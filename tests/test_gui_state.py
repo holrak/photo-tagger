@@ -58,9 +58,12 @@ from photo_tagger.gui_state import (
     reveal_label,
     status_sort_rank,
     status_summary,
+    tagged_legend,
     tagged_summary,
+    tagged_tooltip,
     thumb_badges,
 )
+from photo_tagger.i18n import activate
 from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
@@ -367,6 +370,30 @@ def test_tagged_summary_letters_and_empty_marker() -> None:
     """Present fields compress to their letters in T/D/K order; none becomes a dash."""
     assert tagged_summary({FIELD_KEYWORDS, FIELD_TITLE}) == "TK"
     assert tagged_summary(set()) == "-"
+
+
+def test_tagged_legend_maps_every_letter() -> None:
+    """The header legend pairs each letter with its field name, in display order."""
+    assert tagged_legend() == "T = title, D = description, K = keywords"
+
+
+def test_tagged_tooltip_spells_out_the_present_letters() -> None:
+    """The cell tooltip names only the fields on the file; an empty set says nothing."""
+    assert tagged_tooltip({FIELD_KEYWORDS, FIELD_TITLE}) == (
+        "Already on the file: T = title, K = keywords"
+    )
+    assert tagged_tooltip(set()) == "Already on the file: nothing"
+
+
+def test_tagged_tooltip_is_fully_translated() -> None:
+    """The pt_BR catalog covers the whole tooltip, field names included (regression test)."""
+    activate("pt_BR")
+    try:
+        assert tagged_tooltip({FIELD_KEYWORDS, FIELD_TITLE}) == (
+            "Já no arquivo: T = título, K = palavras-chave"
+        )
+    finally:
+        activate("en")
 
 
 def test_fields_written_reports_only_nonempty_values() -> None:

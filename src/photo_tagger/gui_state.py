@@ -18,7 +18,7 @@ import tomlkit
 from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
-from photo_tagger.i18n import AUTO, _, gettext_noop, ngettext
+from photo_tagger.i18n import AUTO, _, gettext_noop, ngettext, pgettext
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
@@ -595,8 +595,16 @@ def file_type_label(path: Path) -> str:
     return f"{suffix}+xmp" if path.with_suffix(".xmp").exists() else suffix
 
 
-# Column letters for the Tagged indicator, in display order.
-_FIELD_LETTERS = ((FIELD_TITLE, "T"), (FIELD_DESCRIPTION, "D"), (FIELD_KEYWORDS, "K"))
+# The Tagged indicator's letter and display label per field, in display order. The letters go
+# through the catalog under this msgctxt, so a language whose field names start with other letters
+# can remap them; the tooltips below spell out whatever letters are active, so they stay clear
+# either way.
+TAGGED_LETTER_CONTEXT = "Tagged column letter"
+_FIELD_LETTERS = (
+    (FIELD_TITLE, "T", gettext_noop("title")),
+    (FIELD_DESCRIPTION, "D", gettext_noop("description")),
+    (FIELD_KEYWORDS, "K", gettext_noop("keywords")),
+)
 
 
 def tagged_summary(fields: set[str]) -> str:
@@ -604,10 +612,37 @@ def tagged_summary(fields: set[str]) -> str:
     Compress a file's present metadata fields into the Tagged column label.
 
     "TDK" means title, description, and keywords all exist; "-" means the scan ran and found none.
-    The header tooltip spells out the letters.
+    tagged_legend (the header tooltip) and tagged_tooltip (the cell tooltip) spell the letters out.
     """
-    letters = "".join(letter for field_name, letter in _FIELD_LETTERS if field_name in fields)
+    letters = "".join(
+        pgettext(TAGGED_LETTER_CONTEXT, letter)
+        for field_name, letter, _label in _FIELD_LETTERS
+        if field_name in fields
+    )
     return letters or "-"
+
+
+def tagged_legend() -> str:
+    """Spell out every Tagged letter ("T = title, D = description, K = keywords"), localized."""
+    return ", ".join(
+        f"{pgettext(TAGGED_LETTER_CONTEXT, letter)} = {_(label)}"
+        for _field_name, letter, label in _FIELD_LETTERS
+    )
+
+
+def tagged_tooltip(fields: set[str]) -> str:
+    """
+    Explain a row's Tagged cell on hover, naming each present field next to its letter.
+
+    Built from the same table as tagged_summary so the tooltip cannot drift from the letters, and
+    from the display labels rather than the raw field constants so the names are translated.
+    """
+    present = ", ".join(
+        f"{pgettext(TAGGED_LETTER_CONTEXT, letter)} = {_(label)}"
+        for field_name, letter, label in _FIELD_LETTERS
+        if field_name in fields
+    )
+    return _("Already on the file: {fields}").format(fields=present or _("nothing"))
 
 
 def fields_written(title: str | None, description: str | None, keywords: KeywordSet) -> set[str]:

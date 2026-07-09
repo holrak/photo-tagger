@@ -395,15 +395,32 @@ msgid "Tagged"
 msgstr "Etiquetada"
 
 #: src/photo_tagger/gui.py:1125
+#, python-brace-format
 msgid ""
 "Click a column header to sort. Type: file extension, +xmp when a sidecar "
 "exists.\n"
-"Tagged: metadata already on the file (T title, D description, K keywords)."
+"Tagged: metadata already on the file ({legend})."
 msgstr ""
 "Clique no cabeçalho de uma coluna para ordenar. Tipo: extensão do "
 "arquivo, +xmp quando existe um sidecar.\n"
-"Etiquetada: metadados já presentes no arquivo (T título, D descrição, K "
-"palavras-chave)."
+"Etiquetada: metadados já presentes no arquivo ({legend})."
+
+#. The one-letter Tagged column markers. A language may remap them (e.g. "P" for palavras-chave);
+#. the tooltips spell out whatever letters are chosen, next to the translated field names.
+#: src/photo_tagger/gui_state.py:604
+msgctxt "Tagged column letter"
+msgid "T"
+msgstr "T"
+
+#: src/photo_tagger/gui_state.py:605
+msgctxt "Tagged column letter"
+msgid "D"
+msgstr "D"
+
+#: src/photo_tagger/gui_state.py:606
+msgctxt "Tagged column letter"
+msgid "K"
+msgstr "K"
 
 #: src/photo_tagger/gui.py:1140
 msgid "Drag photos or folders here. Select one and press Delete to remove it."
@@ -1030,12 +1047,12 @@ msgstr "Verificação de conexão"
 msgid "ready (cached)"
 msgstr "pronto (em cache)"
 
-#: src/photo_tagger/gui.py:2723
+#: src/photo_tagger/gui_state.py:648
 #, python-brace-format
 msgid "Already on the file: {fields}"
 msgstr "Já no arquivo: {fields}"
 
-#: src/photo_tagger/gui.py:2724
+#: src/photo_tagger/gui_state.py:648
 msgid "nothing"
 msgstr "nada"
 

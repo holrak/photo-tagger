@@ -157,7 +157,9 @@ from photo_tagger.gui_state import (
     reveal_label,
     status_sort_rank,
     status_summary,
+    tagged_legend,
     tagged_summary,
+    tagged_tooltip,
     thumb_badges,
 )
 from photo_tagger.i18n import _, gettext_noop, ngettext
@@ -1127,9 +1129,8 @@ class MainWindow(QMainWindow):
         header.setToolTip(
             _(
                 "Click a column header to sort. Type: file extension, +xmp when a sidecar "
-                "exists.\nTagged: metadata already on the file (T title, D description, K "
-                "keywords).",
-            ),
+                "exists.\nTagged: metadata already on the file ({legend}).",
+            ).format(legend=tagged_legend()),
         )
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_tree_context_menu)
@@ -2722,12 +2723,7 @@ class MainWindow(QMainWindow):
         leaf.setToolTip(_COL_STATUS, item.error if item.status == FAILED else "")
         if item.known_fields is not None:
             leaf.setText(_COL_TAGGED, tagged_summary(item.known_fields))
-            leaf.setToolTip(
-                _COL_TAGGED,
-                _("Already on the file: {fields}").format(
-                    fields=", ".join(sorted(item.known_fields)) or _("nothing"),
-                ),
-            )
+            leaf.setToolTip(_COL_TAGGED, tagged_tooltip(item.known_fields))
 
     def _resort(self) -> None:
         """Re-apply the active sort so changed statuses settle when sorting by the Status column."""

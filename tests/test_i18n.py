@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import pytest
 
 from photo_tagger import i18n
-from photo_tagger.i18n import _, activate, detect_language, gettext_noop, ngettext
+from photo_tagger.i18n import _, activate, detect_language, gettext_noop, ngettext, pgettext
 
 
 @pytest.fixture(autouse=True)
@@ -109,3 +109,10 @@ def test_gettext_noop_returns_the_message_unchanged() -> None:
     """The extraction marker never translates."""
     activate("pt_BR")
     assert gettext_noop("Generate Selected") == "Generate Selected"
+
+
+def test_pgettext_looks_up_the_context_and_falls_back() -> None:
+    """A contextualized msgid resolves from the catalog; a missing pair returns the msgid."""
+    activate("pt_BR")
+    assert pgettext("Tagged column letter", "T") == "T"
+    assert pgettext("no such context", "T") == "T"

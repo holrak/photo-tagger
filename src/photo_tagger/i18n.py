@@ -47,6 +47,16 @@ def ngettext(singular: str, plural: str, count: int) -> str:
     return _active.ngettext(singular, plural, count)
 
 
+def pgettext(context: str, message: str) -> str:
+    """
+    Translate *message* under *context* (a msgctxt in the catalog).
+
+    For msgids too short to be unambiguous on their own, like the Tagged column's single letters:
+    the context keeps them from colliding with any other use of the same string.
+    """
+    return _active.pgettext(context, message)
+
+
 def gettext_noop(message: str) -> str:
     """
     Mark *message* for catalog extraction without translating it here.

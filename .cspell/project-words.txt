@@ -13,6 +13,7 @@ casefold
 Casefolded
 casefolded
 charliermarsh
+chave
 CHEVRONLIGHT
 cogvlm
 configfile
@@ -89,6 +90,8 @@ minicpm
 mkdocs
 mofile
 moondream
+msgctxt
+msgids
 mtimes
 mypy
 nixpkgs
@@ -99,6 +102,7 @@ Ollama
 OLLAMA
 ollama
 pacman
+palavras
 parentless
 pinentry
 pipx
@@ -156,6 +160,7 @@ tasklist
 testpypi
 testsdeselect
 titlecase
+título
 tlsv
 tobytes
 tomlkit
