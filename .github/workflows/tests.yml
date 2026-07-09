@@ -130,9 +130,11 @@ jobs:
           pycroscope --config-file pyproject.toml
 
       - name: Check version sync
+        # Invoke via `python` so uv runs this in the project env, not PEP 723 script mode, where
+        # `--locked` would demand a per-script lockfile that does not exist.
         run: >-
           uv run --locked --no-build --no-binary-package photo-tagger
-          scripts/check_version_sync.py
+          python scripts/check_version_sync.py
 
   sonarcloud:
     # Reuse the coverage report from unit-tests instead of running the suite twice.
