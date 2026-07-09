@@ -27,6 +27,13 @@ _CONSOLE_FORMAT = (
     "<yellow>{extra}</yellow>"
 )
 
+# Loguru's built-in sink prints everything, DEBUG included, to stderr. Anything logged before
+# setup_logging() runs (config loading happens at import time) would leak at DEBUG, so replace
+# that sink with an INFO console the moment this module is imported. setup_logging() then
+# reconfigures per the user's flags.
+logger.remove()
+logger.add(sys.stderr, level="INFO", colorize=True, format=_CONSOLE_FORMAT)
+
 
 def setup_logging(
     file_log_level: LogLevel = "DEBUG",
@@ -35,6 +42,10 @@ def setup_logging(
 ) -> None:
     """
     Configure Loguru for both console and file logging.
+
+    The file sink is serialized: each line is one JSON record (message, level, timestamp, and the
+    structured ``extra`` fields), so the logs can be filtered and parsed with jq and friends
+    instead of regexes.
 
     Args:
         file_log_level: Log level for file (use 'OFF' to disable)
@@ -51,6 +62,7 @@ def setup_logging(
             log_file,
             level=file_log_level,
             format=_FILE_FORMAT,
+            serialize=True,
             rotation="500 MB",
             retention="10 days",
             compression="zip",
