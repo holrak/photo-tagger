@@ -11,14 +11,15 @@ on:
   # Allows manual trigger from Actions tab
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Job-level so the publish jobs get no repository access at all; they only
+    # download the built artifact and need id-token for trusted publishing.
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
