@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
-from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -34,6 +34,7 @@ from PySide6.QtGui import (
     QDesktopServices,
     QIcon,
     QKeySequence,
+    QPainter,
     QPixmap,
     QShortcut,
 )
@@ -83,13 +84,18 @@ from photo_tagger.config import (
     DEFAULT_TEMPERATURE,
     DEFAULT_USER_PROMPT,
 )
-from photo_tagger.config_file import load_config, user_config_path
+from photo_tagger.config_file import find_config_file, load_config, user_config_path
 from photo_tagger.csv_report import write_report
 from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
 from photo_tagger.errors import DiscoveryError, PhotoTaggerError, ProviderError
 from photo_tagger.gui_state import (
     ADDED,
+    BADGE_FAILED,
+    BADGE_METADATA,
+    BADGE_SAVED,
+    BADGE_SIDECAR,
+    BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
     PENDING,
@@ -99,6 +105,7 @@ from photo_tagger.gui_state import (
     SAVED,
     WORKING,
     FolderNode,
+    GuiConfigValues,
     PhotoItem,
     Proposal,
     apply_proposal,
@@ -115,6 +122,7 @@ from photo_tagger.gui_state import (
     keywords_to_save,
     keywords_to_text,
     login_shell_path,
+    merged_config_text,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -126,6 +134,7 @@ from photo_tagger.gui_state import (
     status_sort_rank,
     status_summary,
     tagged_summary,
+    thumb_badges,
 )
 from photo_tagger.image_io import prepare_image_for_agent
 from photo_tagger.logging_setup import setup_logging
@@ -246,6 +255,12 @@ QPushButton#primary:disabled {
     background: #9aa0e8; border-color: #9aa0e8; color: #eaeaff;
 }
 QLineEdit, QPlainTextEdit, QComboBox { padding: 4px 6px; border-radius: 5px; }
+/* Scroll-area edits keep their native square frame unless given an explicit border, which is
+   why only the QLineEdit fields looked rounded. */
+QPlainTextEdit, QTextEdit {
+    border: 1px solid rgba(130, 130, 140, 35%); border-radius: 5px; padding: 4px 6px;
+}
+QPlainTextEdit#tree { font-family: "SF Mono", Menlo, Consolas, monospace; }
 QComboBox::drop-down {
     subcontrol-origin: padding; subcontrol-position: center right;
     width: 22px; border: none; background: transparent;
@@ -420,7 +435,8 @@ class GenerateWorker(QObject):
             camera_info=context.camera_info,
         )
         image_hash = hash_image_file(path) if cache is not None else ""
-        inference = cache.get(image_hash) if cache is not None else None
+        cached = cache.get(image_hash) if cache is not None else None
+        inference = cached
         if inference is None:
             jpeg = prepare_image_for_agent(path, max_size=_PREVIEW_MAX)
             inference = analyze_image_with_ai(image_bytes=jpeg, agent=agent, user_prompt=prompt)
@@ -439,6 +455,7 @@ class GenerateWorker(QObject):
             camera_info=dict(context.camera_info),
             location_tags=dict(context.location_tags),
             gps_position=context.gps_position,
+            from_cache=cached is not None,
             input_tokens=inference.input_tokens,
             output_tokens=inference.output_tokens,
             total_tokens=inference.total_tokens,
@@ -606,7 +623,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(_app_icon())
         self.resize(1180, 760)
         self.setAcceptDrops(True)
-        self._placeholder_icon = _make_placeholder()
+        self._placeholder_pixmap = _make_placeholder()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -674,9 +691,14 @@ class MainWindow(QMainWindow):
             self._save_config,
         )
         save_defaults.setToolTip(
-            "Write the current provider, model, URL, file types, and save options to "
-            f"{user_config_path()}, where the CLI and the GUI read their defaults. The API key "
-            "is never written.",
+            "Update the config file with the current provider, model, URL, file types, and save "
+            "options. Other settings and comments in the file are preserved; the API key is "
+            "never written.",
+        )
+        edit_config = settings_menu.addAction("Edit Config File...", self._edit_config)
+        edit_config.setToolTip(
+            "Open the config file in your default editor for the settings the GUI does not "
+            "surface (prompt file, sampling, workers, filters, ...). Created if missing.",
         )
 
         help_menu = menubar.addMenu("Help")
@@ -696,18 +718,9 @@ class MainWindow(QMainWindow):
         """Return the cache file generation should use, or None when caching is toggled off."""
         return self._cache_file if self._cache_action.isChecked() else None
 
-    def _save_config(self) -> None:
-        """Write the GUI's current choices to the user config file (never the API key)."""
-        target = user_config_path()
-        if target.exists():
-            answer = QMessageBox.question(
-                self,
-                "Overwrite config file?",
-                f"{target} already exists. Replace it with the current GUI settings?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-        text = config_toml_text(
+    def _current_config_values(self) -> GuiConfigValues:
+        """Collect the GUI's current choices that persist to the config file (never the API key)."""
+        return GuiConfigValues(
             provider_name=self._provider_name(),
             model_name=self._model.currentText().strip(),
             api_base_url=self._url.text().strip() or None,
@@ -720,13 +733,41 @@ class MainWindow(QMainWindow):
             use_sidecar=not self._embed.isChecked(),
             telemetry_enabled=self._telemetry_enabled,
         )
+
+    def _config_target(self) -> Path:
+        """Return the config file to save into: the one in effect, or the user default path."""
+        return find_config_file() or user_config_path()
+
+    def _save_config(self) -> None:
+        """
+        Persist the GUI's current choices into the config file.
+
+        An existing file is merged, not replaced: only the GUI-managed keys change, and comments,
+        ordering, and every other setting survive. A missing file is created from a template.
+        """
+        target = self._config_target()
+        values = self._current_config_values()
         try:
+            if target.exists():
+                text = merged_config_text(target.read_text(encoding="utf-8"), values)
+                note = f"Updated {target} (other settings and comments preserved)."
+            else:
+                text = config_toml_text(values)
+                note = f"Saved defaults to {target}."
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Could not save the config file", str(exc))
             return
-        self._status.setText(f"Saved defaults to {target}.")
+        self._status.setText(note)
+
+    def _edit_config(self) -> None:
+        """Open the config file in the user's editor, creating it first if it does not exist."""
+        target = self._config_target()
+        if not target.exists():
+            self._save_config()
+        if target.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _show_about(self) -> None:
         """Show a small About dialog with the version and project link."""
@@ -1116,24 +1157,27 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(2, 1)
-        grid.addWidget(self._section_label("Existing"), 0, 1)
-        grid.addWidget(self._section_label("New (editable)"), 0, 2)
-
-        self._existing_source = QLineEdit()
-        self._existing_source.setReadOnly(True)
+        # The metadata source rides along in the Existing header (it has no "New" counterpart,
+        # so a full grid row of its own broke the columns' symmetry).
+        existing_header = QHBoxLayout()
+        existing_header.addWidget(self._section_label("Existing"))
+        self._existing_source = QLabel("")
+        self._existing_source.setObjectName("hint")
         self._existing_source.setToolTip(
             "Where the existing metadata was read from: the image file, an XMP sidecar, or both.",
         )
-        grid.addWidget(QLabel("Source"), 1, 0)
-        grid.addWidget(self._existing_source, 1, 1)
+        existing_header.addWidget(self._existing_source)
+        existing_header.addStretch(1)
+        grid.addLayout(existing_header, 0, 1)
+        grid.addWidget(self._section_label("New (editable)"), 0, 2)
 
         self._existing_title = QLineEdit()
         self._existing_title.setReadOnly(True)
         self._title = QLineEdit()
         self._title.setToolTip("The title to write. Edit freely before saving.")
-        grid.addWidget(QLabel("Title"), 2, 0)
-        grid.addWidget(self._existing_title, 2, 1)
-        grid.addWidget(self._title, 2, 2)
+        grid.addWidget(QLabel("Title"), 1, 0)
+        grid.addWidget(self._existing_title, 1, 1)
+        grid.addWidget(self._title, 1, 2)
 
         top = Qt.AlignmentFlag.AlignTop
         self._existing_description = _readonly_box(44)
@@ -1143,9 +1187,9 @@ class MainWindow(QMainWindow):
         # reserving a fixed block of the pane (textChanged also fires on programmatic fills).
         self._description.textChanged.connect(lambda: _fit_text_height(self._description))
         _fit_text_height(self._description)
-        grid.addWidget(QLabel("Description"), 3, 0, top)
-        grid.addWidget(self._existing_description, 3, 1)
-        grid.addWidget(self._description, 3, 2)
+        grid.addWidget(QLabel("Description"), 2, 0, top)
+        grid.addWidget(self._existing_description, 2, 1)
+        grid.addWidget(self._description, 2, 2)
 
         self._existing_keywords = _readonly_box(150)
         self._keywords = QPlainTextEdit()
@@ -1156,9 +1200,9 @@ class MainWindow(QMainWindow):
             "(e.g. 'Duck<Bird<Animal'); the changes and resulting paths show below.",
         )
         self._keywords.textChanged.connect(self._refresh_derived)
-        grid.addWidget(QLabel("Keywords"), 4, 0, top)
-        grid.addWidget(self._existing_keywords, 4, 1)
-        grid.addWidget(self._keywords, 4, 2)
+        grid.addWidget(QLabel("Keywords"), 3, 0, top)
+        grid.addWidget(self._existing_keywords, 3, 1)
+        grid.addWidget(self._keywords, 3, 2)
         return grid
 
     def _build_details_section(self) -> QVBoxLayout:
@@ -1185,6 +1229,7 @@ class MainWindow(QMainWindow):
         self._diff.setMinimumHeight(90)
         self._diff.setToolTip("Keyword changes a save will make: green added, red removed.")
         self._hierarchy = _readonly_box(60)
+        self._hierarchy.setObjectName("tree")  # monospace, so the branch guides line up
         self._hierarchy.setToolTip(
             "The keyword tree that saving will write (stored as Lightroom hierarchy paths).",
         )
@@ -1578,18 +1623,28 @@ class MainWindow(QMainWindow):
         pending: list[Path] = []
         for path in under:
             key = str(path)
-            cached = self._thumb_cache.get(key)
-            icon = QIcon(cached) if cached is not None else self._placeholder_icon
-            grid_item = QListWidgetItem(icon, path.name)
+            grid_item = QListWidgetItem(path.name)
             grid_item.setData(_PATH_ROLE, key)
             self._grid.addItem(grid_item)
             self._grid_items[key] = grid_item
-            if cached is None:
+            self._update_grid_item(self._items[key], grid_item)
+            if key not in self._thumb_cache:
                 pending.append(path)
         self._right.setCurrentIndex(_PAGE_GRID)
         self._status.setText(f"{len(under)} photo(s) in {folder.name or folder}.")
         if pending:
             self._start_thumbs(pending)
+
+    def _update_grid_item(self, item: PhotoItem, grid_item: QListWidgetItem) -> None:
+        """Refresh a grid thumbnail: the image (or placeholder) plus its state badges."""
+        key = str(item.path)
+        base = self._thumb_cache.get(key, self._placeholder_pixmap)
+        badges = thumb_badges(item, has_sidecar=item.path.with_suffix(".xmp").exists())
+        grid_item.setIcon(QIcon(_badged_pixmap(base, badges)))
+        notes = [_BADGE_TEXT[name] for name in badges]
+        if item.status == FAILED and item.error:
+            notes.append(item.error)
+        grid_item.setToolTip("\n".join([item.path.name, *notes]))
 
     def _on_thumb_activated(self, item: QListWidgetItem) -> None:
         key = item.data(_PATH_ROLE)
@@ -1604,8 +1659,9 @@ class MainWindow(QMainWindow):
             return
         self._thumb_cache[path] = pixmap
         grid_item = self._grid_items.get(path)
-        if grid_item is not None:
-            grid_item.setIcon(QIcon(pixmap))
+        item = self._items.get(path)
+        if grid_item is not None and item is not None:
+            self._update_grid_item(item, grid_item)
 
     def _start_thumbs(self, paths: list[Path]) -> None:
         self._thumb_thread = QThread(self)
@@ -1634,7 +1690,8 @@ class MainWindow(QMainWindow):
             self._render_preview(item)
         finally:
             QApplication.restoreOverrideCursor()
-        self._existing_source.setText(", ".join(item.existing_sources) or _NONE)
+        sources = ", ".join(item.existing_sources)
+        self._existing_source.setText(f"(from {sources})" if sources else "(no metadata found)")
         self._existing_title.setText(item.existing_title or _NONE)
         self._existing_description.setPlainText(item.existing_description or _NONE)
         _fit_text_height(self._existing_description)
@@ -2017,10 +2074,17 @@ class MainWindow(QMainWindow):
         leaf = self._leaf_for(item.path)
         if leaf is not None:
             self._render_status_cells(leaf, item)
+        # Keep the folder grid's badge overlay in step with the tree.
+        grid_item = self._grid_items.get(str(item.path))
+        if grid_item is not None:
+            self._update_grid_item(item, grid_item)
 
     def _render_status_cells(self, leaf: QTreeWidgetItem, item: PhotoItem) -> None:
         """Paint the Status and Tagged columns for *item*'s row."""
-        leaf.setText(_COL_STATUS, _STATUS_LABEL[item.status])
+        label = _STATUS_LABEL[item.status]
+        if item.status == READY and item.from_cache:
+            label = "ready (cached)"
+        leaf.setText(_COL_STATUS, label)
         leaf.setData(_COL_STATUS, _STATUS_RANK_ROLE, status_sort_rank(item.status))
         color = _STATUS_COLOR.get(item.status)
         leaf.setData(
@@ -2121,11 +2185,58 @@ class MainWindow(QMainWindow):
         )
 
 
-def _make_placeholder() -> QIcon:
+def _make_placeholder() -> QPixmap:
     """Build a neutral grey tile shown in the grid until a thumbnail loads."""
     pixmap = QPixmap(_THUMB_SIZE, _THUMB_SIZE)
     pixmap.fill(QColor(50, 50, 56))
-    return QIcon(pixmap)
+    return pixmap
+
+
+# Thumbnail badge rendering: fill color and glyph per badge name. The lifecycle badge (first
+# three) draws top-right; the informational ones stack top-left.
+_BADGE_STYLE = {
+    BADGE_FAILED: ("#f85149", "✗"),  # red cross
+    BADGE_SAVED: ("#3fb950", "✓"),  # green check
+    BADGE_UNSAVED: ("#6366f1", "•"),  # indigo dot: generated, not saved yet
+    BADGE_METADATA: ("#8a8a8a", "M"),  # file already carries metadata
+    BADGE_SIDECAR: ("#0e7490", "S"),  # an XMP sidecar exists
+}
+_BADGE_TEXT = {
+    BADGE_FAILED: "generation failed",
+    BADGE_SAVED: "saved",
+    BADGE_UNSAVED: "generated, not saved yet",
+    BADGE_METADATA: "already has metadata",
+    BADGE_SIDECAR: "has an XMP sidecar",
+}
+_LIFECYCLE_BADGES = frozenset({BADGE_FAILED, BADGE_SAVED, BADGE_UNSAVED})
+
+
+def _badged_pixmap(base: QPixmap, badges: list[str]) -> QPixmap:
+    """Overlay the badge dots for *badges* onto a copy of *base*."""
+    if not badges or base.isNull():
+        return base
+    pixmap = QPixmap(base)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    radius = max(12, pixmap.width() // 8)
+    margin = max(3, radius // 4)
+    left = margin
+    font = painter.font()
+    font.setPixelSize(int(radius * 0.7))
+    font.setBold(True)
+    painter.setFont(font)
+    for name in badges:
+        color, glyph = _BADGE_STYLE[name]
+        x = pixmap.width() - radius - margin if name in _LIFECYCLE_BADGES else left
+        if name not in _LIFECYCLE_BADGES:
+            left += radius + margin
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(x, margin, radius, radius)
+        painter.setPen(QColor("white"))
+        painter.drawText(QRect(x, margin, radius, radius), Qt.AlignmentFlag.AlignCenter, glyph)
+    painter.end()
+    return pixmap
 
 
 def _checked(selected: bool) -> Qt.CheckState:  # noqa: FBT001 - tiny private bool mapper.

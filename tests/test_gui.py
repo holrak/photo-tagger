@@ -594,7 +594,7 @@ def test_hierarchy_preview_updates_from_keywords(
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._overwrite.setChecked(True)  # noqa: SLF001
     window._keywords.setPlainText("Duck<Bird<Animal")  # noqa: SLF001 - triggers textChanged
-    assert window._hierarchy.toPlainText() == "Animal\n  Bird\n    Duck"  # noqa: SLF001
+    assert window._hierarchy.toPlainText() == "Animal\n└─ Bird\n   └─ Duck"  # noqa: SLF001
 
 
 def test_save_current_writes_and_marks_saved(
@@ -633,7 +633,7 @@ def test_selecting_shows_metadata_source(
     monkeypatch.setattr(gui, "read_metadata_sources", lambda _p: ["XMP sidecar"])
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
-    assert window._existing_source.text() == "XMP sidecar"  # noqa: SLF001
+    assert window._existing_source.text() == "(from XMP sidecar)"  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -1625,6 +1625,8 @@ def test_save_config_writes_the_gui_choices(
     import tomllib  # noqa: PLC0415 - test-local parser.
 
     target = tmp_path / "config.toml"
+    # No config in effect, so the save creates the user config from the template.
+    monkeypatch.setattr(gui, "find_config_file", lambda: None)
     monkeypatch.setattr(gui, "user_config_path", lambda: target)
     window._model.setCurrentText("qwen/qwen3-vl-30b")  # noqa: SLF001
     window._api_key.setText("sk-secret")  # noqa: SLF001 - must NOT be written
@@ -1640,6 +1642,56 @@ def test_save_config_writes_the_gui_choices(
     assert data["extensions"] == "jpg,cr3"
     assert data["output"]["use_sidecar"] is False
     assert data["telemetry"]["enabled"] is True
+
+
+def test_save_config_merges_into_the_config_in_effect(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Saving over an existing config updates GUI keys but keeps comments and other tables."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    target = tmp_path / "config.toml"
+    target.write_text(
+        '# hands off\nextensions = "cr3"\n\n[filter]\nskip_tagged = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gui, "find_config_file", lambda: target)
+    window._extensions.setText("jpg")  # noqa: SLF001
+
+    window._save_config()  # noqa: SLF001
+
+    text = target.read_text(encoding="utf-8")
+    assert "# hands off" in text
+    data = tomllib.loads(text)
+    assert data["extensions"] == "jpg"
+    assert data["filter"]["skip_tagged"] is True  # untouched table survives
+    assert "preserved" in window._status.text()  # noqa: SLF001
+
+
+def test_cached_proposal_shows_in_the_status_column(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """A proposal replayed from the cache labels its row 'ready (cached)'."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    window._on_file_done(  # noqa: SLF001
+        Proposal(
+            path=img,
+            existing_title=None,
+            existing_description=None,
+            existing_keywords=KeywordSet(),
+            title="T",
+            description="D",
+            keywords=[],
+            from_cache=True,
+        ),
+    )
+    leaf = window._leaf_for(img)  # noqa: SLF001
+    assert leaf is not None
+    assert leaf.text(2) == "ready (cached)"
 
 
 def test_description_boxes_grow_only_with_content(

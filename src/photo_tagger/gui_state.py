@@ -13,6 +13,8 @@ import subprocess  # nosec B404 - only used to read the user's own login-shell P
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import tomlkit
+
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
@@ -92,6 +94,7 @@ class PhotoItem:
     existing_sources: list[str] = field(default_factory=list)
     sources_read: bool = False
     has_proposal: bool = False
+    from_cache: bool = False
     title: str = ""
     description: str = ""
     keywords: list[str] = field(default_factory=list)
@@ -118,6 +121,7 @@ class Proposal:
     camera_info: dict[str, str] = field(default_factory=dict)
     location_tags: dict[str, str] = field(default_factory=dict)
     gps_position: str | None = None
+    from_cache: bool = False
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -211,6 +215,7 @@ def apply_proposal(item: PhotoItem, proposal: Proposal) -> None:
     item.total_tokens = proposal.total_tokens
     item.seconds = proposal.seconds
     item.has_proposal = True
+    item.from_cache = proposal.from_cache
     item.status = READY
     item.error = ""
 
@@ -249,6 +254,7 @@ def photo_item_to_report_row(item: PhotoItem, *, overwrite: bool) -> ReportRow:
         output_tokens=item.output_tokens,
         total_tokens=item.total_tokens,
         seconds=item.seconds,
+        from_cache=item.from_cache if item.has_proposal else None,
     )
 
 
@@ -427,12 +433,23 @@ def format_existing_keywords(keywords: KeywordSet) -> str:
     return "\n".join(lines)
 
 
+def _walk_tree(node: _Tree, prefix: str, lines: list[str]) -> None:
+    """Append *node*'s children to *lines* with ``tree``-style guide characters."""
+    entries = list(node.items())
+    for index, (name, child) in enumerate(entries):
+        last = index == len(entries) - 1
+        lines.append(prefix + ("└─ " if last else "├─ ") + name)
+        _walk_tree(child, prefix + ("   " if last else "│  "), lines)
+
+
 def hierarchy_tree_text(paths: Iterable[str]) -> str:
     """
-    Render Lightroom ``A|B|C`` paths as an indented tree, one level per two spaces.
+    Render Lightroom ``A|B|C`` paths as a ``tree``-style diagram with branch guides.
 
     Cumulative paths ("A|B", "A|B|C") collapse into one branch, so the view shows the taxonomy shape
-    rather than repeating every prefix line.
+    rather than repeating every prefix line. Roots sit at column zero and children hang off
+    ``├─``/``└─`` connectors like the CLI ``tree`` command, which reads far better than plain two-
+    space indentation.
     """
     root: _Tree = {}
     for path in paths:
@@ -441,13 +458,9 @@ def hierarchy_tree_text(paths: Iterable[str]) -> str:
             node = node.setdefault(segment, {})
 
     lines: list[str] = []
-
-    def walk(node: _Tree, depth: int) -> None:
-        for name, child in node.items():
-            lines.append("  " * depth + name)
-            walk(child, depth + 1)
-
-    walk(root, 0)
+    for name, child in root.items():
+        lines.append(name)
+        _walk_tree(child, "", lines)
     return "\n".join(lines)
 
 
@@ -577,6 +590,35 @@ def tagged_summary(fields: set[str]) -> str:
     return letters or "-"
 
 
+# Badge names for the folder grid's thumbnail overlays, in the order they are drawn.
+BADGE_FAILED = "failed"
+BADGE_SAVED = "saved"
+BADGE_UNSAVED = "unsaved"
+BADGE_METADATA = "metadata"
+BADGE_SIDECAR = "sidecar"
+
+
+def thumb_badges(item: PhotoItem, *, has_sidecar: bool) -> list[str]:
+    """
+    Decide which overlay badges a photo's grid thumbnail shows.
+
+    At most one lifecycle badge (failed beats saved beats unsaved-proposal), plus the already-has-
+    metadata and sidecar markers. The GUI maps each name to a color and glyph.
+    """
+    badges: list[str] = []
+    if item.status == FAILED:
+        badges.append(BADGE_FAILED)
+    elif item.status == SAVED:
+        badges.append(BADGE_SAVED)
+    elif item.has_proposal:
+        badges.append(BADGE_UNSAVED)
+    if item.known_fields:
+        badges.append(BADGE_METADATA)
+    if has_sidecar:
+        badges.append(BADGE_SIDECAR)
+    return badges
+
+
 def _toml_str(value: str) -> str:
     """Quote *value* as a TOML basic string."""
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
@@ -588,52 +630,92 @@ def _toml_bool(value: bool) -> str:  # noqa: FBT001  # the bool is the value bei
     return "true" if value else "false"
 
 
-def config_toml_text(  # noqa: PLR0913  # one keyword-only parameter per persisted setting
-    *,
-    provider_name: str,
-    model_name: str,
-    api_base_url: str | None,
-    extensions: str,
-    recursive: bool,
-    write_title: bool,
-    write_description: bool,
-    write_keywords: bool,
-    preserve_keywords: bool,
-    use_sidecar: bool,
-    telemetry_enabled: bool,
-) -> str:
+@dataclass(frozen=True, slots=True)
+class GuiConfigValues:
     """
-    Render the GUI's current choices as the TOML config file the CLI and GUI both load.
+    The GUI settings that persist to the config file.
 
-    Key names mirror the config tables ``load_defaults`` reads ([provider], [output],
-    [telemetry], plus the top-level extensions/recursive). The API key is deliberately not a
-    parameter: it must never be written to disk.
+    The API key is deliberately not a field: it must never be written to disk.
+    """
+
+    provider_name: str
+    model_name: str
+    api_base_url: str | None
+    extensions: str
+    recursive: bool
+    write_title: bool
+    write_description: bool
+    write_keywords: bool
+    preserve_keywords: bool
+    use_sidecar: bool
+    telemetry_enabled: bool
+
+
+def config_toml_text(values: GuiConfigValues) -> str:
+    """
+    Render *values* as a fresh TOML config file the CLI and GUI both load.
+
+    Key names mirror the config tables ``load_defaults`` reads ([provider], [output], [telemetry],
+    plus the top-level extensions/recursive). Used only when no config file exists yet; an existing
+    file goes through :func:`merged_config_text` instead so nothing is lost.
     """
     lines = [
         "# Written by the Photo Tagger GUI (Settings > Save Settings as Defaults).",
-        f"extensions = {_toml_str(extensions)}",
-        f"recursive = {_toml_bool(recursive)}",
+        f"extensions = {_toml_str(values.extensions)}",
+        f"recursive = {_toml_bool(values.recursive)}",
         "",
         "[provider]",
-        f"provider_name = {_toml_str(provider_name)}",
-        f"model_name = {_toml_str(model_name)}",
+        f"provider_name = {_toml_str(values.provider_name)}",
+        f"model_name = {_toml_str(values.model_name)}",
     ]
-    if api_base_url:
-        lines.append(f"api_base_url = {_toml_str(api_base_url)}")
+    if values.api_base_url:
+        lines.append(f"api_base_url = {_toml_str(values.api_base_url)}")
     lines += [
         "",
         "[output]",
-        f"write_title = {_toml_bool(write_title)}",
-        f"write_description = {_toml_bool(write_description)}",
-        f"write_keywords = {_toml_bool(write_keywords)}",
-        f"preserve_keywords = {_toml_bool(preserve_keywords)}",
-        f"use_sidecar = {_toml_bool(use_sidecar)}",
+        f"write_title = {_toml_bool(values.write_title)}",
+        f"write_description = {_toml_bool(values.write_description)}",
+        f"write_keywords = {_toml_bool(values.write_keywords)}",
+        f"preserve_keywords = {_toml_bool(values.preserve_keywords)}",
+        f"use_sidecar = {_toml_bool(values.use_sidecar)}",
         "",
         "[telemetry]",
-        f"enabled = {_toml_bool(telemetry_enabled)}",
+        f"enabled = {_toml_bool(values.telemetry_enabled)}",
         "",
     ]
     return "\n".join(lines)
+
+
+def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
+    """
+    Update *existing_text* (a TOML config file) with *values*, preserving everything else.
+
+    tomlkit keeps comments, ordering, and keys the GUI does not manage, so saving from the GUI never
+    destroys a hand-written config. Only the GUI-managed keys are set; a blank base URL removes the
+    key so the provider default applies again.
+    """
+    document = tomlkit.parse(existing_text)
+    document["extensions"] = values.extensions
+    document["recursive"] = values.recursive
+
+    provider = document.setdefault("provider", tomlkit.table())
+    provider["provider_name"] = values.provider_name
+    provider["model_name"] = values.model_name
+    if values.api_base_url:
+        provider["api_base_url"] = values.api_base_url
+    else:
+        provider.pop("api_base_url", None)
+
+    output = document.setdefault("output", tomlkit.table())
+    output["write_title"] = values.write_title
+    output["write_description"] = values.write_description
+    output["write_keywords"] = values.write_keywords
+    output["preserve_keywords"] = values.preserve_keywords
+    output["use_sidecar"] = values.use_sidecar
+
+    telemetry = document.setdefault("telemetry", tomlkit.table())
+    telemetry["enabled"] = values.telemetry_enabled
+    return tomlkit.dumps(document)
 
 
 # How long to wait for the login shell to report its PATH before giving up.

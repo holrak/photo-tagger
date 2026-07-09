@@ -14,6 +14,7 @@ charliermarsh
 cogvlm
 configfile
 conftest
+Consolas
 consoledonottrack
 cooldown
 CREAT
@@ -73,6 +74,7 @@ logfire
 loguru
 lucide
 magiclink
+Menlo
 minicpm
 mkdocs
 moondream
@@ -136,6 +138,7 @@ testsdeselect
 titlecase
 tlsv
 tobytes
+tomlkit
 twemoji
 unwritable
 usefixtures

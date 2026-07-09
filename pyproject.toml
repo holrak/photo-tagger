@@ -38,6 +38,7 @@ dependencies = [
     "pyexiftool>=0.5.6",
     "rawpy>=0.27.0",
     "rich>=15.0.0",
+    "tomlkit>=0.15.0",
 ]
 
 [project.optional-dependencies]

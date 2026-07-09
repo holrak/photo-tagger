@@ -8,6 +8,11 @@ import pytest
 
 from photo_tagger.gui_state import (
     ADDED,
+    BADGE_FAILED,
+    BADGE_METADATA,
+    BADGE_SAVED,
+    BADGE_SIDECAR,
+    BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
     PENDING,
@@ -19,6 +24,7 @@ from photo_tagger.gui_state import (
     UNCHANGED,
     WORKING,
     FolderNode,
+    GuiConfigValues,
     PhotoItem,
     Proposal,
     apply_proposal,
@@ -39,6 +45,7 @@ from photo_tagger.gui_state import (
     keywords_to_save,
     keywords_to_text,
     login_shell_path,
+    merged_config_text,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -50,6 +57,7 @@ from photo_tagger.gui_state import (
     status_sort_rank,
     status_summary,
     tagged_summary,
+    thumb_badges,
 )
 from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
@@ -317,16 +325,16 @@ def test_format_existing_keywords_keeps_only_deepest_chain() -> None:
     assert format_existing_keywords(kw) == "Duck<Bird<Animal"
 
 
-def test_hierarchy_preview_renders_an_indented_tree() -> None:
-    """The preview folds the cumulative paths a save writes into one indented tree."""
+def test_hierarchy_preview_renders_a_guided_tree() -> None:
+    """The preview folds the cumulative paths a save writes into one tree with branch guides."""
     preview = hierarchy_preview(KeywordSet(), ["Duck<Bird<Animal"], overwrite=True)
-    assert preview == "Animal\n  Bird\n    Duck"
+    assert preview == "Animal\n└─ Bird\n   └─ Duck"
 
 
 def test_hierarchy_tree_text_merges_shared_roots() -> None:
-    """Two chains under one root share the root line instead of repeating it."""
+    """Two chains under one root share the root line, with tree-style connectors."""
     text = hierarchy_tree_text(["Animal|Bird", "Animal|Bird|Duck", "Animal|Cat"])
-    assert text == "Animal\n  Bird\n    Duck\n  Cat"
+    assert text == "Animal\n├─ Bird\n│  └─ Duck\n└─ Cat"
 
 
 def test_chain_to_display_reverses_to_leaf_first() -> None:
@@ -365,6 +373,25 @@ def test_tagged_summary_letters_and_empty_marker() -> None:
     assert tagged_summary(set()) == "-"
 
 
+def _config_values(**overrides: object) -> GuiConfigValues:
+    """Build GuiConfigValues with sensible test defaults, overridable per test."""
+    base: dict[str, object] = {
+        "provider_name": "lmstudio",
+        "model_name": "qwen/qwen3-vl-30b",
+        "api_base_url": "http://localhost:1234/v1",
+        "extensions": "jpg,cr3",
+        "recursive": True,
+        "write_title": True,
+        "write_description": True,
+        "write_keywords": True,
+        "preserve_keywords": True,
+        "use_sidecar": True,
+        "telemetry_enabled": True,
+    }
+    base.update(overrides)
+    return GuiConfigValues(**base)  # type: ignore[arg-type]
+
+
 def test_config_toml_text_round_trips_through_load_defaults() -> None:
     """The GUI-written TOML parses and lands on the right Defaults fields."""
     import tomllib  # noqa: PLC0415 - test-local parser.
@@ -372,17 +399,12 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
     from photo_tagger.cli_options import load_defaults  # noqa: PLC0415
 
     text = config_toml_text(
-        provider_name="lmstudio",
-        model_name='qwen "vl" model',
-        api_base_url="http://localhost:1234/v1",
-        extensions="jpg,cr3",
-        recursive=True,
-        write_title=True,
-        write_description=False,
-        write_keywords=True,
-        preserve_keywords=True,
-        use_sidecar=False,
-        telemetry_enabled=False,
+        _config_values(
+            model_name='qwen "vl" model',
+            write_description=False,
+            use_sidecar=False,
+            telemetry_enabled=False,
+        ),
     )
     defaults = load_defaults(tomllib.loads(text))
 
@@ -397,20 +419,80 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
 
 def test_config_toml_text_omits_blank_url() -> None:
     """A blank base URL is left out so the provider default applies."""
-    text = config_toml_text(
-        provider_name="ollama",
-        model_name="llava",
-        api_base_url=None,
-        extensions="jpg",
-        recursive=False,
-        write_title=True,
-        write_description=True,
-        write_keywords=True,
-        preserve_keywords=True,
-        use_sidecar=True,
-        telemetry_enabled=True,
-    )
+    text = config_toml_text(_config_values(api_base_url=None))
     assert "api_base_url" not in text
+
+
+def test_merged_config_text_preserves_comments_and_unknown_keys() -> None:
+    """Merging updates only the GUI-managed keys; comments and other settings survive."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    existing = (
+        "# my hand-written config\n"
+        'extensions = "cr3"\n'
+        "\n"
+        "[provider]\n"
+        'provider_name = "ollama"\n'
+        '# model_name = "qwen/qwen3-vl-30b"\n'
+        "\n"
+        "[filter]\n"
+        "skip_tagged = true\n"
+        "\n"
+        "[artifacts]\n"
+        'summary_file = "summary.txt"  # keep me\n'
+    )
+    merged = merged_config_text(existing, _config_values(model_name="llava"))
+
+    # Comments and untouched tables survive verbatim.
+    assert "# my hand-written config" in merged
+    assert "# keep me" in merged
+    data = tomllib.loads(merged)
+    assert data["filter"]["skip_tagged"] is True
+    assert data["artifacts"]["summary_file"] == "summary.txt"
+    # GUI-managed keys are updated in place.
+    assert data["extensions"] == "jpg,cr3"
+    assert data["provider"]["provider_name"] == "lmstudio"
+    assert data["provider"]["model_name"] == "llava"
+    assert data["output"]["use_sidecar"] is True
+
+
+def test_merged_config_text_drops_blank_url() -> None:
+    """Clearing the URL removes the key so the provider default applies again."""
+    existing = '[provider]\napi_base_url = "http://old:1234/v1"\n'
+    merged = merged_config_text(existing, _config_values(api_base_url=None))
+    assert "api_base_url" not in merged
+
+
+def test_apply_proposal_carries_the_cache_flag() -> None:
+    """A cached proposal marks the item so the tree can label it 'ready (cached)'."""
+    item = PhotoItem(path=Path("/a.jpg"))
+    proposal = Proposal(
+        path=Path("/a.jpg"),
+        existing_title=None,
+        existing_description=None,
+        existing_keywords=KeywordSet(),
+        title="T",
+        description="D",
+        keywords=[],
+        from_cache=True,
+    )
+    apply_proposal(item, proposal)
+    assert item.from_cache is True
+
+
+def test_thumb_badges_lifecycle_and_info_markers() -> None:
+    """One lifecycle badge at most, plus metadata and sidecar markers when they apply."""
+    failed = PhotoItem(path=Path("/a.jpg"), status=FAILED, known_fields={"title"})
+    assert thumb_badges(failed, has_sidecar=True) == [BADGE_FAILED, BADGE_METADATA, BADGE_SIDECAR]
+
+    saved = PhotoItem(path=Path("/a.jpg"), status=SAVED)
+    assert thumb_badges(saved, has_sidecar=False) == [BADGE_SAVED]
+
+    ready = PhotoItem(path=Path("/a.jpg"), status=READY, has_proposal=True)
+    assert thumb_badges(ready, has_sidecar=False) == [BADGE_UNSAVED]
+
+    pending = PhotoItem(path=Path("/a.jpg"), known_fields=set())
+    assert thumb_badges(pending, has_sidecar=False) == []
 
 
 def test_keyword_diff_merge_marks_added_and_unchanged() -> None:
