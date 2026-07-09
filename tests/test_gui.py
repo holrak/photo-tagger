@@ -1585,6 +1585,117 @@ def test_tree_uncheck_reflects_in_grid_checkboxes(
     assert states == {Qt.CheckState.Unchecked}
 
 
+def test_grid_checkbox_click_does_not_open_the_photo(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Toggling a thumbnail checkbox swallows the click; a later plain click still opens."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": img})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+    grid_item = window._grid_items[str(img)]  # noqa: SLF001
+
+    grid_item.setCheckState(Qt.CheckState.Unchecked)  # the toggle half of the click
+    window._on_thumb_activated(grid_item)  # noqa: SLF001 - the click half
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001 - stayed in the grid
+
+    window._on_thumb_activated(grid_item)  # noqa: SLF001 - a later plain click
+    assert window._right.currentIndex() == gui._PAGE_DETAIL  # noqa: SLF001
+
+
+def test_modifier_click_on_thumbnail_keeps_the_grid(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shift/cmd click is building a selection, so it must not navigate away."""
+    img = _jpeg(tmp_path / "a.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    monkeypatch.setattr(gui, "_selection_modifiers_active", lambda: True)
+    _add_dir(window, {"a": img})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    window._on_thumb_activated(window._grid_items[str(img)])  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+
+
+def test_bulk_context_menu_checks_unchecks_and_removes(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Right-clicking inside a multi-selection offers bulk check/uncheck/remove."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    c = _jpeg(tmp_path / "c.jpg")
+    _add_dir(window, {"a": a, "b": b, "c": c})
+    for path in (a, b):
+        leaf = window._leaf_for(path)  # noqa: SLF001
+        assert leaf is not None
+        leaf.setSelected(True)
+
+    leaf_a = window._leaf_for(a)  # noqa: SLF001
+    menu = window._build_tree_context_menu(leaf_a)  # noqa: SLF001
+    assert menu is not None
+    actions = {action.text(): action for action in menu.actions() if action.text()}
+    assert "Uncheck 2 Photos" in actions
+    assert "Check 2 Photos" in actions
+
+    actions["Uncheck 2 Photos"].trigger()
+    assert window._items[str(a)].selected is False  # noqa: SLF001
+    assert window._items[str(b)].selected is False  # noqa: SLF001
+    assert window._items[str(c)].selected is True  # noqa: SLF001 - not in the selection
+    top = window._tree.topLevelItem(0)  # noqa: SLF001
+    assert top is not None
+    assert top.checkState(0) == Qt.CheckState.PartiallyChecked
+
+    actions["Remove From List"].trigger()
+    assert str(a) not in window._items  # noqa: SLF001
+    assert str(b) not in window._items  # noqa: SLF001
+    assert str(c) in window._items  # noqa: SLF001
+
+
+def test_single_row_right_click_keeps_the_per_photo_menu(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """With one row selected, the menu is the per-photo one (Generate, reveal, ...)."""
+    a = _jpeg(tmp_path / "a.jpg")
+    _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a})
+    leaf = window._leaf_for(a)  # noqa: SLF001
+    assert leaf is not None
+    window._tree.setCurrentItem(leaf)  # noqa: SLF001 - selects just this row
+
+    menu = window._build_tree_context_menu(leaf)  # noqa: SLF001
+    assert menu is not None
+    texts = [action.text() for action in menu.actions() if action.text()]
+    assert texts[0] == "Generate"
+
+
+def test_remove_selected_drops_every_selected_row(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Delete acts on the whole selection, not only the current row."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    c = _jpeg(tmp_path / "c.jpg")
+    _add_dir(window, {"a": a, "b": b, "c": c})
+    for path in (a, c):
+        leaf = window._leaf_for(path)  # noqa: SLF001
+        assert leaf is not None
+        leaf.setSelected(True)
+
+    window._remove_selected()  # noqa: SLF001
+
+    assert sorted(window._items) == [str(b)]  # noqa: SLF001
+
+
 def test_generating_status_pluralizes(
     window: gui.MainWindow,
     tmp_path: Path,

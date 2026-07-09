@@ -632,6 +632,7 @@ class MainWindow(QMainWindow):
         self._scan_thread: QThread | None = None
         self._scan_worker: MetadataScanWorker | None = None
         self._syncing = False
+        self._grid_check_toggled = False
         # Raw config, for keys the Defaults dataclass fills with CLI-oriented values: the GUI
         # wants its own broad extension default unless the user actually saved one.
         self._raw_config = load_config()
@@ -899,7 +900,9 @@ class MainWindow(QMainWindow):
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Photos", "Type", "Status", "Tagged"])
-        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Extended: shift+click selects a range, Cmd/Ctrl+click adds single rows, and
+        # shift+arrows grow the selection from the keyboard.
+        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         header = self._tree.header()
         header.setStretchLastSection(False)
         for column, width in (
@@ -1045,6 +1048,11 @@ class MainWindow(QMainWindow):
         path = tree_item.data(0, _PATH_ROLE)
         if path is None:
             return None
+        # A right-click on one of several selected photos acts on the whole selection.
+        selected = self._selected_photo_items()
+        clicked_in_selection = any(str(item.path) == path for item in selected)
+        if not bool(tree_item.data(0, _IS_DIR_ROLE)) and len(selected) > 1 and clicked_in_selection:
+            return self._build_bulk_context_menu(selected)
         menu = QMenu(self._tree)
         item = self._items.get(path)
         if not bool(tree_item.data(0, _IS_DIR_ROLE)) and item is not None:
@@ -1066,10 +1074,66 @@ class MainWindow(QMainWindow):
         )
         return menu
 
+    def _selected_photo_items(self) -> list[PhotoItem]:
+        """Return the photos behind the tree's currently selected file rows."""
+        out: list[PhotoItem] = []
+        for tree_item in self._tree.selectedItems():
+            if bool(tree_item.data(0, _IS_DIR_ROLE)):
+                continue
+            item = self._items.get(tree_item.data(0, _PATH_ROLE))
+            if item is not None:
+                out.append(item)
+        return out
+
+    def _build_bulk_context_menu(self, items: list[PhotoItem]) -> QMenu:
+        """Build the context menu shown when several photos are selected at once."""
+        menu = QMenu(self)
+        count = pluralize(len(items), "Photo")
+        menu.addAction(
+            f"Check {count}",
+            lambda: self._set_items_checked(items, checked=True),
+        )
+        menu.addAction(
+            f"Uncheck {count}",
+            lambda: self._set_items_checked(items, checked=False),
+        )
+        menu.addSeparator()
+        generate = menu.addAction(f"Generate {count}", lambda: self._run_generation(items))
+        generate.setEnabled(self._thread is None)
+        menu.addSeparator()
+        menu.addAction(
+            "Remove From List",
+            lambda: self._remove_items([str(item.path) for item in items]),
+        )
+        return menu
+
+    def _set_items_checked(self, items: list[PhotoItem], *, checked: bool) -> None:
+        """Check or uncheck *items* in place, keeping tree, folders, and grid in step."""
+        self._syncing = True
+        leaves = []
+        for item in items:
+            item.selected = checked
+            leaf = self._leaf_for(item.path)
+            if leaf is not None:
+                leaf.setCheckState(0, _checked(checked))
+                leaves.append(leaf)
+        # Folder tristates re-derive after every leaf is set, walking each chain upward.
+        for leaf in leaves:
+            parent = leaf.parent()
+            while parent is not None:
+                self._sync_folder_check(parent)
+                parent = parent.parent()
+        self._sync_grid_checks()
+        self._syncing = False
+        self._update_status()
+
     def _on_grid_item_changed(self, grid_item: QListWidgetItem) -> None:
         """Mirror a thumbnail checkbox change onto the photo and its tree row."""
         if self._syncing:
             return
+        # Remember that this was a checkbox click so the itemClicked that follows the same
+        # mouse release does not also open the photo.
+        self._grid_check_toggled = True
         key = grid_item.data(_PATH_ROLE)
         item = self._items.get(key)
         if item is None:
@@ -1098,7 +1162,12 @@ class MainWindow(QMainWindow):
         grid_item = self._grid.itemAt(pos)
         if grid_item is None:
             return
-        menu = self._build_tree_context_menu(self._leaf_for(Path(grid_item.data(_PATH_ROLE))))
+        selected_keys = [gi.data(_PATH_ROLE) for gi in self._grid.selectedItems()]
+        if len(selected_keys) > 1 and grid_item.data(_PATH_ROLE) in selected_keys:
+            items = [self._items[key] for key in selected_keys if key in self._items]
+            menu: QMenu | None = self._build_bulk_context_menu(items)
+        else:
+            menu = self._build_tree_context_menu(self._leaf_for(Path(grid_item.data(_PATH_ROLE))))
         if menu is not None:
             menu.exec(self._grid.viewport().mapToGlobal(pos))
 
@@ -1185,6 +1254,7 @@ class MainWindow(QMainWindow):
         grid.setSpacing(8)
         grid.setUniformItemSizes(True)
         grid.setWordWrap(True)
+        grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         grid.itemClicked.connect(self._on_thumb_activated)
         grid.itemChanged.connect(self._on_grid_item_changed)
         # Thumbnails answer to the same right-click menu as their row in the tree.
@@ -1547,19 +1617,24 @@ class MainWindow(QMainWindow):
         self._start_metadata_scan()
 
     def _remove_selected(self) -> None:
-        item = self._tree.currentItem()
-        if item is None:
+        """Remove every selected row (files, and folders with their contents) from the list."""
+        removed: list[str] = []
+        for tree_item in self._tree.selectedItems():
+            path = tree_item.data(0, _PATH_ROLE)
+            if path is None:
+                continue
+            if bool(tree_item.data(0, _IS_DIR_ROLE)):
+                prefix = Path(path)
+                removed += [k for k in self._items if Path(k).is_relative_to(prefix)]
+            else:
+                removed.append(path)
+        self._remove_items(removed)
+
+    def _remove_items(self, keys: list[str]) -> None:
+        """Drop the photos behind *keys* from the list and refresh the tree."""
+        if not keys:
             return
-        path = item.data(0, _PATH_ROLE)
-        is_dir = bool(item.data(0, _IS_DIR_ROLE))
-        if path is None:
-            return
-        if is_dir:
-            prefix = Path(path)
-            removed = [k for k in self._items if Path(k).is_relative_to(prefix)]
-        else:
-            removed = [path]
-        for key in removed:
+        for key in keys:
             self._items.pop(key, None)
             self._preview_cache.pop(key, None)
             if self._current is not None and str(self._current.path) == key:
@@ -1804,6 +1879,14 @@ class MainWindow(QMainWindow):
         grid_item.setToolTip("\n".join([item.path.name, *notes]))
 
     def _on_thumb_activated(self, item: QListWidgetItem) -> None:
+        if self._grid_check_toggled:
+            # This click landed on the checkbox: the toggle already happened, and jumping to
+            # the detail page would yank the user out of the grid they are working in.
+            self._grid_check_toggled = False
+            return
+        if _selection_modifiers_active():
+            # Shift/Cmd clicks are building a multi-selection; navigating away would kill it.
+            return
         key = item.data(_PATH_ROLE)
         leaf = self._leaf_for(Path(key))
         if leaf is not None:
@@ -2406,6 +2489,14 @@ def _badged_pixmap(base: QPixmap, badges: list[str]) -> QPixmap:
 def _checked(selected: bool) -> Qt.CheckState:  # noqa: FBT001 - tiny private bool mapper.
     """Map a selected flag to a Qt check state."""
     return Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked
+
+
+def _selection_modifiers_active() -> bool:
+    """Report whether a multi-select modifier (Shift or Ctrl/Cmd) is held right now."""
+    modifiers = QApplication.keyboardModifiers()
+    return bool(
+        modifiers & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier),
+    )
 
 
 _DIFF_STYLE = {

@@ -143,6 +143,7 @@ titlecase
 tlsv
 tobytes
 tomlkit
+tristates
 twemoji
 unwritable
 usefixtures

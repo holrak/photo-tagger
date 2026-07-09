@@ -62,9 +62,13 @@ under their parent folder, so a deep shoot stays organized rather than flattened
 ### 2. Choose what to process
 
 Every folder and file has a checkbox; uncheck a folder to exclude everything under it, or uncheck
-individual files. Only checked photos are generated. To take an item off the list entirely (rather
-than just deselect it), select it and click **Remove**, press ++delete++ / ++backspace++, or use
-**Remove From List** in its right-click menu; **File > Clear List** empties the whole list.
+individual files. Only checked photos are generated. Rows support multi-selection the usual way
+(++shift++-click for a range, ++cmd++/++ctrl++-click to add single rows, ++shift++ + arrow keys from
+the keyboard); right-clicking inside the selection then offers **Check / Uncheck / Generate /
+Remove** for all of it at once, and this works in the thumbnail grid too. To take items off the list
+entirely (rather than just deselect them), select them and click **Remove**, press ++delete++ /
+++backspace++, or use **Remove From List** in the right-click menu; **File > Clear List** empties
+the whole list.
 
 The tree has four resizable, sortable columns (click a header to sort; click again to reverse;
 folders stay grouped above their sibling files either way):
