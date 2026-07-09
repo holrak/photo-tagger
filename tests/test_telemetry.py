@@ -130,6 +130,37 @@ def test_first_run_notice_still_shows_when_marker_unwritable(
     assert telemetry.first_run_notice() == telemetry.FIRST_RUN_NOTICE
 
 
+# --- GUI preference ----------------------------------------------------------------------------
+
+
+def test_gui_pref_round_trips() -> None:
+    """An unset pref reads as None; a written choice reads back unchanged."""
+    assert telemetry.read_gui_pref() is None
+    telemetry.write_gui_pref(enabled=False)
+    assert telemetry.read_gui_pref() is False
+    telemetry.write_gui_pref(enabled=True)
+    assert telemetry.read_gui_pref() is True
+
+
+def test_gui_pref_unrecognized_reads_as_none(tmp_path: Path) -> None:
+    """A garbled pref file is treated as 'no choice', not a crash."""
+    pref = tmp_path / "state" / "photo-tagger" / "gui-telemetry"
+    pref.parent.mkdir(parents=True)
+    pref.write_text("maybe")
+    assert telemetry.read_gui_pref() is None
+
+
+def test_gui_pref_write_degrades_when_unwritable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """If the state dir cannot be created, persisting the pref is swallowed, never raised."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    monkeypatch.setenv("XDG_STATE_HOME", str(blocker))
+    telemetry.write_gui_pref(enabled=False)  # must not raise
+
+
 # --- payload contents (the privacy guarantee) --------------------------------------------------
 
 

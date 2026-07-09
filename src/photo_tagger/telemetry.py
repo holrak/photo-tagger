@@ -57,10 +57,11 @@ _SEND_TIMEOUT_SECONDS = 2.0
 # giving up and letting the daemon thread be abandoned at interpreter exit.
 _FLUSH_TIMEOUT_SECONDS = 2.5
 
-# State files. The install id and the "first-run notice already shown" marker live under the user
-# state directory, mirroring how config_file.py uses an XDG-style location.
+# State files. The install id, the "first-run notice already shown" marker, and the GUI's persisted
+# on/off choice live under the user state directory, mirroring config_file.py's XDG-style location.
 _INSTALL_ID_FILE = "install-id"
 _NOTICE_MARKER_FILE = "telemetry-notice-shown"
+_GUI_PREF_FILE = "gui-telemetry"
 
 # Shown once, to stderr, on the first run telemetry is active. Opt-out tools are expected to
 # disclose up front; this is that disclosure.
@@ -165,6 +166,35 @@ def first_run_notice() -> str | None:
     except OSError as exc:
         logger.debug("telemetry_notice_marker_failed", error=str(exc))
     return FIRST_RUN_NOTICE
+
+
+def read_gui_pref() -> bool | None:
+    """
+    Return the GUI's persisted telemetry choice, or ``None`` if the user never made one.
+
+    The GUI's Settings toggle writes this so the choice survives restarts. ``None`` means "no
+    explicit choice", so the GUI falls back to the config-file default. Anything unreadable or
+    unrecognized is treated as no choice.
+    """
+    try:
+        text = (_state_dir() / _GUI_PREF_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if text == "1":
+        return True
+    if text == "0":
+        return False
+    return None
+
+
+def write_gui_pref(*, enabled: bool) -> None:
+    """Persist the GUI's telemetry choice so the Settings toggle sticks across restarts."""
+    path = _state_dir() / _GUI_PREF_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("1" if enabled else "0", encoding="utf-8")
+    except OSError as exc:
+        logger.debug("telemetry_gui_pref_persist_failed", error=str(exc))
 
 
 def build_payload(run: RunInfo) -> dict[str, object]:
