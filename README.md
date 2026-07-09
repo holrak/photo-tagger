@@ -28,7 +28,7 @@ directly into each photo with `--embed-in-photo`.
 - Works with RAW and standard image formats (CR3, CR2, NEF, JPG, PNG, and more)
 - Generates a title, a concise description, and hierarchical keywords
 - Merges with existing metadata unless you opt-in to overwrite
-- Works with Ollama, LM Studio, and any hosted OpenAI-compatible API
+- Works with Ollama, LM Studio, llama.cpp, and any hosted OpenAI-compatible API
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow
 - Converts images to compact JPEG bytes to minimize token usage
@@ -39,7 +39,8 @@ directly into each photo with `--embed-in-photo`.
 
 - Python 3.14+
 - [ExifTool](https://exiftool.org/) available on `PATH`
-- A running Ollama or LM Studio server exposing a vision-language model (for example Qwen-VL)
+- A running Ollama, LM Studio, or llama.cpp server exposing a vision-language model (for example
+  Qwen-VL)
 - `libraw` support for `rawpy` (install via Homebrew on macOS: `brew install libraw`)
 
 ## Installation
@@ -79,10 +80,15 @@ Environment variables provide defaults so you can keep the CLI concise:
 - `OLLAMA_API_KEY` – optional API key passed to Ollama requests
 - `LM_STUDIO_BASE_URL` – override the LM Studio endpoint (default `http://localhost:1234/v1`)
 - `LM_STUDIO_API_KEY` / `OPENAI_API_KEY` – API key for LM Studio’s OpenAI-compatible server
+- `LLAMA_CPP_BASE_URL` – override the llama.cpp `llama-server` endpoint (default
+  `http://localhost:8080/v1`)
+- `LLAMA_CPP_API_KEY` – API key for llama.cpp, only needed when `llama-server` was started with
+  `--api-key`
 - `OPENAI_BASE_URL` – endpoint for the `openai` provider (default `https://api.openai.com/v1`)
 - `OPENAI_API_KEY` – API key for the `openai` provider (required for that provider)
 - `MODEL_NAME` – default model name (default `qwen/qwen3-vl-30b`)
-- `JPEG_DIMENSIONS`, `JPEG_QUALITY`, `TEMPERATURE`, `MAX_TOKENS`, `RETRIES` – fine-tune runtime
+- `JPEG_DIMENSIONS`, `JPEG_QUALITY`, `TEMPERATURE`, `MAX_TOKENS`, `RETRIES`, `TIMEOUT_SECONDS`,
+  `FREQUENCY_PENALTY` – fine-tune runtime
 - `PHOTO_TAGGER_EXIFTOOL` – path to the ExifTool binary, for installs not on `PATH` (overrides the
   config file's `exiftool_path`)
 

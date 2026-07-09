@@ -37,6 +37,7 @@ nav = [
     { "Desktop GUI" = "usage/gui.md" },
     { "Recipes" = "usage/recipes.md" },
   ] },
+  { "Troubleshooting" = "troubleshooting.md" },
   { "Architecture" = [
     "architecture/index.md",
     { "Processing pipeline" = "architecture/pipeline.md" },
@@ -51,6 +52,7 @@ nav = [
     { "Dependencies" = "development/dependencies.md" },
     { "Documentation" = "development/documentation.md" },
   ] },
+  { "Telemetry" = "telemetry.md" },
   { "Contributing" = "contributing.md" },
   { "License" = "license.md" },
 ]

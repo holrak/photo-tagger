@@ -18,12 +18,12 @@ server and tune the defaults that suit your library.
 photo-tagger leans on a few external pieces that it does not bundle. Make sure each one is available
 before you run your first batch.
 
-| Tool                       | Why it is needed                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Python 3.14+               | The runtime. photo-tagger targets modern Python syntax.                                                             |
-| ExifTool on `PATH`         | Reads existing metadata and writes the title, description, and keywords. `pyexiftool` drives the `exiftool` binary. |
-| `libraw` (rawpy)           | Decodes RAW files (CR3, CR2, NEF, DNG). Linux wheels bundle it; on macOS run `brew install libraw`.                 |
-| Ollama or LM Studio server | A running model server exposing a vision-language model (for example Qwen3-VL) over an OpenAI-compatible API.       |
+| Tool               | Why it is needed                                                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Python 3.14+       | The runtime. photo-tagger targets modern Python syntax.                                                                                 |
+| ExifTool on `PATH` | Reads existing metadata and writes the title, description, and keywords. `pyexiftool` drives the `exiftool` binary.                     |
+| `libraw` (rawpy)   | Decodes RAW files (CR3, CR2, NEF, DNG). Linux wheels bundle it; on macOS run `brew install libraw`.                                     |
+| Model server       | A running Ollama, LM Studio, or llama.cpp server exposing a vision-language model (for example Qwen3-VL) over an OpenAI-compatible API. |
 
 !!! warning
 

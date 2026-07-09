@@ -185,4 +185,6 @@ exiftool -ver
 ```
 
 The first prints the CLI options; the second prints the installed ExifTool version. Once both work,
-head to [Configuration](configuration.md) to point photo-tagger at your model server.
+head to [Configuration](configuration.md) to point photo-tagger at your model server. If either
+command fails, or your first run will not start, see [Troubleshooting](../troubleshooting.md) for
+the most common causes and fixes.

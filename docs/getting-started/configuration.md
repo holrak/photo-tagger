@@ -33,6 +33,8 @@ These variables set defaults. Any matching CLI flag still overrides them. See
 | `OLLAMA_API_KEY`      | none                        | API key for Ollama.                                                                |
 | `LM_STUDIO_BASE_URL`  | `http://localhost:1234/v1`  | LM Studio API base URL.                                                            |
 | `LM_STUDIO_API_KEY`   | none                        | API key for LM Studio.                                                             |
+| `LLAMA_CPP_BASE_URL`  | `http://localhost:8080/v1`  | llama.cpp `llama-server` API base URL.                                             |
+| `LLAMA_CPP_API_KEY`   | none                        | API key for llama.cpp; only needed when `llama-server` runs with `--api-key`.      |
 | `OPENAI_BASE_URL`     | `https://api.openai.com/v1` | Base URL for the `openai` provider (the real OpenAI API or a drop-in gateway).     |
 | `OPENAI_API_KEY`      | none                        | API key for the `openai` provider (required); also the fallback key for LM Studio. |
 | `TEMPERATURE`         | `0.2`                       | Sampling temperature.                                                              |

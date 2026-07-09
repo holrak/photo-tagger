@@ -19,8 +19,8 @@ Consolas
 consoledonottrack
 cooldown
 CREAT
-cyclopts
 Cyclopts
+cyclopts
 dataclass
 datas
 debugpy
@@ -33,10 +33,10 @@ docformatter
 docstrings
 downscales
 EDITMSG
-exif
 Exif
-exiftool
+exif
 Exiftool
+exiftool
 filelock
 fontawesome
 fromarray
@@ -91,8 +91,8 @@ nixpkgs
 noconfirm
 NOSONAR
 numprocesses
-ollama
 Ollama
+ollama
 OLLAMA
 pacman
 parentless
@@ -119,6 +119,7 @@ pytest
 pytestmark
 pyupgrade
 qapp
+qtbase
 qwen
 rawpy
 RDWR
@@ -133,8 +134,8 @@ smartsymbols
 smolvlm
 sonarcloud
 sonarlint
-sonarqube
 SonarQube
+sonarqube
 stdouts
 stubjpeg
 subcontrol

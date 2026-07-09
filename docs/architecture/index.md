@@ -95,8 +95,8 @@ logic stays testable without a display.
 
 - [Processing pipeline](pipeline.md): how `run_batch()` orders the per-photo steps, handles serial
     versus concurrent execution, retries failures, and streams outcomes.
-- [AI providers](ai-providers.md): the backend registry (Ollama, LM Studio, OpenAI), agent
-    construction, model validation, and schema-validation retries.
+- [AI providers](ai-providers.md): the backend registry (Ollama, LM Studio, llama.cpp, OpenAI),
+    agent construction, model validation, and schema-validation retries.
 - [Metadata and keywords](metadata.md): reading existing context, the exact tags written, and how
     hierarchical keywords are parsed and merged.
 - [Caching and locking](caching.md): the SQLite inference cache, its namespace digest, and the

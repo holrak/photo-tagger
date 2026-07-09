@@ -55,13 +55,13 @@ All checks passed.
 The provider group selects the backend and how to reach it. Prefer the API-key environment variables
 over `--api-key` so the key never lands in your shell history.
 
-| Flag                  | Default                                                                     | Env var                                                      | Description                                                        |
-| --------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `--provider` NAME     | `lmstudio`                                                                  | `-`                                                          | Backend: `ollama`, `lmstudio`, `llamacpp`, or `openai`.            |
-| `-m`, `--model` NAME  | `qwen/qwen3-vl-30b`                                                         | `MODEL_NAME`                                                 | Vision-language model identifier.                                  |
-| `-u`, `--url` URL     | `http://localhost:1234/v1` (lmstudio), `http://localhost:11434/v1` (ollama) | `LM_STUDIO_BASE_URL` / `OLLAMA_BASE_URL` / `OPENAI_BASE_URL` | Provider API base URL.                                             |
-| `-k`, `--api-key` KEY | none                                                                        | `OLLAMA_API_KEY` / `LM_STUDIO_API_KEY` / `OPENAI_API_KEY`    | API key; prefer the env vars over the flag. Required for `openai`. |
-| `--retries` N         | `5`                                                                         | `RETRIES`                                                    | Automatic retries when the model output fails schema validation.   |
+| Flag                  | Default                                                                                                            | Env var                                                                             | Description                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `--provider` NAME     | `lmstudio`                                                                                                         | `-`                                                                                 | Backend: `ollama`, `lmstudio`, `llamacpp`, or `openai`.            |
+| `-m`, `--model` NAME  | `qwen/qwen3-vl-30b`                                                                                                | `MODEL_NAME`                                                                        | Vision-language model identifier.                                  |
+| `-u`, `--url` URL     | `http://localhost:1234/v1` (lmstudio), `http://localhost:11434/v1` (ollama), `http://localhost:8080/v1` (llamacpp) | `LM_STUDIO_BASE_URL` / `OLLAMA_BASE_URL` / `LLAMA_CPP_BASE_URL` / `OPENAI_BASE_URL` | Provider API base URL.                                             |
+| `-k`, `--api-key` KEY | none                                                                                                               | `OLLAMA_API_KEY` / `LM_STUDIO_API_KEY` / `LLAMA_CPP_API_KEY` / `OPENAI_API_KEY`     | API key; prefer the env vars over the flag. Required for `openai`. |
+| `--retries` N         | `5`                                                                                                                | `RETRIES`                                                                           | Automatic retries when the model output fails schema validation.   |
 
 ## Inference
 

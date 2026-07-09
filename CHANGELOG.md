@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- New `llamacpp` provider for llama.cpp's `llama-server`. Default endpoint
+  `http://localhost:8080/v1`; env vars `LLAMA_CPP_BASE_URL` and `LLAMA_CPP_API_KEY` (the key is only
+  needed when `llama-server` was started with `--api-key`).
+- Anonymous, opt-out usage telemetry with a one-time first-run notice. Disable it with
+  `--no-telemetry`, `PHOTO_TAGGER_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1`), `enabled = false` under
+  `[telemetry]` in the config file, or the GUI's **Settings > Send Anonymous Telemetry** toggle.
+- GUI redesign: split **Generate**/**Save** buttons with option menus, thumbnail badges,
+  multi-selection with bulk actions, tree columns for file type, status, and already-tagged,
+  collapsible keyword-change details, reveal-in-file-manager on Windows, Linux, and macOS, and CSV
+  export.
+- The GUI now caches results by default (sharing the CLI's cache format), with skip-cache actions
+  for forcing a fresh generation.
+- **Settings > Save Settings as Defaults** merges into the existing config file instead of rewriting
+  it, preserving comments and unknown keys.
+- Windowed `photo-tagger-gui` entry point, so the desktop app launches without a console window.
+- `exiftool_path` config key and `PHOTO_TAGGER_EXIFTOOL` env var for ExifTool installs not on
+  `PATH`. A GUI launched from Finder also inherits the login shell's `PATH` automatically.
+- `packaging/build_macos_app.sh` builds a standalone, double-clickable macOS app with PyInstaller.
+
+### Changed
+
+- Console logging is capped at `INFO` from import (so nothing above it leaks before the CLI flags
+  apply), and file logs are serialized as JSON lines.
+- System prompt now demands English-only, single-script output and at most one hierarchy chain per
+  keyword.
+
+### Fixed
+
+- The GUI's telemetry beacon is flushed before the process exits instead of being lost.
+- The GUI result cache is keyed on the image content hash, so **Embed in Photo** no longer
+  invalidates it.
+- Hierarchical keywords written with `>` separators are parsed as hierarchies instead of being
+  mangled, and model keywords are deduplicated.
+- Ctrl-C during a concurrent batch no longer miscounts photos that finished while the pool drained.
+
 ## [0.4.0] - 2026-06-26
 
 ### Changed
@@ -170,3 +209,4 @@ Initial release.
 [0.2.2]: https://github.com/jbsilva/photo-tagger/compare/v0.2.1...v0.2.2
 [0.3.0]: https://github.com/jbsilva/photo-tagger/compare/v0.2.2...v0.3.0
 [0.4.0]: https://github.com/jbsilva/photo-tagger/compare/v0.3.0...v0.4.0
+[unreleased]: https://github.com/jbsilva/photo-tagger/compare/v0.4.0...HEAD

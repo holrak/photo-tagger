@@ -4,12 +4,12 @@ icon: lucide/bot
 
 # AI providers
 
-photo-tagger talks to a vision-language model through an OpenAI-compatible chat API. Three backends
-are supported: [Ollama](https://ollama.com/) and [LM Studio](https://lmstudio.ai/) for local
-servers, and `openai` for any hosted OpenAI-compatible endpoint (the real OpenAI API or a drop-in
-gateway). The HTTP calls and the structured-output decoding are handled by
-[pydantic-ai](https://ai.pydantic.dev/), so the rest of the pipeline only ever sees a validated
-result object.
+photo-tagger talks to a vision-language model through an OpenAI-compatible chat API. Four backends
+are supported: [Ollama](https://ollama.com/), [LM Studio](https://lmstudio.ai/), and
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` for local servers, and `openai`
+for any hosted OpenAI-compatible endpoint (the real OpenAI API or a drop-in gateway). The HTTP calls
+and the structured-output decoding are handled by [pydantic-ai](https://ai.pydantic.dev/), so the
+rest of the pipeline only ever sees a validated result object.
 
 ## The backend registry
 
@@ -25,17 +25,19 @@ registry, so the agent setup, the `--provider` choices, and the model check neve
 | --------- | ------------------ | --------------------------- | -------------------- | ------------ |
 | LM Studio | `lmstudio`         | `http://localhost:1234/v1`  | `LM_STUDIO_BASE_URL` | no           |
 | Ollama    | `ollama`           | `http://localhost:11434/v1` | `OLLAMA_BASE_URL`    | no           |
+| llama.cpp | `llamacpp`         | `http://localhost:8080/v1`  | `LLAMA_CPP_BASE_URL` | no           |
 | OpenAI    | `openai`           | `https://api.openai.com/v1` | `OPENAI_BASE_URL`    | yes          |
 
 You point photo-tagger at a backend in three ways, in order of precedence (CLI flags win):
 
-- `--provider ollama`, `--provider lmstudio`, or `--provider openai` selects the backend. Omit it to
-    get LM Studio.
+- `--provider ollama`, `--provider lmstudio`, `--provider llamacpp`, or `--provider openai` selects
+    the backend. Omit it to get LM Studio.
 - `-u/--url URL` overrides the base URL. The matching env var is `LM_STUDIO_BASE_URL`,
-    `OLLAMA_BASE_URL`, or `OPENAI_BASE_URL`. When neither is set, the provider's default URL above
-    is used.
+    `OLLAMA_BASE_URL`, `LLAMA_CPP_BASE_URL`, or `OPENAI_BASE_URL`. When neither is set, the
+    provider's default URL above is used.
 - `-k/--api-key KEY` sets the API key. Prefer the env vars: `OLLAMA_API_KEY` for Ollama,
-    `LM_STUDIO_API_KEY` (with `OPENAI_API_KEY` as a fallback) for LM Studio, and `OPENAI_API_KEY`
+    `LM_STUDIO_API_KEY` (with `OPENAI_API_KEY` as a fallback) for LM Studio, `LLAMA_CPP_API_KEY` for
+    llama.cpp (only needed when `llama-server` was started with `--api-key`), and `OPENAI_API_KEY`
     for the `openai` provider. Local servers usually do not require a key; the `openai` provider
     does and fails fast with a clear message when one is missing.
 
@@ -79,9 +81,9 @@ flowchart LR
 
 `create_agent()` looks the backend up in the registry, resolves the base URL and API key, then
 validates that the requested model is actually present on the provider before doing anything else.
-The backend knows where to look: the OpenAI-compatible `/v1/models` listing (LM Studio, OpenAI) or
-Ollama's `/api/tags`. If the model name is not found, it raises a `ProviderError` so the run stops
-before wasting time on images. The `openai` backend additionally short-circuits with a
+The backend knows where to look: the OpenAI-compatible `/v1/models` listing (LM Studio, llama.cpp,
+OpenAI) or Ollama's `/api/tags`. If the model name is not found, it raises a `ProviderError` so the
+run stops before wasting time on images. The `openai` backend additionally short-circuits with a
 `ProviderError` when no key is configured. Once validation passes it constructs an `OpenAIChatModel`
 over the provider and wraps it in an `Agent` whose `output_type` is `GeneratedMetadata`.
 
