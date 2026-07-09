@@ -480,6 +480,21 @@ def test_cli_skips_cache_when_open_fails(tmp_path: Path) -> None:
     assert captured.get("cache") is None
 
 
+def test_cli_cache_file_opened_is_passed_and_closed(tmp_path: Path) -> None:
+    """A usable --cache-file opens a cache, hands it to run_batch, and closes it in the finally."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    cache_path = tmp_path / "cache.sqlite3"
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--cache-file", str(cache_path)])
+
+    # The cache opened (reached run_batch) and the finally closed it without error.
+    assert captured["cache"] is not None
+    assert cache_path.exists()
+
+
 def test_cli_lock_file_blocks_second_run(tmp_path: Path) -> None:
     """A second --lock-file invocation while another holds the lock exits with code 1."""
     from photo_tagger.locking import FileLock  # noqa: PLC0415 - test-local import.

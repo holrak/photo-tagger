@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
 import pytest
 
@@ -70,6 +71,20 @@ def test_apply_overrides_coerces_str_to_path() -> None:
     result = apply_overrides(_PathDC(), {"output": "reports/run.json"})
     assert result.output == Path("reports/run.json")
     assert isinstance(result.output, Path)
+
+
+def test_apply_overrides_coerces_annotated_path_and_leaves_other_unions() -> None:
+    """_coerce_field unwraps Annotated, converts a bare Path, and leaves a non-Path union alone."""
+
+    @dataclass
+    class _AnnotatedDC:
+        folder: Annotated[Path, "meta"] = Path()
+        name: Annotated[str | None, "meta"] = None
+
+    result = apply_overrides(_AnnotatedDC(), {"folder": "logs/today", "name": "keep"})
+    assert result.folder == Path("logs/today")
+    assert isinstance(result.folder, Path)
+    assert result.name == "keep"
 
 
 def test_apply_overrides_falls_back_when_type_hints_unresolvable(
