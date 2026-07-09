@@ -130,6 +130,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "- Hierarchies: a SEPARATE list (the 'hierarchies' field, not 'keywords'). For each keyword "
     "that has a natural taxonomy, add one chain written specific-to-general with '<' as the "
     "separator, max 5 levels, e.g. 'Golden Eagle<Bird of Prey<Animal' or 'Oak<Tree<Plant'. "
+    "At most ONE chain per keyword: pick its single most natural taxonomy, never several "
+    "alternative parents for the same keyword. "
     "Populate this field whenever a subject, place, or object has an obvious parent category; "
     "leave it empty only when nothing in the image has one.\n"
     "- Language: English only, Latin script, in every field. Never mix scripts within a keyword "
