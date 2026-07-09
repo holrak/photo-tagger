@@ -1,4 +1,9 @@
 # mypy: ignore-errors
+# The lint/pycroscope environment does not install the [gui] extra, so pycroscope cannot import
+# this Qt shell (PySide6 is absent) and would also misread shiboken's runtime-generated attributes.
+# Exclude the whole module from pycroscope, the same way it is excluded from coverage and zuban;
+# the Qt-free logic that is worth analyzing lives in gui_state.py.
+# static analysis: ignore
 """
 PySide6 desktop frontend for photo-tagger.
 

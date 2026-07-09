@@ -206,17 +206,9 @@ missing_parameter_annotation = false
 suggested_parameter_type = false
 suggested_return_type = false
 
-# PySide6's widget attributes are generated at runtime by shiboken, so pycroscope's
-# static view of the Qt classes reports every .addWidget/.clicked/etc. as undefined.
-# These are false positives; the GUI shell is verified by the offscreen tests in
-# test_gui.py instead. (gui.py is likewise excluded from coverage and from zuban
-# via its `# mypy: ignore-errors` header.)
-[[tool.pycroscope.overrides]]
-module = "photo_tagger.gui"
-undefined_attribute = false
-# QTreeWidgetItemIterator supports `it += 1` at runtime, but pycroscope's static view of the
-# shiboken-generated class does not model the operator.
-unsupported_operation = false
+# gui.py (the Qt shell) is excluded from pycroscope wholesale via a file-level
+# `# static analysis: ignore` header in the module itself, because the lint job does not install
+# the [gui] extra and pycroscope cannot import PySide6. See the note at the top of gui.py.
 
 [tool.bandit]
 # packaging/ and telemetry/ are dev tooling (like tests/), not shipped app code. packaging/'s only

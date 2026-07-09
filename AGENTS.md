@@ -50,13 +50,15 @@ version string. `scripts/check_version_sync.py` guards the hand-maintained docs 
 - **GUI code is special.** Put testable GUI logic in `gui_state.py` (plain Python, covered
   normally). `gui.py` is the Qt shell: it is excluded from coverage (`[tool.coverage.run].omit` plus
   `sonar.coverage.exclusions`, so SonarQube does not count its untested-in-CI lines against new-code
-  coverage), from zuban via its `# mypy: ignore-errors` header, and from pycroscope via a module
-  override (shiboken generates Qt attributes at runtime, so static tools see false
-  `undefined_attribute` errors). `tests/test_gui.py` carries the same `# mypy: ignore-errors`
-  header: it imports PySide6, which has no stubs and is not installed in the lint job, so zuban
-  would otherwise only report an unresolved import. Test it with `uv sync --extra gui --group test`
-  then `QT_QPA_PLATFORM=offscreen uv run pytest tests/test_gui.py`; those tests `importorskip`
-  PySide6 so the suite stays green without the extra.
+  coverage), from zuban via its `# mypy: ignore-errors` header, and from pycroscope via a file-level
+  `# static analysis: ignore` header (pycroscope cannot import PySide6 in the lint job, which does
+  not install the `[gui]` extra, and shiboken generates Qt attributes at runtime, so static tools
+  would misread the Qt shell either way). `tests/test_gui.py` carries the same
+  `# mypy: ignore-errors` header: it imports PySide6, which has no stubs and is not installed in the
+  lint job, so zuban would otherwise only report an unresolved import. Test it with
+  `uv sync --extra gui --group test` then
+  `QT_QPA_PLATFORM=offscreen uv run pytest tests/test_gui.py`; those tests `importorskip` PySide6 so
+  the suite stays green without the extra.
 
 ## Before committing
 
