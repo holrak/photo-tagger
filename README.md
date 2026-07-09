@@ -327,9 +327,11 @@ wrapped so it can never crash or slow down a run.
 - pass `--no-telemetry` on the command line
 - set `PHOTO_TAGGER_NO_TELEMETRY=1` (or the cross-tool `DO_NOT_TRACK=1`) in your environment
 - put `enabled = false` under `[telemetry]` in your config file
+- in the desktop app, uncheck **Settings > Send Anonymous Telemetry** (the first-run dialog also
+  offers a one-click "Turn It Off"); the choice is remembered for next launch
 
-The environment variables win over the flag and config, so exporting `PHOTO_TAGGER_NO_TELEMETRY=1`
-once disables telemetry everywhere, including the GUI.
+The environment variables win over everything, so exporting `PHOTO_TAGGER_NO_TELEMETRY=1` once
+disables telemetry everywhere, including the GUI.
 
 ## Logging
 

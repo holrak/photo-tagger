@@ -28,7 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem
 
-from photo_tagger import gui
+from photo_tagger import gui, telemetry
 from photo_tagger.errors import ProviderError
 from photo_tagger.gui_state import (
     FAILED,
@@ -1272,3 +1272,39 @@ def test_on_file_done_applies_proposal_to_item(window: gui.MainWindow, tmp_path:
     item = window._items[str(img)]  # noqa: SLF001
     assert item.status == READY
     assert item.title == "Generated"
+
+
+# ---------------------------------------------------------------------------
+# menu bar + telemetry toggle
+# ---------------------------------------------------------------------------
+
+
+def test_menu_bar_has_file_settings_help(window: gui.MainWindow) -> None:
+    """The window carries a real menu bar with File, Settings, and Help menus."""
+    titles = [action.text() for action in window.menuBar().actions()]
+    assert "File" in titles
+    assert "Settings" in titles
+    assert "Help" in titles
+
+
+def test_telemetry_toggle_defaults_on_and_persists(window: gui.MainWindow) -> None:
+    """The Settings toggle reflects the default (on) and persists the choice when changed."""
+    action = window._telemetry_action  # noqa: SLF001
+    assert action.isCheckable()
+    assert action.isChecked() is True  # default: telemetry on, no saved preference yet
+    assert window._telemetry_enabled is True  # noqa: SLF001
+
+    action.setChecked(False)  # user turns it off from the menu
+    assert window._telemetry_enabled is False  # noqa: SLF001
+    assert telemetry.read_gui_pref() is False  # the choice is persisted for next launch
+
+
+def test_telemetry_toggle_reflects_saved_off_preference(qapp: QApplication) -> None:
+    """A window built after the user disabled telemetry comes up unchecked."""
+    telemetry.write_gui_pref(enabled=False)
+    win = gui.MainWindow()
+    try:
+        assert win._telemetry_enabled is False  # noqa: SLF001
+        assert win._telemetry_action.isChecked() is False  # noqa: SLF001
+    finally:
+        win.close()

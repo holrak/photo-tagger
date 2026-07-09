@@ -25,7 +25,15 @@ from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QIcon,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -408,6 +416,9 @@ class MainWindow(QMainWindow):
         self._syncing = False
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
+        # Telemetry on/off: a persisted Settings-menu choice wins over the config-file default.
+        _pref = telemetry.read_gui_pref()
+        self._telemetry_enabled = self._defaults.telemetry.enabled if _pref is None else _pref
 
         self.setWindowTitle(f"Photo Tagger {__version__}")
         self.setWindowIcon(_app_icon())
@@ -435,9 +446,58 @@ class MainWindow(QMainWindow):
         status_row.addWidget(self._status, stretch=1)
         status_row.addWidget(logs_button)
         layout.addLayout(status_row)
+        self._build_menus()
         self._show_detail(enabled=False)
 
     # --- construction ----------------------------------------------------------------------
+
+    def _build_menus(self) -> None:
+        """Build the menu bar: File actions, a Settings telemetry toggle, and Help."""
+        menubar = self.menuBar()
+
+        file_menu = menubar.addMenu("File")
+        file_menu.addAction("Add Photos...", self._choose_files)
+        file_menu.addAction("Add Folder...", self._choose_folder)
+        file_menu.addSeparator()
+        file_menu.addAction("Clear List", self._clear)
+        file_menu.addSeparator()
+        quit_action = file_menu.addAction("Quit", self.close)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+
+        settings_menu = menubar.addMenu("Settings")
+        self._telemetry_action = QAction("Send Anonymous Telemetry", self)
+        self._telemetry_action.setCheckable(True)
+        self._telemetry_action.setChecked(self._telemetry_enabled)
+        self._telemetry_action.setToolTip(
+            "Anonymous usage stats (model, batch size, OS, CPU arch, timing). No photos or "
+            "personal data.",
+        )
+        self._telemetry_action.toggled.connect(self._on_telemetry_toggled)
+        settings_menu.addAction(self._telemetry_action)
+
+        help_menu = menubar.addMenu("Help")
+        help_menu.addAction("Test Connection", self._test_connection)
+        help_menu.addAction("Open Logs", self._open_logs)
+        help_menu.addSeparator()
+        about_action = help_menu.addAction("About Photo Tagger", self._show_about)
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _on_telemetry_toggled(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
+        """Persist the telemetry choice and apply it to this session right away."""
+        self._telemetry_enabled = enabled
+        telemetry.write_gui_pref(enabled=enabled)
+        self._status.setText("Anonymous telemetry on." if enabled else "Anonymous telemetry off.")
+
+    def _show_about(self) -> None:
+        """Show a small About dialog with the version and project link."""
+        QMessageBox.about(
+            self,
+            "About Photo Tagger",
+            f"<b>Photo Tagger {__version__}</b><br><br>"
+            "Describe photos and add keywords with a vision-language model.<br><br>"
+            '<a href="https://github.com/jbsilva/photo-tagger">github.com/jbsilva/photo-tagger</a>',
+        )
 
     def _build_toolbar(self) -> QVBoxLayout:
         # Two rows: connection settings on top, actions below, so neither gets cramped.
@@ -1523,16 +1583,33 @@ class MainWindow(QMainWindow):
 
     def maybe_show_telemetry_notice(self) -> None:
         """
-        Show the one-time telemetry disclosure dialog on the first run telemetry is active.
+        Show the one-time telemetry disclosure on the first run telemetry is active.
 
-        Called from :func:`launch` after the window is shown, not from ``__init__``, so the headless
-        test suite (which constructs the window directly) never triggers a modal dialog.
+        Offers to turn telemetry off right here; otherwise it stays on and can be toggled later from
+        the Settings menu. Called from :func:`launch` after the window is shown, not from
+        ``__init__``, so the headless test suite (which builds the window directly) never blocks on
+        a modal dialog.
         """
-        if not telemetry.should_send(config_enabled=self._defaults.telemetry.enabled):
+        if not telemetry.should_send(config_enabled=self._telemetry_enabled):
             return
-        notice = telemetry.first_run_notice()
-        if notice is not None:
-            QMessageBox.information(self, "Anonymous usage telemetry", notice)
+        if telemetry.first_run_notice() is None:  # already shown on an earlier run
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Anonymous usage telemetry")
+        box.setText("Photo Tagger sends anonymous usage stats to guide development.")
+        box.setInformativeText(
+            "Collected: model name, batch size, OS, CPU architecture, timing.\n"
+            "Never: photos, file paths, filenames, tags, or personal data.\n\n"
+            "You can turn this off now, or anytime from Settings > Send Anonymous Telemetry.",
+        )
+        keep = box.addButton("Keep Enabled", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Turn It Off", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep)
+        box.exec()
+        if box.clickedButton() is not keep:
+            # Unchecking fires _on_telemetry_toggled, which persists the choice.
+            self._telemetry_action.setChecked(False)
 
     def _emit_telemetry(self) -> None:
         """Fire a best-effort GUI usage beacon on close; never blocks and never raises."""
@@ -1544,7 +1621,7 @@ class MainWindow(QMainWindow):
                 batch_size=count_generated(self._items.values()),
                 duration_seconds=time.monotonic() - self._session_start,
             ),
-            enabled=self._defaults.telemetry.enabled,
+            enabled=self._telemetry_enabled,
             block=False,
         )
 
