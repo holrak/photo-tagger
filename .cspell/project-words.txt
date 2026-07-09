@@ -3,6 +3,8 @@ annotationlib
 APFS
 ARGB
 arithmatex
+arquivo
+arquivos
 autouse
 bakllava
 betterem
@@ -19,8 +21,8 @@ Consolas
 consoledonottrack
 cooldown
 CREAT
-Cyclopts
 cyclopts
+Cyclopts
 dataclass
 datas
 debugpy
@@ -35,8 +37,8 @@ downscales
 EDITMSG
 Exif
 exif
-Exiftool
 exiftool
+Exiftool
 filelock
 fontawesome
 fromarray
@@ -45,6 +47,7 @@ frontmatter
 fstrings
 ftruncate
 genai
+Gerar
 getpid
 getpixel
 gpgconf
@@ -57,8 +60,8 @@ importorskips
 imread
 inlinehilite
 internvl
-iptc
 IPTC
+iptc
 isort
 jbsilva
 LANCZOS
@@ -72,8 +75,8 @@ linecap
 linejoin
 linenums
 litellm
-llamacpp
 LLAMACPP
+llamacpp
 llava
 lmstudio
 LMSTUDIO
@@ -84,6 +87,7 @@ magiclink
 Menlo
 minicpm
 mkdocs
+mofile
 moondream
 mtimes
 mypy
@@ -92,14 +96,16 @@ noconfirm
 NOSONAR
 numprocesses
 Ollama
-ollama
 OLLAMA
+ollama
 pacman
 parentless
 pinentry
 pipx
 pixmap
 pixtral
+pofile
+Português
 prek
 primarysplit
 psutil
@@ -123,11 +129,13 @@ qtbase
 qwen
 rawpy
 RDWR
+recompiles
 relocks
 roundtrips
 scannerwork
 scriptable
 sdist
+Selecionadas
 selftest
 shiboken
 smartsymbols

@@ -29,6 +29,7 @@ from photo_tagger.gui_state import (
     apply_proposal,
     build_tree,
     chain_to_display,
+    config_text_with_language,
     config_toml_text,
     count_generated,
     deselect_paths,
@@ -49,7 +50,6 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
-    pluralize,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -575,13 +575,6 @@ def test_status_sort_rank_unknown_status_sorts_last() -> None:
     assert status_sort_rank("bogus") > status_sort_rank(FAILED)
 
 
-def test_pluralize_adds_s_past_one() -> None:
-    """Counts read naturally: singular at one, plural otherwise (including zero)."""
-    assert pluralize(1, "photo") == "1 photo"
-    assert pluralize(2, "photo") == "2 photos"
-    assert pluralize(0, "file") == "0 files"
-
-
 def test_status_summary_counts_states() -> None:
     """The summary reports total, selected, generated, saved, and failed counts."""
     items = [
@@ -595,6 +588,34 @@ def test_status_summary_counts_states() -> None:
     assert "2 generated" in summary
     assert "1 saved" in summary
     assert "1 failed" in summary
+
+
+def test_status_summary_uses_singular_for_one_file() -> None:
+    """A single photo reads '1 file', not '1 files'."""
+    assert "1 file ·" in status_summary([PhotoItem(path=Path("/a.jpg"))])
+
+
+def test_config_text_with_language_sets_and_preserves() -> None:
+    """Setting a language keeps every other line (comments included) intact."""
+    existing = '# my config\nextensions = "jpg"\n\n[provider]\nmodel_name = "m"\n'
+    result = config_text_with_language(existing, "pt_BR")
+    assert 'language = "pt_BR"' in result
+    assert "# my config" in result
+    assert 'model_name = "m"' in result
+
+
+def test_config_text_with_language_auto_removes_the_key() -> None:
+    """Choosing the system default removes the pinned key instead of writing 'auto'."""
+    existing = 'language = "pt_BR"\nextensions = "jpg"\n'
+    result = config_text_with_language(existing, "auto")
+    assert "language" not in result
+    assert 'extensions = "jpg"' in result
+
+
+def test_config_text_with_language_works_on_an_empty_file() -> None:
+    """A missing config starts from empty text and still gets the key."""
+    assert 'language = "en"' in config_text_with_language("", "en")
+    assert config_text_with_language("", "auto") == ""
 
 
 def test_count_generated_counts_only_proposed_photos() -> None:

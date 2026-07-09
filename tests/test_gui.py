@@ -1368,6 +1368,36 @@ def test_telemetry_toggle_defaults_on_and_persists(window: gui.MainWindow) -> No
     assert telemetry.read_gui_pref() is False  # the choice is persisted for next launch
 
 
+def test_language_menu_lists_system_default_and_catalogs(window: gui.MainWindow) -> None:
+    """The Settings > Language menu offers System Default plus every shipped language."""
+    labels = [action.text() for action in window._language_menu.actions()]  # noqa: SLF001
+    assert labels[0] == "System Default"
+    assert "English" in labels
+    assert "Português (Brasil)" in labels
+    # No explicit choice saved: the system-default entry starts checked.
+    assert window._language_menu.actions()[0].isChecked()  # noqa: SLF001
+
+
+def test_language_choice_persists_to_the_config_file(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Picking a language writes the config key; picking System Default removes it."""
+    target = tmp_path / "config.toml"
+    target.write_text('# keep me\nextensions = "jpg"\n', encoding="utf-8")
+    monkeypatch.setattr(gui, "find_config_file", lambda: target)
+
+    window._set_language("pt_BR")  # noqa: SLF001
+    text = target.read_text(encoding="utf-8")
+    assert 'language = "pt_BR"' in text
+    assert "# keep me" in text
+    assert "Restart" in window._status.text()  # noqa: SLF001
+
+    window._set_language("auto")  # noqa: SLF001
+    assert "language" not in target.read_text(encoding="utf-8")
+
+
 def test_telemetry_toggle_reflects_saved_off_preference(qapp: QApplication) -> None:
     """A window built after the user disabled telemetry comes up unchecked."""
     telemetry.write_gui_pref(enabled=False)

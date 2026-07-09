@@ -48,6 +48,7 @@ gui = ["pyside6>=6.11.1"]
 
 [dependency-groups]
 dev = [
+    "babel>=2.18.0",
     "bandit>=1.9.4",
     "pycroscope>=0.4.0",
     "ruff>=0.15.20",
@@ -156,6 +157,10 @@ python_executable = ".venv/bin/python"
 [tool.typos.default.extend-words]
 # PyInstaller's Analysis(...) parameter is literally named "datas"; not a typo for "data".
 datas = "datas"
+
+[tool.typos.files]
+# Translation catalogs are not English; the checker would flag every Portuguese word.
+extend-exclude = ["src/photo_tagger/locale/**"]
 
 [tool.pycroscope]
 # Directory to analyze (relative to pyproject.toml) and the import root for the src layout

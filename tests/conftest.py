@@ -20,6 +20,22 @@ os.environ["PHOTO_TAGGER_CONFIG"] = str(Path(__file__).parent / "empty-config.to
 
 
 @pytest.fixture(autouse=True)
+def _english_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Pin the UI language to English so string assertions hold on any machine.
+
+    Without this, a developer with a pt_BR locale (or PHOTO_TAGGER_LANG exported) would get
+    translated GUI strings and every label assertion in test_gui/test_gui_state would fail.
+    activate("en") installs the identity catalog; tests that exercise a real catalog call activate()
+    themselves and are reset by the next test's fixture run.
+    """
+    from photo_tagger import i18n  # noqa: PLC0415 - import here to keep conftest import light.
+
+    monkeypatch.delenv("PHOTO_TAGGER_LANG", raising=False)
+    i18n.activate("en")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_telemetry_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
     Keep telemetry hermetic: redirect its state dir to tmp and clear the opt-out env vars.

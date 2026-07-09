@@ -115,3 +115,10 @@ repos:
         language: system
         pass_filenames: false
         files: (pyproject\.toml|uv\.lock|SECURITY\.md|CHANGELOG\.md)
+
+      - id: check-translations
+        name: check compiled translations
+        entry: uv run scripts/compile_translations.py --check
+        language: system
+        pass_filenames: false
+        files: \.(po|pot|mo)$|compile_translations\.py$

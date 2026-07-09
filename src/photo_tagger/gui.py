@@ -26,9 +26,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
-from PySide6.QtCore import QObject, QRect, QSize, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import (
+    QLibraryInfo,
+    QLocale,
+    QObject,
+    QRect,
+    QSize,
+    Qt,
+    QThread,
+    QTranslator,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QBrush,
     QColor,
     QDesktopServices,
@@ -73,7 +85,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from photo_tagger import __version__, telemetry
+from photo_tagger import __version__, i18n, telemetry
 from photo_tagger.ai import analyze_image_with_ai, create_agent
 from photo_tagger.cache import (
     InferenceCache,
@@ -116,6 +128,7 @@ from photo_tagger.gui_state import (
     Proposal,
     apply_proposal,
     build_tree,
+    config_text_with_language,
     config_toml_text,
     count_generated,
     deselect_paths,
@@ -134,7 +147,6 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
-    pluralize,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -143,6 +155,7 @@ from photo_tagger.gui_state import (
     tagged_summary,
     thumb_badges,
 )
+from photo_tagger.i18n import _, gettext_noop, ngettext
 from photo_tagger.image_io import prepare_image_for_agent
 from photo_tagger.logging_setup import setup_logging
 from photo_tagger.metadata import (
@@ -196,27 +209,29 @@ _PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" pla
 _PAGE_DETAIL = 1  # right-pane stack index for one photo's detail
 _PAGE_GRID = 2  # right-pane stack index for a folder's thumbnail grid
 _DIR_MARK = "dir"  # truthy sentinel stored on folder tree items; files leave the role unset
-_NONE = "(none)"  # placeholder shown when a photo has no existing title/description/keywords
+# Placeholder shown when a photo has no existing title/description/keywords. Module-level strings
+# use gettext_noop (extraction marker); their use sites translate with _() at display time.
+_NONE = gettext_noop("(none)")
 
 # Right-pane placeholder copy. It adapts to the list: a getting-started nudge while empty, and a
 # "pick a photo" nudge once photos are loaded but none is open. This is what fills the right pane
 # when there is nothing to inspect, instead of an empty (and confusing) detail form.
-_EMPTY_START = (
+_EMPTY_START = gettext_noop(
     "Add photos to get started.\n\n"
-    "Drag photos or folders onto the window, or use the Add Photos button."
+    "Drag photos or folders onto the window, or use the Add Photos button.",
 )
-_EMPTY_PICK = (
+_EMPTY_PICK = gettext_noop(
     "Select a photo to review it.\n\n"
-    "Generate proposes a title, description, and keywords you can edit before saving."
+    "Generate proposes a title, description, and keywords you can edit before saving.",
 )
 
 # Short status word shown in the tree's second column.
 _STATUS_LABEL = {
     PENDING: "",
-    WORKING: "working...",
-    READY: "ready",
-    SAVED: "saved ✓",
-    FAILED: "failed ✗",
+    WORKING: gettext_noop("working..."),
+    READY: gettext_noop("ready"),
+    SAVED: gettext_noop("saved ✓"),
+    FAILED: gettext_noop("failed ✗"),
 }
 
 # The field-aware "deselect already-tagged" menu, mirroring the CLI's --skip-tagged but letting
@@ -226,20 +241,25 @@ _STATUS_LABEL = {
 # a description" and stays selected for title/description generation.
 _TAGGED_PRESETS: tuple[tuple[str, frozenset[str], bool, str], ...] = (
     (
-        "Has any metadata",
+        gettext_noop("Has any metadata"),
         frozenset({FIELD_TITLE, FIELD_DESCRIPTION, FIELD_KEYWORDS}),
         False,
-        "any metadata",
+        gettext_noop("any metadata"),
     ),
-    ("Has a title", frozenset({FIELD_TITLE}), True, "a title"),
-    ("Has a description", frozenset({FIELD_DESCRIPTION}), True, "a description"),
+    (gettext_noop("Has a title"), frozenset({FIELD_TITLE}), True, gettext_noop("a title")),
     (
-        "Has a title and a description",
+        gettext_noop("Has a description"),
+        frozenset({FIELD_DESCRIPTION}),
+        True,
+        gettext_noop("a description"),
+    ),
+    (
+        gettext_noop("Has a title and a description"),
         frozenset({FIELD_TITLE, FIELD_DESCRIPTION}),
         True,
-        "a title and a description",
+        gettext_noop("a title and a description"),
     ),
-    ("Has keywords", frozenset({FIELD_KEYWORDS}), True, "keywords"),
+    (gettext_noop("Has keywords"), frozenset({FIELD_KEYWORDS}), True, gettext_noop("keywords")),
 )
 
 # Theme-agnostic polish: only spacing/rounding plus the brand accent on primary actions and
@@ -644,6 +664,9 @@ class MainWindow(QMainWindow):
         self._syncing = False
         self._grid_check_toggled = False
         self._closing = False
+        # The persisted UI language choice; "auto" means follow the OS locale. Changing it in the
+        # Settings menu rewrites this key and takes effect on the next launch.
+        self._language = str(self._raw_config.get("language", i18n.AUTO))
         self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
@@ -684,75 +707,119 @@ class MainWindow(QMainWindow):
 
         # Kept on self: QAction.menu() hands out a transient wrapper that shiboken may delete,
         # so tests (and future code) need a stable reference to the menu itself.
-        file_menu = self._file_menu = menubar.addMenu("File")
-        file_menu.addAction("Add Photos...", self._choose_files)
-        file_menu.addAction("Add Folder...", self._choose_folder)
+        file_menu = self._file_menu = menubar.addMenu(_("File"))
+        file_menu.addAction(_("Add Photos..."), self._choose_files)
+        file_menu.addAction(_("Add Folder..."), self._choose_folder)
         file_menu.addSeparator()
-        export_action = file_menu.addAction("Export CSV Report...", self._export_csv)
+        export_action = file_menu.addAction(_("Export CSV Report..."), self._export_csv)
         export_action.setToolTip(
-            "Save a CSV report of every photo: generated and existing metadata, EXIF, and "
-            "token usage.",
+            _(
+                "Save a CSV report of every photo: generated and existing metadata, EXIF, and "
+                "token usage.",
+            ),
         )
         file_menu.addSeparator()
-        file_menu.addAction("Clear List", self._clear)
+        file_menu.addAction(_("Clear List"), self._clear)
         file_menu.addSeparator()
-        quit_action = file_menu.addAction("Quit", self.close)
+        quit_action = file_menu.addAction(_("Quit"), self.close)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
 
-        settings_menu = menubar.addMenu("Settings")
+        settings_menu = menubar.addMenu(_("Settings"))
         settings_menu.setToolTipsVisible(True)
-        self._cache_action = QAction("Cache AI Results", self)
+        self._cache_action = QAction(_("Cache AI Results"), self)
         self._cache_action.setCheckable(True)
         self._cache_action.setChecked(True)
         self._cache_action.setToolTip(
-            f"Reuse earlier results for unchanged photos ({self._cache_file}). Uncheck to call "
-            "the model again for everything; a single photo can skip the cache from its "
-            "right-click menu.",
+            _(
+                "Reuse earlier results for unchanged photos ({cache_file}). Uncheck to call "
+                "the model again for everything; a single photo can skip the cache from its "
+                "right-click menu.",
+            ).format(cache_file=self._cache_file),
         )
         settings_menu.addAction(self._cache_action)
-        self._telemetry_action = QAction("Send Anonymous Telemetry", self)
+        self._telemetry_action = QAction(_("Send Anonymous Telemetry"), self)
         self._telemetry_action.setCheckable(True)
         self._telemetry_action.setChecked(self._telemetry_enabled)
         self._telemetry_action.setToolTip(
-            "Anonymous usage stats (model, batch size, OS, CPU arch, timing). No photos or "
-            "personal data.",
+            _(
+                "Anonymous usage stats (model, batch size, OS, CPU arch, timing). No photos or "
+                "personal data.",
+            ),
         )
         self._telemetry_action.toggled.connect(self._on_telemetry_toggled)
         settings_menu.addAction(self._telemetry_action)
         settings_menu.addSeparator()
+        self._build_language_menu(settings_menu)
+        settings_menu.addSeparator()
         save_defaults = settings_menu.addAction(
-            "Save Settings as Defaults...",
+            _("Save Settings as Defaults..."),
             self._save_config,
         )
         save_defaults.setToolTip(
-            "Update the config file with the current provider, model, URL, file types, and save "
-            "options. Other settings and comments in the file are preserved; the API key is "
-            "never written.",
+            _(
+                "Update the config file with the current provider, model, URL, file types, and "
+                "save options. Other settings and comments in the file are preserved; the API "
+                "key is never written.",
+            ),
         )
-        edit_config = settings_menu.addAction("Edit Config File...", self._edit_config)
+        edit_config = settings_menu.addAction(_("Edit Config File..."), self._edit_config)
         edit_config.setToolTip(
-            "Open the config file in your default editor for the settings the GUI does not "
-            "surface (prompt file, sampling, workers, filters, ...). Created if missing.",
+            _(
+                "Open the config file in your default editor for the settings the GUI does not "
+                "surface (prompt file, sampling, workers, filters, ...). Created if missing.",
+            ),
         )
 
-        help_menu = self._help_menu = menubar.addMenu("Help")
+        help_menu = self._help_menu = menubar.addMenu(_("Help"))
         help_menu.addAction(
-            "Documentation",
+            _("Documentation"),
             lambda: QDesktopServices.openUrl(QUrl(_DOCS_URL)),
         )
         help_menu.addSeparator()
-        help_menu.addAction("Test Connection", self._test_connection)
-        help_menu.addAction("Open Logs", self._open_logs)
+        help_menu.addAction(_("Test Connection"), self._test_connection)
+        help_menu.addAction(_("Open Logs"), self._open_logs)
         help_menu.addSeparator()
-        about_action = help_menu.addAction("About Photo Tagger", self._show_about)
+        about_action = help_menu.addAction(_("About Photo Tagger"), self._show_about)
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _build_language_menu(self, settings_menu: QMenu) -> None:
+        """Add the Language submenu: System Default plus every shipped catalog."""
+        self._language_menu = settings_menu.addMenu(_("Language"))
+        self._language_group = QActionGroup(self)
+        entries = [(i18n.AUTO, _("System Default")), *i18n.SUPPORTED_LANGUAGES.items()]
+        for code, label in entries:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(code == self._language)
+            action.triggered.connect(
+                lambda _checked=False, chosen=code: self._set_language(chosen),
+            )
+            self._language_group.addAction(action)
+            self._language_menu.addAction(action)
+
+    def _set_language(self, code: str) -> None:
+        """Persist the UI language choice into the config file; applied on the next launch."""
+        if code == self._language:
+            return
+        self._language = code
+        target = self._config_target()
+        try:
+            existing = target.read_text(encoding="utf-8") if target.exists() else ""
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(config_text_with_language(existing, code), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
+            return
+        self._status.setText(_("Language saved. Restart Photo Tagger to apply it."))
 
     def _on_telemetry_toggled(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
         """Persist the telemetry choice and apply it to this session right away."""
         self._telemetry_enabled = enabled
         telemetry.write_gui_pref(enabled=enabled)
-        self._status.setText("Anonymous telemetry on." if enabled else "Anonymous telemetry off.")
+        self._status.setText(
+            _("Anonymous telemetry on.") if enabled else _("Anonymous telemetry off."),
+        )
 
     def _active_cache_file(self) -> Path | None:
         """Return the cache file generation should use, or None when caching is toggled off."""
@@ -790,16 +857,16 @@ class MainWindow(QMainWindow):
         try:
             if target.exists():
                 text = merged_config_text(target.read_text(encoding="utf-8"), values)
-                note = f"Updated {target} (other settings and comments preserved)."
+                note = _("Updated {target} (other settings and comments preserved).")
             else:
                 text = config_toml_text(values)
-                note = f"Saved defaults to {target}."
+                note = _("Saved defaults to {target}.")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
         except OSError as exc:
-            QMessageBox.warning(self, "Could not save the config file", str(exc))
+            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
             return
-        self._status.setText(note)
+        self._status.setText(note.format(target=target))
 
     def _edit_config(self) -> None:
         """Open the config file in the user's editor, creating it first if it does not exist."""
@@ -813,9 +880,10 @@ class MainWindow(QMainWindow):
         """Show a small About dialog with the version and project link."""
         QMessageBox.about(
             self,
-            "About Photo Tagger",
+            _("About Photo Tagger"),
             f"<b>Photo Tagger {__version__}</b><br><br>"
-            "Describe photos and add keywords with a vision-language model.<br><br>"
+            + _("Describe photos and add keywords with a vision-language model.")
+            + "<br><br>"
             '<a href="https://github.com/jbsilva/photo-tagger">github.com/jbsilva/photo-tagger</a>',
         )
 
@@ -830,28 +898,28 @@ class MainWindow(QMainWindow):
         # Size to the widest label so "LM Studio" is not clipped.
         self._provider.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._provider.setMinimumContentsLength(10)
-        self._provider.setToolTip("Backend that serves the vision-language model.")
+        self._provider.setToolTip(_("Backend that serves the vision-language model."))
 
         self._model = QComboBox()
         self._model.setEditable(True)
         self._model.setMinimumWidth(260)
         self._model.setCurrentText(provider.model_name)
         self._model.setToolTip(
-            "Model identifier. Type it, or press Refresh to list what the provider serves.",
+            _("Model identifier. Type it, or press Refresh to list what the provider serves."),
         )
-        refresh = QPushButton("Refresh")
-        refresh.setToolTip("Query the provider for the models it currently serves.")
+        refresh = QPushButton(_("Refresh"))
+        refresh.setToolTip(_("Query the provider for the models it currently serves."))
         refresh.clicked.connect(self._refresh_models)
 
         self._connection_dialog = self._build_connection_dialog()
-        connection = QPushButton("Connection...")
-        connection.setToolTip("Server URL, API key, and a connection test.")
+        connection = QPushButton(_("Connection..."))
+        connection.setToolTip(_("Server URL, API key, and a connection test."))
         connection.clicked.connect(self._connection_dialog.exec)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Provider"))
+        row.addWidget(QLabel(_("Provider")))
         row.addWidget(self._provider)
-        row.addWidget(QLabel("Model"))
+        row.addWidget(QLabel(_("Model")))
         row.addWidget(self._model, stretch=1)
         row.addWidget(refresh)
         row.addWidget(connection)
@@ -861,7 +929,7 @@ class MainWindow(QMainWindow):
         """URL, API key, and the connection test: set-once settings, out of the main window."""
         provider = self._defaults.provider
         dialog = QDialog(self)
-        dialog.setWindowTitle("Connection settings")
+        dialog.setWindowTitle(_("Connection settings"))
         dialog.setMinimumWidth(520)
         form = QFormLayout(dialog)
         # macOS style defaults to fixed-size fields; let them fill the dialog width instead.
@@ -869,9 +937,9 @@ class MainWindow(QMainWindow):
 
         self._url = QLineEdit(provider.api_base_url or "")
         self._url.setMinimumWidth(380)
-        self._url.setPlaceholderText("(provider default URL)")
-        self._url.setToolTip("Provider API base URL. Leave blank to use the provider's default.")
-        form.addRow("Base URL", self._url)
+        self._url.setPlaceholderText(_("(provider default URL)"))
+        self._url.setToolTip(_("Provider API base URL. Leave blank to use the provider's default."))
+        form.addRow(_("Base URL"), self._url)
 
         # Pre-filled from a config-file key if one is set, never from an environment variable: an
         # env key stays in the environment and is resolved at call time, so it never lands in the
@@ -880,18 +948,21 @@ class MainWindow(QMainWindow):
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._api_key.setClearButtonEnabled(True)
         self._api_key.setMinimumWidth(380)
-        self._api_key.setPlaceholderText("(uses provider env var)")
+        self._api_key.setPlaceholderText(_("(uses provider env var)"))
         self._api_key.setToolTip(
-            "API key for the provider. Leave blank to use the provider's environment variable "
-            "(OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or OLLAMA_API_KEY). Required "
-            "for OpenAI. A typed key is used for this session only and is never written to disk.",
+            _(
+                "API key for the provider. Leave blank to use the provider's environment variable "
+                "(OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or OLLAMA_API_KEY). "
+                "Required for OpenAI. A typed key is used for this session only and is never "
+                "written to disk.",
+            ),
         )
-        form.addRow("API key", self._api_key)
+        form.addRow(_("API key"), self._api_key)
 
-        self._test_button = QPushButton("Test Connection")
-        self._test_button.setToolTip("Check ExifTool and that the provider serves the model.")
+        self._test_button = QPushButton(_("Test Connection"))
+        self._test_button.setToolTip(_("Check ExifTool and that the provider serves the model."))
         self._test_button.clicked.connect(self._test_connection)
-        close = QPushButton("Close")
+        close = QPushButton(_("Close"))
         close.setDefault(True)
         close.clicked.connect(dialog.accept)
         buttons = QHBoxLayout()
@@ -907,7 +978,7 @@ class MainWindow(QMainWindow):
         box.addLayout(self._build_tree_controls())
 
         self._tree = QTreeWidget()
-        self._tree.setHeaderLabels(["Photos", "Type", "Status", "Tagged"])
+        self._tree.setHeaderLabels([_("Photos"), _("Type"), _("Status"), _("Tagged")])
         # Extended: shift+click selects a range, Cmd/Ctrl+click adds single rows, and
         # shift+arrows grow the selection from the keyboard.
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -925,8 +996,11 @@ class MainWindow(QMainWindow):
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(_COL_NAME, Qt.SortOrder.AscendingOrder)
         header.setToolTip(
-            "Click a column header to sort. Type: file extension, +xmp when a sidecar exists.\n"
-            "Tagged: metadata already on the file (T title, D description, K keywords).",
+            _(
+                "Click a column header to sort. Type: file extension, +xmp when a sidecar "
+                "exists.\nTagged: metadata already on the file (T title, D description, K "
+                "keywords).",
+            ),
         )
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_tree_context_menu)
@@ -938,7 +1012,7 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(self._remove_selected)
         box.addWidget(self._tree, stretch=1)
 
-        hint = QLabel("Drag photos or folders here. Select one and press Delete to remove it.")
+        hint = QLabel(_("Drag photos or folders here. Select one and press Delete to remove it."))
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         box.addWidget(hint)
@@ -952,10 +1026,12 @@ class MainWindow(QMainWindow):
         # the closest single-control equivalent (drag-and-drop takes both anyway).
         add = QToolButton()
         add.setObjectName("add")
-        add.setText("Add Photos...")
+        add.setText(_("Add Photos..."))
         add.setToolTip(
-            "Add photos (click), or open the arrow for adding a whole folder and for the "
-            "folder-scan options. Dragging files or folders onto the window also works.",
+            _(
+                "Add photos (click), or open the arrow for adding a whole folder and for the "
+                "folder-scan options. Dragging files or folders onto the window also works.",
+            ),
         )
         add.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         add.clicked.connect(self._choose_files)
@@ -963,14 +1039,14 @@ class MainWindow(QMainWindow):
         controls.addWidget(add)
         controls.addStretch(1)
 
-        select = QPushButton("Select")
+        select = QPushButton(_("Select"))
         select.setObjectName("menubutton")
-        select.setToolTip("Check or uncheck photos in bulk.")
+        select.setToolTip(_("Check or uncheck photos in bulk."))
         select.setMenu(self._build_select_menu())
         controls.addWidget(select)
 
-        remove = QPushButton("Remove")
-        remove.setToolTip("Remove the selected folder or photo from the list (or press Delete).")
+        remove = QPushButton(_("Remove"))
+        remove.setToolTip(_("Remove the selected folder or photo from the list (or press Delete)."))
         remove.clicked.connect(self._remove_selected)
         controls.addWidget(remove)
         return controls
@@ -978,20 +1054,22 @@ class MainWindow(QMainWindow):
     def _build_add_menu(self) -> QMenu:
         """Build the Add button's arrow menu: the folder dialog plus the folder-scan settings."""
         menu = QMenu(self)
-        menu.addAction("Add Folder...", self._choose_folder)
+        menu.addAction(_("Add Folder..."), self._choose_folder)
         menu.addSeparator()
         panel = QWidget()
         form = QFormLayout(panel)
         self._extensions = QLineEdit(self._raw_config.get("extensions", DEFAULT_GUI_EXTENSIONS))
         self._extensions.setMinimumWidth(280)
         self._extensions.setToolTip(
-            "Extensions to scan for in folders (comma-separated).\n"
-            "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg.",
+            _(
+                "Extensions to scan for in folders (comma-separated).\n"
+                "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg.",
+            ),
         )
-        form.addRow("File types", self._extensions)
-        self._recursive = QCheckBox("Include subfolders")
+        form.addRow(_("File types"), self._extensions)
+        self._recursive = QCheckBox(_("Include subfolders"))
         self._recursive.setChecked(bool(self._raw_config.get("recursive", True)))
-        self._recursive.setToolTip("Descend into subfolders when adding a folder.")
+        self._recursive.setToolTip(_("Descend into subfolders when adding a folder."))
         form.addRow("", self._recursive)
         host = QWidgetAction(menu)
         host.setDefaultWidget(panel)
@@ -1001,19 +1079,21 @@ class MainWindow(QMainWindow):
     def _build_select_menu(self) -> QMenu:
         """Bulk check/uncheck actions, including the CLI's --skip-tagged/--skip-from mirrors."""
         menu = self._select_menu = QMenu(self)
-        menu.addAction("Check All", lambda: self._set_all_checked(checked=True))
-        menu.addAction("Uncheck All", lambda: self._set_all_checked(checked=False))
-        menu.addAction("Invert Checked", self._invert_checked)
+        menu.addAction(_("Check All"), lambda: self._set_all_checked(checked=True))
+        menu.addAction(_("Uncheck All"), lambda: self._set_all_checked(checked=False))
+        menu.addAction(_("Invert Checked"), self._invert_checked)
         menu.addSeparator()
 
-        self._tagged_menu = menu.addMenu("Uncheck Already Tagged")
+        self._tagged_menu = menu.addMenu(_("Uncheck Already Tagged"))
         self._tagged_menu.setToolTip(
-            "Uncheck photos that already have the chosen metadata (in the image or its XMP "
-            "sidecar), e.g. 'a title and a description' to skip those while keeping "
-            "keyword-only photos. Mirrors the CLI's --skip-tagged.",
+            _(
+                "Uncheck photos that already have the chosen metadata (in the image or its XMP "
+                "sidecar), e.g. 'a title and a description' to skip those while keeping "
+                "keyword-only photos. Mirrors the CLI's --skip-tagged.",
+            ),
         )
         for text, required, match_all, phrase in _TAGGED_PRESETS:
-            action = self._tagged_menu.addAction(text)
+            action = self._tagged_menu.addAction(_(text))
             action.triggered.connect(
                 lambda _checked=False, req=required, all_=match_all, ph=phrase: (
                     self._deselect_tagged(
@@ -1024,17 +1104,19 @@ class MainWindow(QMainWindow):
                 ),
             )
 
-        from_file = menu.addAction("Uncheck From Skip List...", self._deselect_from_file)
+        from_file = menu.addAction(_("Uncheck From Skip List..."), self._deselect_from_file)
         from_file.setToolTip(
-            "Uncheck photos whose filename or full path is listed in a text file (one per "
-            "line), like the CLI's --skip-from.",
+            _(
+                "Uncheck photos whose filename or full path is listed in a text file (one per "
+                "line), like the CLI's --skip-from.",
+            ),
         )
         return menu
 
     def _set_all_checked(self, *, checked: bool) -> None:
         """Check or uncheck every photo at once."""
         if not self._items:
-            self._status.setText("Add photos before selecting.")
+            self._status.setText(_("Add photos before selecting."))
             return
         for item in self._items.values():
             item.selected = checked
@@ -1044,7 +1126,7 @@ class MainWindow(QMainWindow):
     def _invert_checked(self) -> None:
         """Flip every photo's checkbox: checked becomes unchecked and vice versa."""
         if not self._items:
-            self._status.setText("Add photos before selecting.")
+            self._status.setText(_("Add photos before selecting."))
             return
         for item in self._items.values():
             item.selected = not item.selected
@@ -1075,19 +1157,19 @@ class MainWindow(QMainWindow):
         menu = QMenu(self._tree)
         item = self._items.get(path)
         if not bool(tree_item.data(0, _IS_DIR_ROLE)) and item is not None:
-            label = "Retry Generation" if item.status == FAILED else "Generate"
+            label = _("Retry Generation") if item.status == FAILED else _("Generate")
             generate = menu.addAction(label, lambda: self._run_generation([item]))
             generate.setEnabled(self._thread is None)
             fresh = menu.addAction(
-                "Generate (Skip Cache)",
+                _("Generate (Skip Cache)"),
                 lambda: self._run_generation([item], use_cache=False),
             )
-            fresh.setToolTip("Call the model even when a cached result exists for this photo.")
+            fresh.setToolTip(_("Call the model even when a cached result exists for this photo."))
             fresh.setEnabled(self._thread is None)
             menu.addSeparator()
         menu.addAction(reveal_label(sys.platform), lambda: self._reveal(Path(path)))
         menu.addSeparator()
-        remove = menu.addAction("Remove From List")
+        remove = menu.addAction(_("Remove From List"))
         remove.triggered.connect(
             lambda: (self._tree.setCurrentItem(tree_item), self._remove_selected()),
         )
@@ -1107,32 +1189,39 @@ class MainWindow(QMainWindow):
     def _build_bulk_context_menu(self, items: list[PhotoItem]) -> QMenu:
         """Build the context menu shown when several photos are selected at once."""
         menu = QMenu(self)
-        count = pluralize(len(items), "Photo")
+        n = len(items)
         menu.addAction(
-            f"Check {count}",
+            ngettext("Check {n} Photo", "Check {n} Photos", n).format(n=n),
             lambda: self._set_items_checked(items, checked=True),
         )
         menu.addAction(
-            f"Uncheck {count}",
+            ngettext("Uncheck {n} Photo", "Uncheck {n} Photos", n).format(n=n),
             lambda: self._set_items_checked(items, checked=False),
         )
         only = menu.addAction(
-            f"Check Only {count}",
+            ngettext("Check Only {n} Photo", "Check Only {n} Photos", n).format(n=n),
             lambda: self._check_only_items(items),
         )
-        only.setToolTip("Check the selected photos and uncheck every other photo in the list.")
+        only.setToolTip(_("Check the selected photos and uncheck every other photo in the list."))
         menu.addSeparator()
-        generate = menu.addAction(f"Generate {count}", lambda: self._run_generation(items))
+        generate = menu.addAction(
+            ngettext("Generate {n} Photo", "Generate {n} Photos", n).format(n=n),
+            lambda: self._run_generation(items),
+        )
         generate.setEnabled(self._thread is None)
         fresh = menu.addAction(
-            f"Generate {count} (Skip Cache)",
+            ngettext(
+                "Generate {n} Photo (Skip Cache)",
+                "Generate {n} Photos (Skip Cache)",
+                n,
+            ).format(n=n),
             lambda: self._run_generation(items, use_cache=False),
         )
-        fresh.setToolTip("One-time: call the model even for photos with cached results.")
+        fresh.setToolTip(_("One-time: call the model even for photos with cached results."))
         fresh.setEnabled(self._thread is None)
         menu.addSeparator()
         menu.addAction(
-            "Remove From List",
+            _("Remove From List"),
             lambda: self._remove_items([str(item.path) for item in items]),
         )
         return menu
@@ -1276,7 +1365,7 @@ class MainWindow(QMainWindow):
         if not pixmap.isNull():
             icon.setPixmap(pixmap)
         box.addWidget(icon)
-        self._empty_message = QLabel(_EMPTY_START)
+        self._empty_message = QLabel(_(_EMPTY_START))
         self._empty_message.setObjectName("empty")
         self._empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_message.setWordWrap(True)
@@ -1314,7 +1403,7 @@ class MainWindow(QMainWindow):
         self._error_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._error_banner.hide()
         box.addWidget(self._error_banner)
-        self._preview = QLabel("Select a photo to preview it.")
+        self._preview = QLabel(_("Select a photo to preview it."))
         self._preview.setObjectName("preview")
         self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview.setMinimumHeight(240)
@@ -1341,47 +1430,52 @@ class MainWindow(QMainWindow):
         # The metadata source rides along in the Existing header (it has no "New" counterpart,
         # so a full grid row of its own broke the columns' symmetry).
         existing_header = QHBoxLayout()
-        existing_header.addWidget(self._section_label("Existing"))
+        existing_header.addWidget(self._section_label(_("Existing")))
         self._existing_source = QLabel("")
         self._existing_source.setObjectName("hint")
         self._existing_source.setToolTip(
-            "Where the existing metadata was read from: the image file, an XMP sidecar, or both.",
+            _(
+                "Where the existing metadata was read from: the image file, an XMP sidecar, "
+                "or both.",
+            ),
         )
         existing_header.addWidget(self._existing_source)
         existing_header.addStretch(1)
         grid.addLayout(existing_header, 0, 1)
-        grid.addWidget(self._section_label("New (editable)"), 0, 2)
+        grid.addWidget(self._section_label(_("New (editable)")), 0, 2)
 
         self._existing_title = QLineEdit()
         self._existing_title.setReadOnly(True)
         self._title = QLineEdit()
-        self._title.setToolTip("The title to write. Edit freely before saving.")
-        grid.addWidget(QLabel("Title"), 1, 0)
+        self._title.setToolTip(_("The title to write. Edit freely before saving."))
+        grid.addWidget(QLabel(_("Title")), 1, 0)
         grid.addWidget(self._existing_title, 1, 1)
         grid.addWidget(self._title, 1, 2)
 
         top = Qt.AlignmentFlag.AlignTop
         self._existing_description = _readonly_box(44)
         self._description = QPlainTextEdit()
-        self._description.setToolTip("The description to write.")
+        self._description.setToolTip(_("The description to write."))
         # Descriptions are usually a sentence or two; grow the boxes with the text instead of
         # reserving a fixed block of the pane (textChanged also fires on programmatic fills).
         self._description.textChanged.connect(lambda: _fit_text_height(self._description))
         _fit_text_height(self._description)
-        grid.addWidget(QLabel("Description"), 2, 0, top)
+        grid.addWidget(QLabel(_("Description")), 2, 0, top)
         grid.addWidget(self._existing_description, 2, 1)
         grid.addWidget(self._description, 2, 2)
 
         self._existing_keywords = _readonly_box(150)
         self._keywords = QPlainTextEdit()
         self._keywords.setMinimumHeight(150)
-        self._keywords.setPlaceholderText("One per line. Use < for hierarchy (Duck<Bird<Animal)")
+        self._keywords.setPlaceholderText(_("One per line. Use < for hierarchy (Duck<Bird<Animal)"))
         self._keywords.setToolTip(
-            "Keywords to write, one per line. Use '<' for a hierarchy "
-            "(e.g. 'Duck<Bird<Animal'); the changes and resulting paths show below.",
+            _(
+                "Keywords to write, one per line. Use '<' for a hierarchy "
+                "(e.g. 'Duck<Bird<Animal'); the changes and resulting paths show below.",
+            ),
         )
         self._keywords.textChanged.connect(self._refresh_derived)
-        grid.addWidget(QLabel("Keywords"), 3, 0, top)
+        grid.addWidget(QLabel(_("Keywords")), 3, 0, top)
         grid.addWidget(self._existing_keywords, 3, 1)
         grid.addWidget(self._keywords, 3, 2)
         return grid
@@ -1390,13 +1484,15 @@ class MainWindow(QMainWindow):
         """Collapsible keyword-change details: the diff and the resulting hierarchy paths."""
         box = QVBoxLayout()
         self._details_toggle = QToolButton()
-        self._details_toggle.setText("Keyword changes")
+        self._details_toggle.setText(_("Keyword changes"))
         self._details_toggle.setCheckable(True)
         self._details_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self._details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._details_toggle.setToolTip(
-            "Show exactly what saving will change: added and removed keywords, plus the "
-            "resulting keyword tree.",
+            _(
+                "Show exactly what saving will change: added and removed keywords, plus the "
+                "resulting keyword tree.",
+            ),
         )
         self._details_toggle.toggled.connect(self._on_details_toggled)
         box.addWidget(self._details_toggle)
@@ -1408,14 +1504,14 @@ class MainWindow(QMainWindow):
         self._diff = QTextEdit()
         self._diff.setReadOnly(True)
         self._diff.setMinimumHeight(90)
-        self._diff.setToolTip("Keyword changes a save will make: green added, red removed.")
+        self._diff.setToolTip(_("Keyword changes a save will make: green added, red removed."))
         self._hierarchy = _readonly_box(60)
         self._hierarchy.setObjectName("tree")  # monospace, so the branch guides line up
         self._hierarchy.setToolTip(
-            "The keyword tree that saving will write (stored as Lightroom hierarchy paths).",
+            _("The keyword tree that saving will write (stored as Lightroom hierarchy paths)."),
         )
-        form.addRow("Changes", self._diff)
-        form.addRow("Tree", self._hierarchy)
+        form.addRow(_("Changes"), self._diff)
+        form.addRow(_("Tree"), self._hierarchy)
         self._details_panel.hide()
         box.addWidget(self._details_panel)
         return box
@@ -1430,16 +1526,20 @@ class MainWindow(QMainWindow):
         """Build the menu deciding what a save writes: field toggles, merge mode, sidecar."""
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
-        self._write_title = QAction("Write Title", self)
-        self._write_title.setToolTip("Write the title. Uncheck to leave the existing title as is.")
-        self._write_description = QAction("Write Description", self)
-        self._write_description.setToolTip(
-            "Write the description. Uncheck to leave the existing description as is.",
+        self._write_title = QAction(_("Write Title"), self)
+        self._write_title.setToolTip(
+            _("Write the title. Uncheck to leave the existing title as is."),
         )
-        self._write_keywords = QAction("Write Keywords", self)
+        self._write_description = QAction(_("Write Description"), self)
+        self._write_description.setToolTip(
+            _("Write the description. Uncheck to leave the existing description as is."),
+        )
+        self._write_keywords = QAction(_("Write Keywords"), self)
         self._write_keywords.setToolTip(
-            "Write keywords. Uncheck to leave existing keywords untouched, e.g. to refresh only "
-            "the title and description.",
+            _(
+                "Write keywords. Uncheck to leave existing keywords untouched, e.g. to refresh "
+                "only the title and description.",
+            ),
         )
         # Defaults come from the config file, so choices saved via Settings > Save Settings as
         # Defaults come back on the next launch.
@@ -1457,13 +1557,13 @@ class MainWindow(QMainWindow):
         self._write_keywords.toggled.connect(self._on_write_keywords_toggled)
         menu.addSeparator()
 
-        self._overwrite = QAction("Overwrite Existing Keywords", self)
+        self._overwrite = QAction(_("Overwrite Existing Keywords"), self)
         self._overwrite.setToolTip(
-            "Replace existing keywords instead of merging the new ones in.",
+            _("Replace existing keywords instead of merging the new ones in."),
         )
         self._overwrite.toggled.connect(self._refresh_derived)
-        self._embed = QAction("Embed in Photo", self)
-        self._embed.setToolTip("Write into the image file instead of an XMP sidecar.")
+        self._embed = QAction(_("Embed in Photo"), self)
+        self._embed.setToolTip(_("Write into the image file instead of an XMP sidecar."))
         for action, checked in (
             (self._overwrite, not output.preserve_keywords),
             (self._embed, not output.use_sidecar),
@@ -1490,31 +1590,37 @@ class MainWindow(QMainWindow):
         fields = [
             name
             for action, name in (
-                (self._write_title, "title"),
-                (self._write_description, "description"),
-                (self._write_keywords, "keywords"),
+                (self._write_title, _("title")),
+                (self._write_description, _("description")),
+                (self._write_keywords, _("keywords")),
             )
             if action.isChecked()
         ]
-        parts = [", ".join(fields) if fields else "nothing (pick a field in the arrow menu)"]
+        parts = [", ".join(fields) if fields else _("nothing (pick a field in the arrow menu)")]
         if self._write_keywords.isChecked():
             parts.append(
-                "overwriting existing keywords"
+                _("overwriting existing keywords")
                 if self._overwrite.isChecked()
-                else "merging with existing keywords",
+                else _("merging with existing keywords"),
             )
-        parts.append("into the image file" if self._embed.isChecked() else "to an XMP sidecar")
+        parts.append(
+            _("into the image file") if self._embed.isChecked() else _("to an XMP sidecar"),
+        )
         return ", ".join(parts)
 
     def _refresh_save_tooltips(self) -> None:
         """Keep both Save buttons' tooltips describing the currently chosen options."""
-        summary = f"Currently writes {self._save_options_summary()}."
+        summary = _("Currently writes {options}.").format(options=self._save_options_summary())
         self._save_button.setToolTip(
-            f"Write this photo. {summary} Change what is written with the arrow.",
+            _("Write this photo. {summary} Change what is written with the arrow.").format(
+                summary=summary,
+            ),
         )
         self._save_selected_button.setToolTip(
-            f"Write the checked photos that have a generated proposal. {summary} "
-            "Change what is written with the arrow.",
+            _(
+                "Write the checked photos that have a generated proposal. {summary} "
+                "Change what is written with the arrow.",
+            ).format(summary=summary),
         )
 
     def _build_save_row(self) -> QHBoxLayout:
@@ -1523,9 +1629,9 @@ class MainWindow(QMainWindow):
         row.addStretch(1)
         self._generate_one_button = QToolButton()
         self._generate_one_button.setObjectName("split")
-        self._generate_one_button.setText("Generate This Photo")
+        self._generate_one_button.setText(_("Generate This Photo"))
         self._generate_one_button.setToolTip(
-            "Run the model on just this photo, regardless of which photos are checked.",
+            _("Run the model on just this photo, regardless of which photos are checked."),
         )
         self._generate_one_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._generate_one_button.clicked.connect(
@@ -1534,16 +1640,16 @@ class MainWindow(QMainWindow):
         self._generate_one_menu = QMenu(self)
         self._generate_one_menu.setToolTipsVisible(True)
         skip_one = self._generate_one_menu.addAction(
-            "Generate This Photo (Skip Cache)",
+            _("Generate This Photo (Skip Cache)"),
             lambda: self._generate_current(use_cache=False),
         )
-        skip_one.setToolTip("One-time: call the model even when a cached result exists.")
+        skip_one.setToolTip(_("One-time: call the model even when a cached result exists."))
         self._generate_one_button.setMenu(self._generate_one_menu)
         # The save options live on the button's own arrow, so what a save writes is
         # discoverable right where the save happens (both Save buttons share one menu).
         self._save_button = QToolButton()
         self._save_button.setObjectName("split")
-        self._save_button.setText("Save This Photo")
+        self._save_button.setText(_("Save This Photo"))
         self._save_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._save_button.clicked.connect(
             lambda: self._save_current(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -1555,24 +1661,28 @@ class MainWindow(QMainWindow):
 
     def _build_bottom_bar(self) -> QHBoxLayout:
         """Status on the left; the batch workflow (generate, then save) on the right."""
-        self._status = QLabel("Drag photos or folders here to begin.")
+        self._status = QLabel(_("Drag photos or folders here to begin."))
         self._status.setObjectName("status")
         self._progress = QProgressBar()
         self._progress.setMaximumWidth(220)
         self._progress.setFormat("%v / %m")
         self._progress.setVisible(False)
 
-        self._retry_button = QPushButton("Retry Failed")
+        self._retry_button = QPushButton(_("Retry Failed"))
         self._retry_button.setToolTip(
-            "Re-run the model on every photo that failed to generate. Enabled once a photo "
-            "has actually failed.",
+            _(
+                "Re-run the model on every photo that failed to generate. Enabled once a photo "
+                "has actually failed.",
+            ),
         )
         self._retry_button.setEnabled(False)
         self._retry_button.clicked.connect(self._retry_failed)
-        self._cancel_button = QPushButton("Cancel")
+        self._cancel_button = QPushButton(_("Cancel"))
         self._cancel_button.setToolTip(
-            "Stop generating. The photo currently in flight finishes; the rest are left "
-            "untouched so you can resume them later.",
+            _(
+                "Stop generating. The photo currently in flight finishes; the rest are left "
+                "untouched so you can resume them later.",
+            ),
         )
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._cancel_generation)
@@ -1581,8 +1691,8 @@ class MainWindow(QMainWindow):
         # one-time skip-cache run without changing the Settings toggle.
         self._generate_button = QToolButton()
         self._generate_button.setObjectName("primarysplit")
-        self._generate_button.setText("Generate Selected")
-        self._generate_button.setToolTip("Run the model on the checked photos.")
+        self._generate_button.setText(_("Generate Selected"))
+        self._generate_button.setToolTip(_("Run the model on the checked photos."))
         self._generate_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._generate_button.clicked.connect(
             lambda: self._generate(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -1591,15 +1701,15 @@ class MainWindow(QMainWindow):
         self._generate_menu = QMenu(self)
         self._generate_menu.setToolTipsVisible(True)
         skip_all = self._generate_menu.addAction(
-            "Generate Selected (Skip Cache)",
+            _("Generate Selected (Skip Cache)"),
             lambda: self._generate(use_cache=False),
         )
-        skip_all.setToolTip("One-time: call the model even for photos with cached results.")
+        skip_all.setToolTip(_("One-time: call the model even for photos with cached results."))
         self._generate_button.setMenu(self._generate_menu)
 
         self._save_selected_button = QToolButton()
         self._save_selected_button.setObjectName("primarysplit")
-        self._save_selected_button.setText("Save Selected")
+        self._save_selected_button.setText(_("Save Selected"))
         self._save_selected_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._save_selected_button.clicked.connect(
             lambda: self._save_selected(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -1631,12 +1741,12 @@ class MainWindow(QMainWindow):
     # --- adding, removing, listing photos --------------------------------------------------
 
     def _choose_files(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Add Photos")
+        files, _filter = QFileDialog.getOpenFileNames(self, _("Add Photos"))
         if files:
             self._add_inputs([Path(f) for f in files])
 
     def _choose_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Add a folder of photos")
+        folder = QFileDialog.getExistingDirectory(self, _("Add a folder of photos"))
         if folder:
             self._add_inputs([Path(folder)])
 
@@ -1695,7 +1805,7 @@ class MainWindow(QMainWindow):
         self._current = None
         self._rebuild_tree()
         self._show_empty()
-        self._status.setText("Drag photos or folders here to begin.")
+        self._status.setText(_("Drag photos or folders here to begin."))
         self._retry_button.setEnabled(False)
 
     def _deselect(self, paths: set[Path]) -> int:
@@ -1708,7 +1818,7 @@ class MainWindow(QMainWindow):
     def _deselect_tagged(self, required: frozenset[str], *, match_all: bool, phrase: str) -> None:
         """Uncheck photos that already carry the chosen field(s); *phrase* names the criterion."""
         if not self._items:
-            self._status.setText("Add photos before deselecting.")
+            self._status.setText(_("Add photos before deselecting."))
             return
         # One batched exiftool read, like the CLI's --skip-tagged. A wait cursor covers the
         # brief pause, the same way opening a photo's metadata does.
@@ -1723,18 +1833,21 @@ class MainWindow(QMainWindow):
         changed = self._deselect(matched)
         if changed:
             self._status.setText(
-                f"Deselected {pluralize(changed, 'photo')} with {phrase}; "
-                f"{self._selected_count()} still selected.",
+                ngettext(
+                    "Deselected {n} photo with {phrase}; {selected} still selected.",
+                    "Deselected {n} photos with {phrase}; {selected} still selected.",
+                    changed,
+                ).format(n=changed, phrase=_(phrase), selected=self._selected_count()),
             )
         else:
-            self._status.setText(f"No checked photos have {phrase}.")
+            self._status.setText(_("No checked photos have {phrase}.").format(phrase=_(phrase)))
 
     def _deselect_from_file(self) -> None:
         """Pick a skip-list file and uncheck the photos it names."""
         if not self._items:
-            self._status.setText("Add photos before deselecting.")
+            self._status.setText(_("Add photos before deselecting."))
             return
-        chosen, _ = QFileDialog.getOpenFileName(self, "Choose a skip-list file")
+        chosen, _filter = QFileDialog.getOpenFileName(self, _("Choose a skip-list file"))
         if chosen:
             self._apply_skip_file(Path(chosen))
 
@@ -1743,33 +1856,38 @@ class MainWindow(QMainWindow):
         try:
             entries = load_skip_list(skip_file)
         except DiscoveryError as exc:
-            QMessageBox.warning(self, "Could not read the skip list", str(exc))
+            QMessageBox.warning(self, _("Could not read the skip list"), str(exc))
             return
         if not entries:
             # The file read fine but had nothing usable (empty, blank lines, or only comments).
             # Say so, rather than the ambiguous "Deselected 0" a real no-match would also show.
-            self._status.setText("That skip list had no usable entries (empty or only comments).")
+            self._status.setText(
+                _("That skip list had no usable entries (empty or only comments)."),
+            )
             return
         matched = skip_list_matches([item.path for item in self._items.values()], entries)
         changed = self._deselect(matched)
         if changed:
             self._status.setText(
-                f"Deselected {pluralize(changed, 'photo')} from the skip list; "
-                f"{self._selected_count()} still selected.",
+                ngettext(
+                    "Deselected {n} photo from the skip list; {selected} still selected.",
+                    "Deselected {n} photos from the skip list; {selected} still selected.",
+                    changed,
+                ).format(n=changed, selected=self._selected_count()),
             )
         else:
-            self._status.setText("No photos in the list matched the skip list.")
+            self._status.setText(_("No photos in the list matched the skip list."))
 
     def _export_csv(self) -> None:
         """Write a CSV report of every photo in the list to a chosen path."""
         if not self._items:
-            self._status.setText("Add photos before exporting a CSV.")
+            self._status.setText(_("Add photos before exporting a CSV."))
             return
-        chosen, _ = QFileDialog.getSaveFileName(
+        chosen, _filter = QFileDialog.getSaveFileName(
             self,
-            "Export CSV report",
+            _("Export CSV report"),
             "photo-tagger-report.csv",
-            "CSV files (*.csv)",
+            _("CSV files (*.csv)"),
         )
         if not chosen:
             return
@@ -1785,9 +1903,15 @@ class MainWindow(QMainWindow):
         try:
             write_report(target, rows)
         except OSError as exc:
-            QMessageBox.warning(self, "Could not write the CSV", str(exc))
+            QMessageBox.warning(self, _("Could not write the CSV"), str(exc))
             return
-        self._status.setText(f"Exported {pluralize(len(rows), 'photo')} to {target.name}.")
+        self._status.setText(
+            ngettext(
+                "Exported {n} photo to {name}.",
+                "Exported {n} photos to {name}.",
+                len(rows),
+            ).format(n=len(rows), name=target.name),
+        )
 
     def _rebuild_tree(self) -> None:
         self._syncing = True
@@ -1899,7 +2023,12 @@ class MainWindow(QMainWindow):
                 pending.append(path)
         self._syncing = False
         self._right.setCurrentIndex(_PAGE_GRID)
-        self._status.setText(f"{pluralize(len(under), 'photo')} in {folder.name or folder}.")
+        self._status.setText(
+            ngettext("{n} photo in {folder}.", "{n} photos in {folder}.", len(under)).format(
+                n=len(under),
+                folder=folder.name or folder,
+            ),
+        )
         if pending:
             self._start_thumbs(pending)
 
@@ -1913,7 +2042,7 @@ class MainWindow(QMainWindow):
         base = self._thumb_cache.get(key, self._placeholder_pixmap)
         badges = thumb_badges(item, has_sidecar=item.path.with_suffix(".xmp").exists())
         grid_item.setIcon(QIcon(_badged_pixmap(base, badges)))
-        notes = [_BADGE_TEXT[name] for name in badges]
+        notes = [_(_BADGE_TEXT[name]) for name in badges]
         if item.status == FAILED and item.error:
             notes.append(item.error)
         grid_item.setToolTip("\n".join([item.path.name, *notes]))
@@ -1976,12 +2105,14 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         sources = ", ".join(item.existing_sources)
-        self._existing_source.setText(f"(from {sources})" if sources else "(no metadata found)")
-        self._existing_title.setText(item.existing_title or _NONE)
-        self._existing_description.setPlainText(item.existing_description or _NONE)
+        self._existing_source.setText(
+            _("(from {sources})").format(sources=sources) if sources else _("(no metadata found)"),
+        )
+        self._existing_title.setText(item.existing_title or _(_NONE))
+        self._existing_description.setPlainText(item.existing_description or _(_NONE))
         _fit_text_height(self._existing_description)
         existing_kw = format_existing_keywords(item.existing_keywords)
-        self._existing_keywords.setPlainText(existing_kw or _NONE)
+        self._existing_keywords.setPlainText(existing_kw or _(_NONE))
         self._title.setText(item.title)
         self._description.setPlainText(item.description)
         self._keywords.setPlainText(keywords_to_text(item.keywords))
@@ -1993,8 +2124,10 @@ class MainWindow(QMainWindow):
         """Show the failure reason for a failed photo; hide the banner otherwise."""
         if item.status == FAILED and item.error:
             self._error_banner.setText(
-                f"Generation failed: {item.error}\n"
-                "Use 'Retry Failed' to try again, or Help > Open Logs for the full traceback.",
+                _(
+                    "Generation failed: {error}\nUse 'Retry Failed' to try again, or "
+                    "Help > Open Logs for the full traceback.",
+                ).format(error=item.error),
             )
             self._error_banner.show()
         else:
@@ -2025,7 +2158,7 @@ class MainWindow(QMainWindow):
     def _render_preview(self, item: PhotoItem) -> None:
         pixmap = self._preview_pixmap(item)
         if pixmap is None or pixmap.isNull():
-            self._preview.setText("(no preview available)")
+            self._preview.setText(_("(no preview available)"))
             return
         scaled = pixmap.scaled(
             self._preview.width(),
@@ -2061,22 +2194,22 @@ class MainWindow(QMainWindow):
             return
         if not self._write_keywords.isChecked():
             # Keywords are not being written, so the diff and hierarchy do not apply.
-            self._diff.setHtml("(keywords will not be written)")
-            self._hierarchy.setPlainText(_NONE)
-            self._details_toggle.setText("Keyword changes (not written)")
+            self._diff.setHtml(_("(keywords will not be written)"))
+            self._hierarchy.setPlainText(_(_NONE))
+            self._details_toggle.setText(_("Keyword changes (not written)"))
             return
         edited = parse_keyword_lines(self._keywords.toPlainText())
         overwrite = self._overwrite.isChecked()
         existing = self._current.existing_keywords
         paths = hierarchy_preview(existing, edited, overwrite=overwrite)
-        self._hierarchy.setPlainText(paths or _NONE)
+        self._hierarchy.setPlainText(paths or _(_NONE))
         diff = keyword_diff(existing, edited, overwrite=overwrite)
         self._diff.setHtml(_diff_html(diff))
         # A collapsed section still tells the user whether saving changes anything.
         added = sum(1 for _kw, state in diff if state == ADDED)
         removed = sum(1 for _kw, state in diff if state == REMOVED)
-        summary = f"+{added} / -{removed}" if added or removed else "no change"
-        self._details_toggle.setText(f"Keyword changes ({summary})")
+        summary = f"+{added} / -{removed}" if added or removed else _("no change")
+        self._details_toggle.setText(_("Keyword changes ({summary})").format(summary=summary))
 
     def _show_detail(self, *, enabled: bool) -> None:
         for widget in (
@@ -2094,7 +2227,7 @@ class MainWindow(QMainWindow):
         """Show the idle placeholder page instead of an empty detail form, and clear selection."""
         self._current = None
         self._show_detail(enabled=False)
-        self._empty_message.setText(_EMPTY_PICK if self._items else _EMPTY_START)
+        self._empty_message.setText(_(_EMPTY_PICK) if self._items else _(_EMPTY_START))
         self._right.setCurrentIndex(_PAGE_EMPTY)
 
     def _commit_current(self) -> None:
@@ -2145,29 +2278,39 @@ class MainWindow(QMainWindow):
             return
         if not self._write_fields_chosen():
             self._status.setText(
-                "Pick at least one field to write (Title, Description, or Keywords).",
+                _("Pick at least one field to write (Title, Description, or Keywords)."),
             )
             return
         self._commit_current()
         ok = self._write_item(self._current)
         name = self._current.path.name
-        self._status.setText(f"Saved {name}." if ok else f"Failed to save {name}.")
+        self._status.setText(
+            _("Saved {name}.").format(name=name)
+            if ok
+            else _("Failed to save {name}.").format(name=name),
+        )
         self._resort()
         self._update_status()
 
     def _save_selected(self) -> None:
         if not self._write_fields_chosen():
             self._status.setText(
-                "Pick at least one field to write (Title, Description, or Keywords).",
+                _("Pick at least one field to write (Title, Description, or Keywords)."),
             )
             return
         self._commit_current()
         targets = [item for item in self._items.values() if item.selected and item.has_proposal]
         if not targets:
-            self._status.setText("No checked photos have a proposal to save.")
+            self._status.setText(_("No checked photos have a proposal to save."))
             return
         saved = sum(int(self._write_item(item)) for item in targets)
-        self._status.setText(f"Saved {saved} of {pluralize(len(targets), 'checked photo')}.")
+        self._status.setText(
+            ngettext(
+                "Saved {saved} of {n} checked photo.",
+                "Saved {saved} of {n} checked photos.",
+                len(targets),
+            ).format(saved=saved, n=len(targets)),
+        )
         self._resort()
         self._update_status()
 
@@ -2176,20 +2319,20 @@ class MainWindow(QMainWindow):
     def _generate(self, *, use_cache: bool = True) -> None:
         selected = [item for item in self._items.values() if item.selected]
         if not selected:
-            self._status.setText("Check at least one photo first.")
+            self._status.setText(_("Check at least one photo first."))
             return
         self._run_generation(selected, use_cache=use_cache)
 
     def _generate_current(self, *, use_cache: bool = True) -> None:
         if self._current is None:
-            self._status.setText("Open a photo to generate it.")
+            self._status.setText(_("Open a photo to generate it."))
             return
         self._run_generation([self._current], use_cache=use_cache)
 
     def _retry_failed(self) -> None:
         failed = [item for item in self._items.values() if item.status == FAILED]
         if not failed:
-            self._status.setText("No failed photos to retry.")
+            self._status.setText(_("No failed photos to retry."))
             return
         self._run_generation(failed)
 
@@ -2205,7 +2348,11 @@ class MainWindow(QMainWindow):
             self._update_error_banner(current)
         self._cancelling = False
         self._set_running(running=True, total=len(items))
-        self._status.setText(f"Generating {pluralize(len(items), 'photo')}...")
+        self._status.setText(
+            ngettext("Generating {n} photo...", "Generating {n} photos...", len(items)).format(
+                n=len(items),
+            ),
+        )
 
         self._thread = QThread(self)
         self._worker = GenerateWorker(
@@ -2253,7 +2400,7 @@ class MainWindow(QMainWindow):
         self._cancelling = True
         self._worker.stop()
         self._cancel_button.setEnabled(False)
-        self._status.setText("Cancelling after the current photo finishes...")
+        self._status.setText(_("Cancelling after the current photo finishes..."))
 
     def _on_generate_finished(self) -> None:
         if self._closing:
@@ -2264,9 +2411,15 @@ class MainWindow(QMainWindow):
         # they look queued-again rather than stuck, and report what actually got done.
         reset = self._reset_working()
         if self._cancelling:
-            self._status.setText(f"Cancelled. {pluralize(reset, 'photo')} not generated.")
+            self._status.setText(
+                ngettext(
+                    "Cancelled. {n} photo not generated.",
+                    "Cancelled. {n} photos not generated.",
+                    reset,
+                ).format(n=reset),
+            )
         else:
-            self._status.setText("Generation finished.")
+            self._status.setText(_("Generation finished."))
         self._cancelling = False
         self._resort()
         self._teardown_thread()
@@ -2324,7 +2477,7 @@ class MainWindow(QMainWindow):
             models = backend.list_models(base_url, backend.resolve_api_key(self._api_key_value()))
         except ProviderError as exc:
             QApplication.restoreOverrideCursor()
-            QMessageBox.warning(self, "Could not list models", str(exc))
+            QMessageBox.warning(self, _("Could not list models"), str(exc))
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -2332,7 +2485,13 @@ class MainWindow(QMainWindow):
         self._model.clear()
         self._model.addItems(rank_vision_models(models))
         self._model.setCurrentText(current)
-        self._status.setText(f"Found {len(models)} model(s) on {self._provider_name()}.")
+        self._status.setText(
+            ngettext(
+                "Found {n} model on {provider}.",
+                "Found {n} models on {provider}.",
+                len(models),
+            ).format(n=len(models), provider=PROVIDER_LABELS.get(self._provider_name(), "")),
+        )
 
     def _test_connection(self) -> None:
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -2346,7 +2505,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         box = QMessageBox(self)
-        box.setWindowTitle("Connection check")
+        box.setWindowTitle(_("Connection check"))
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(_check_results_html(results))
         all_ok = all(r.ok for r in results)
@@ -2379,9 +2538,9 @@ class MainWindow(QMainWindow):
 
     def _render_status_cells(self, leaf: QTreeWidgetItem, item: PhotoItem) -> None:
         """Paint the Status and Tagged columns for *item*'s row."""
-        label = _STATUS_LABEL[item.status]
+        label = _(_STATUS_LABEL[item.status]) if _STATUS_LABEL[item.status] else ""
         if item.status == READY and item.from_cache:
-            label = "ready (cached)"
+            label = _("ready (cached)")
         leaf.setText(_COL_STATUS, label)
         leaf.setData(_COL_STATUS, _STATUS_RANK_ROLE, status_sort_rank(item.status))
         color = _STATUS_COLOR.get(item.status)
@@ -2396,7 +2555,9 @@ class MainWindow(QMainWindow):
             leaf.setText(_COL_TAGGED, tagged_summary(item.known_fields))
             leaf.setToolTip(
                 _COL_TAGGED,
-                "Already on the file: " + (", ".join(sorted(item.known_fields)) or "nothing"),
+                _("Already on the file: {fields}").format(
+                    fields=", ".join(sorted(item.known_fields)) or _("nothing"),
+                ),
             )
 
     def _resort(self) -> None:
@@ -2457,15 +2618,17 @@ class MainWindow(QMainWindow):
             return
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Anonymous usage telemetry")
-        box.setText("Photo Tagger sends anonymous usage stats to guide development.")
+        box.setWindowTitle(_("Anonymous usage telemetry"))
+        box.setText(_("Photo Tagger sends anonymous usage stats to guide development."))
         box.setInformativeText(
-            "Collected: model name, batch size, OS, CPU architecture, timing.\n"
-            "Never: photos, file paths, filenames, tags, or personal data.\n\n"
-            "You can turn this off now, or anytime from Settings > Send Anonymous Telemetry.",
+            _(
+                "Collected: model name, batch size, OS, CPU architecture, timing.\n"
+                "Never: photos, file paths, filenames, tags, or personal data.\n\n"
+                "You can turn this off now, or anytime from Settings > Send Anonymous Telemetry.",
+            ),
         )
-        keep = box.addButton("Keep Enabled", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Turn It Off", QMessageBox.ButtonRole.RejectRole)
+        keep = box.addButton(_("Keep Enabled"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Turn It Off"), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(keep)
         box.exec()
         if box.clickedButton() is not keep:
@@ -2510,11 +2673,11 @@ _BADGE_STYLE = {
     BADGE_SIDECAR: ("#0e7490", "S"),  # an XMP sidecar exists
 }
 _BADGE_TEXT = {
-    BADGE_FAILED: "generation failed",
-    BADGE_SAVED: "saved",
-    BADGE_UNSAVED: "generated, not saved yet",
-    BADGE_METADATA: "already has metadata",
-    BADGE_SIDECAR: "has an XMP sidecar",
+    BADGE_FAILED: gettext_noop("generation failed"),
+    BADGE_SAVED: gettext_noop("saved"),
+    BADGE_UNSAVED: gettext_noop("generated, not saved yet"),
+    BADGE_METADATA: gettext_noop("already has metadata"),
+    BADGE_SIDECAR: gettext_noop("has an XMP sidecar"),
 }
 _LIFECYCLE_BADGES = frozenset({BADGE_FAILED, BADGE_SAVED, BADGE_UNSAVED})
 
@@ -2593,7 +2756,7 @@ def _diff_html(diff: list[tuple[str, str]]) -> str:
         safe = html.escape(keyword)
         style, marker = _DIFF_STYLE.get(state, ("color:#8a8a8a", "&nbsp;&nbsp;&nbsp;"))
         rows.append(f'<span style="{style}">{marker}{safe}</span>')
-    return "<br>".join(rows) or "(no change)"
+    return "<br>".join(rows) or _("(no change)")
 
 
 def launch(argv: list[str] | None = None) -> int:
@@ -2613,6 +2776,21 @@ def launch(argv: list[str] | None = None) -> int:
     app.setApplicationDisplayName("Photo Tagger")
     app.setWindowIcon(_app_icon())
     app.setStyleSheet(_stylesheet())
+    # Resolve the UI language before any widget is built: strings are baked at construction.
+    # Qt's system locale is the hint of last resort; it knows the OS language even when no LANG
+    # is exported (a Finder/Dock launch).
+    configured = load_config().get("language")
+    language = i18n.activate(
+        str(configured) if configured else None,
+        system_hint=QLocale.system().name(),
+    )
+    if language != "en":
+        # Also translate Qt's own stock strings (file dialogs, standard buttons). Best-effort:
+        # PySide6 wheels may not ship every qtbase catalog.
+        qt_translator = QTranslator(app)
+        translations_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        if qt_translator.load(QLocale(language), "qtbase", "_", translations_dir):
+            app.installTranslator(qt_translator)
     window = MainWindow()
     window.show()
     window.maybe_show_telemetry_notice()

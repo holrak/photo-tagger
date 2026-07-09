@@ -14,7 +14,11 @@ _ICNS = _HERE / "icon.icns"
 # Some packages read their own version via importlib.metadata at import time (genai_prices, pulled
 # in by pydantic-ai, hard-fails without it). Bundle that metadata. photo-tagger's own metadata is
 # included too so the app reports its real version instead of "0.0.0+unknown".
-_datas = [(str(_ROOT / "src" / "photo_tagger" / "resources"), "photo_tagger/resources")]
+_datas = [
+    (str(_ROOT / "src" / "photo_tagger" / "resources"), "photo_tagger/resources"),
+    # Compiled gettext catalogs; without them the frozen app is English-only.
+    (str(_ROOT / "src" / "photo_tagger" / "locale"), "photo_tagger/locale"),
+]
 _datas += copy_metadata("pydantic_ai", recursive=True)
 _datas += copy_metadata("photo-tagger")
 

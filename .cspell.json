@@ -10,5 +10,11 @@
     }
   ],
   "dictionaries": ["project-words"],
-  "ignorePaths": [".cspell", "*.pyc", "__pycache__", "*.spec"]
+  "ignorePaths": [
+    ".cspell",
+    "*.pyc",
+    "__pycache__",
+    "*.spec",
+    "src/photo_tagger/locale"
+  ]
 }

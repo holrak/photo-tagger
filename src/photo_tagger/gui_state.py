@@ -17,6 +17,7 @@ import tomlkit
 
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
+from photo_tagger.i18n import AUTO, _, ngettext
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
@@ -510,11 +511,6 @@ def status_sort_rank(status: str) -> int:
         return len(STATUS_SORT_ORDER)
 
 
-def pluralize(count: int, noun: str) -> str:
-    """Format a count with its noun, adding a plain "s" past one ("1 photo", "2 photos")."""
-    return f"{count} {noun}" + ("" if count == 1 else "s")
-
-
 def status_summary(items: Iterable[PhotoItem]) -> str:
     """One-line counts for the status bar: selected, generated, saved, failed."""
     items = list(items)
@@ -522,9 +518,15 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
     generated = sum(1 for i in items if i.has_proposal)
     saved = sum(1 for i in items if i.status == SAVED)
     failed = sum(1 for i in items if i.status == FAILED)
-    return (
-        f"{pluralize(len(items), 'file')} · {selected} selected · {generated} generated "
-        f"· {saved} saved · {failed} failed"
+    files = ngettext("{n} file", "{n} files", len(items)).format(n=len(items))
+    return _(
+        "{files} · {selected} selected · {generated} generated · {saved} saved · {failed} failed",
+    ).format(
+        files=files,
+        selected=selected,
+        generated=generated,
+        saved=saved,
+        failed=failed,
     )
 
 
@@ -536,10 +538,10 @@ def count_generated(items: Iterable[PhotoItem]) -> int:
 def reveal_label(platform_name: str) -> str:
     """Name the OS file browser for the context-menu action ("Reveal in Finder" on macOS)."""
     if platform_name == "darwin":
-        return "Reveal in Finder"
+        return _("Reveal in Finder")
     if platform_name.startswith("win"):
-        return "Show in Explorer"
-    return "Show in File Manager"
+        return _("Show in Explorer")
+    return _("Show in File Manager")
 
 
 def reveal_command(path: Path, platform_name: str) -> list[str] | None:
@@ -708,6 +710,22 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
 
     telemetry = document.setdefault("telemetry", tomlkit.table())
     telemetry["enabled"] = values.telemetry_enabled
+    return tomlkit.dumps(document)
+
+
+def config_text_with_language(existing_text: str, language: str) -> str:
+    """
+    Set the top-level ``language`` key in a TOML config, preserving everything else.
+
+    Choosing :data:`~photo_tagger.i18n.AUTO` (follow the OS locale, the built-in default) removes
+    the key instead of writing it, so a config never pins a language the user did not pick. tomlkit
+    keeps comments and ordering intact, like :func:`merged_config_text`.
+    """
+    document = tomlkit.parse(existing_text)
+    if language == AUTO:
+        document.pop("language", None)
+    else:
+        document["language"] = language
     return tomlkit.dumps(document)
 
 
