@@ -118,11 +118,14 @@ max_keywords = 15
 
 [artifacts]
 cache_file = ".photo-tagger-cache.db"
+
+[telemetry]
+enabled = true
 ```
 
 The section names match the internal option groups: `provider`, `inference`, `output`, `log`,
-`display`, `filter`, and `artifacts`. Top-level keys cover `extensions`, `recursive`, and `workers`.
-Unknown keys are silently ignored, so the file stays forward-compatible.
+`display`, `filter`, `artifacts`, and `telemetry`. Top-level keys cover `extensions`, `recursive`,
+and `workers`. Unknown keys are silently ignored, so the file stays forward-compatible.
 
 ## Usage
 
@@ -162,6 +165,7 @@ Key options:
   `jq` or your own tools
 - `--newer-than DATE` / `--older-than DATE` – filter the input batch by file mtime. Accepts ISO 8601
   like `2024-01-01` or `2024-01-01T14:30`; naive timestamps use local time
+- `--no-telemetry` – turn off anonymous usage telemetry for this run (see [Telemetry](#telemetry))
 - `--jpeg-dimensions`, `--jpeg-quality`, `--temperature`, `--max-tokens`, `--retries` – control
   inference behavior
 
@@ -293,6 +297,39 @@ existing values in a side-by-side detail pane, where you can edit any field befo
 photo that fails shows why and can be retried, and **Open logs** opens the run log folder. It reads
 the same config file and environment variables as the CLI. PySide6 is only pulled in by the `gui`
 extra, so the plain CLI install stays lightweight.
+
+## Telemetry
+
+photo-tagger sends a single anonymous beacon at the end of each run so development can be guided by
+how the tool is actually used (which models and platforms are common, typical batch sizes). It is
+**opt-out**: on by default, with a one-time notice on the first run, and easy to disable.
+
+**What is collected**, and nothing else:
+
+- app version and interface (`cli` or `gui`)
+- provider and model name
+- batch size (photo count) and run duration
+- CPU architecture, OS, OS release, and Python version
+- a random install id (a UUID generated once, **not** derived from any hardware identifier)
+
+**What is never collected:** file paths, filenames, photo contents, generated tags/titles/
+descriptions, prompts, API keys, IP addresses, or anything else that identifies you. The exact,
+closed payload is the [`build_payload`](src/photo_tagger/telemetry.py) function; there is nothing
+else to leak.
+
+**Where it goes:** our own Cloudflare Worker at `telemetry.tagger.photo`. No third-party analytics
+service is involved, and the collector's full source (and the queries run against it) lives in
+[`telemetry/`](telemetry/). Sending happens on a background thread with a short timeout and is
+wrapped so it can never crash or slow down a run.
+
+**How to disable it** (any one of these):
+
+- pass `--no-telemetry` on the command line
+- set `PHOTO_TAGGER_NO_TELEMETRY=1` (or the cross-tool `DO_NOT_TRACK=1`) in your environment
+- put `enabled = false` under `[telemetry]` in your config file
+
+The environment variables win over the flag and config, so exporting `PHOTO_TAGGER_NO_TELEMETRY=1`
+once disables telemetry everywhere, including the GUI.
 
 ## Logging
 
