@@ -225,6 +225,9 @@ _DIR_MARK = "dir"  # truthy sentinel stored on folder tree items; files leave th
 # use gettext_noop (extraction marker); their use sites translate with _() at display time.
 _NONE = gettext_noop("(none)")
 
+# Title of the warning box shown when persisting a setting to the config file fails.
+_CONFIG_SAVE_ERROR_TITLE = gettext_noop("Could not save the config file")
+
 # Right-pane placeholder copy. It adapts to the list: a getting-started nudge while empty, and a
 # "pick a photo" nudge once photos are loaded but none is open. This is what fills the right pane
 # when there is nothing to inspect, instead of an empty (and confusing) detail form.
@@ -853,7 +856,7 @@ class MainWindow(QMainWindow):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(config_text_with_language(existing, code), encoding="utf-8")
         except OSError as exc:
-            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
+            QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         self._status.setText(_("Language saved. Restart Photo Tagger to apply it."))
 
@@ -943,7 +946,7 @@ class MainWindow(QMainWindow):
                 encoding="utf-8",
             )
         except OSError as exc:
-            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
+            QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         self._status.setText(
             _("Metadata language set to {language} for the next generation.").format(
@@ -1002,7 +1005,7 @@ class MainWindow(QMainWindow):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
         except OSError as exc:
-            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
+            QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         self._status.setText(note.format(target=target))
 
