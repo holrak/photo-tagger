@@ -102,11 +102,12 @@ any of them. The status bar reports how many photos were deselected and how many
 
 Selecting a **folder** (rather than a file) shows a **thumbnail grid** of its photos on the right,
 like a contact sheet. Thumbnails load in the background, so a large folder of RAW files stays
-responsive. Click any thumbnail to open that photo's detail, or right-click it for the same menu as
-its row in the tree (retry, skip cache, reveal, remove). Each thumbnail carries small badges (hover
-for the explanation): the top-right one tracks the lifecycle (red ✗ failed, green ✓ saved, indigo
-dot for generated-but-not-saved), and the top-left ones flag a photo that already has metadata (`M`)
-or an XMP sidecar (`S`).
+responsive. Click any thumbnail to open that photo's detail, tick its checkbox to select or deselect
+it (kept in sync with the tree), or right-click it for the same menu as its row in the tree (retry,
+skip cache, reveal, remove). Each thumbnail carries small badges (hover for the explanation): the
+top-right one tracks the lifecycle (red ✗ failed, green ✓ saved, indigo dot for
+generated-but-not-saved), and the top-left ones flag a photo that already has metadata (`M`) or an
+XMP sidecar (`S`).
 
 ### 3. Generate proposals
 
@@ -161,7 +162,8 @@ write just the open one, or **Save selected** (bottom bar) to write the **checke
 a proposal. The save scope matches *Generate selected* (the same checkboxes), so check everything to
 save everything.
 
-The **Save options** menu (next to *Save selected*) chooses what every save writes:
+The arrow on either **Save** button opens the save options, which choose what every save writes
+(both buttons share them, and their tooltips always spell out the current choice):
 
 - **Write Title**, **Write Description**, **Write Keywords** (all on by default), the GUI's
     equivalent of the CLI's `--no-write-title` / `--no-write-description` / `--no-write-keywords`.

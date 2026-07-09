@@ -522,6 +522,11 @@ def status_sort_rank(status: str) -> int:
         return len(STATUS_SORT_ORDER)
 
 
+def pluralize(count: int, noun: str) -> str:
+    """Format a count with its noun, adding a plain "s" past one ("1 photo", "2 photos")."""
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
 def status_summary(items: Iterable[PhotoItem]) -> str:
     """One-line counts for the status bar: selected, generated, saved, failed."""
     items = list(items)
@@ -530,7 +535,7 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
     saved = sum(1 for i in items if i.status == SAVED)
     failed = sum(1 for i in items if i.status == FAILED)
     return (
-        f"{len(items)} files · {selected} selected · {generated} generated "
+        f"{pluralize(len(items), 'file')} · {selected} selected · {generated} generated "
         f"· {saved} saved · {failed} failed"
     )
 

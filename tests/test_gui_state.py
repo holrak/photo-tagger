@@ -51,6 +51,7 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    pluralize,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -580,6 +581,13 @@ def test_status_sort_rank_unknown_status_sorts_last() -> None:
     """An unrecognized status ranks after every known one rather than raising."""
     assert status_sort_rank("bogus") == len(STATUS_SORT_ORDER)
     assert status_sort_rank("bogus") > status_sort_rank(FAILED)
+
+
+def test_pluralize_adds_s_past_one() -> None:
+    """Counts read naturally: singular at one, plural otherwise (including zero)."""
+    assert pluralize(1, "photo") == "1 photo"
+    assert pluralize(2, "photo") == "2 photos"
+    assert pluralize(0, "file") == "0 files"
 
 
 def test_status_summary_counts_states() -> None:

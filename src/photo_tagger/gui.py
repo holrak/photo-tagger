@@ -128,6 +128,7 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    pluralize,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -646,6 +647,8 @@ class MainWindow(QMainWindow):
         self.resize(1180, 760)
         self.setAcceptDrops(True)
         self._placeholder_pixmap = _make_placeholder()
+        # Built before the panes: both Save buttons (detail pane and bottom bar) attach it.
+        self._save_options_menu = self._build_save_options_menu()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -661,6 +664,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, stretch=1)
         layout.addLayout(self._build_bottom_bar())
         self._build_menus()
+        self._refresh_save_tooltips()
         self._show_empty()
 
     # --- construction ----------------------------------------------------------------------
@@ -1062,6 +1066,33 @@ class MainWindow(QMainWindow):
         )
         return menu
 
+    def _on_grid_item_changed(self, grid_item: QListWidgetItem) -> None:
+        """Mirror a thumbnail checkbox change onto the photo and its tree row."""
+        if self._syncing:
+            return
+        key = grid_item.data(_PATH_ROLE)
+        item = self._items.get(key)
+        if item is None:
+            return
+        item.selected = grid_item.checkState() == Qt.CheckState.Checked
+        self._syncing = True
+        leaf = self._leaf_for(Path(key))
+        if leaf is not None:
+            leaf.setCheckState(0, _checked(item.selected))
+            parent = leaf.parent()
+            while parent is not None:
+                self._sync_folder_check(parent)
+                parent = parent.parent()
+        self._syncing = False
+        self._update_status()
+
+    def _sync_grid_checks(self) -> None:
+        """Repaint every visible thumbnail checkbox from the model (callers hold _syncing)."""
+        for key, grid_item in self._grid_items.items():
+            item = self._items.get(key)
+            if item is not None:
+                grid_item.setCheckState(_checked(item.selected))
+
     def _on_grid_context_menu(self, pos: object) -> None:
         """Offer a thumbnail the same right-click actions as its row in the tree."""
         grid_item = self._grid.itemAt(pos)
@@ -1155,6 +1186,7 @@ class MainWindow(QMainWindow):
         grid.setUniformItemSizes(True)
         grid.setWordWrap(True)
         grid.itemClicked.connect(self._on_thumb_activated)
+        grid.itemChanged.connect(self._on_grid_item_changed)
         # Thumbnails answer to the same right-click menu as their row in the tree.
         grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         grid.customContextMenuRequested.connect(self._on_grid_context_menu)
@@ -1331,7 +1363,49 @@ class MainWindow(QMainWindow):
             menu.addAction(action)
         # A config that starts with keywords off must also start with Overwrite grayed out.
         self._overwrite.setEnabled(self._write_keywords.isChecked())
+        # Every toggle refreshes the Save buttons' option summary. Connected after the
+        # setChecked calls above so construction never fires into the not-yet-built buttons.
+        for action in (
+            self._write_title,
+            self._write_description,
+            self._write_keywords,
+            self._overwrite,
+            self._embed,
+        ):
+            action.toggled.connect(self._refresh_save_tooltips)
         return menu
+
+    def _save_options_summary(self) -> str:
+        """Describe what a save currently writes, for the Save buttons' tooltips."""
+        fields = [
+            name
+            for action, name in (
+                (self._write_title, "title"),
+                (self._write_description, "description"),
+                (self._write_keywords, "keywords"),
+            )
+            if action.isChecked()
+        ]
+        parts = [", ".join(fields) if fields else "nothing (pick a field in the arrow menu)"]
+        if self._write_keywords.isChecked():
+            parts.append(
+                "overwriting existing keywords"
+                if self._overwrite.isChecked()
+                else "merging with existing keywords",
+            )
+        parts.append("into the image file" if self._embed.isChecked() else "to an XMP sidecar")
+        return ", ".join(parts)
+
+    def _refresh_save_tooltips(self) -> None:
+        """Keep both Save buttons' tooltips describing the currently chosen options."""
+        summary = f"Currently writes {self._save_options_summary()}."
+        self._save_button.setToolTip(
+            f"Write this photo. {summary} Change what is written with the arrow.",
+        )
+        self._save_selected_button.setToolTip(
+            f"Write the checked photos that have a generated proposal. {summary} "
+            "Change what is written with the arrow.",
+        )
 
     def _build_save_row(self) -> QHBoxLayout:
         """Per-photo actions at the bottom of the detail pane; batch actions live below."""
@@ -1355,11 +1429,16 @@ class MainWindow(QMainWindow):
         )
         skip_one.setToolTip("One-time: call the model even when a cached result exists.")
         self._generate_one_button.setMenu(self._generate_one_menu)
-        self._save_button = QPushButton("Save this photo")
-        self._save_button.setToolTip(
-            "Write this photo's fields, honoring the Save options next to Save selected.",
+        # The save options live on the button's own arrow, so what a save writes is
+        # discoverable right where the save happens (both Save buttons share one menu).
+        self._save_button = QToolButton()
+        self._save_button.setObjectName("split")
+        self._save_button.setText("Save this photo")
+        self._save_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self._save_button.clicked.connect(
+            lambda: self._save_current(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
         )
-        self._save_button.clicked.connect(self._save_current)
+        self._save_button.setMenu(self._save_options_menu)
         row.addWidget(self._generate_one_button)
         row.addWidget(self._save_button)
         return row
@@ -1408,16 +1487,14 @@ class MainWindow(QMainWindow):
         skip_all.setToolTip("One-time: call the model even for photos with cached results.")
         self._generate_button.setMenu(self._generate_menu)
 
-        save_options = QPushButton("Save options")
-        save_options.setObjectName("menubutton")
-        save_options.setToolTip("Which fields a save writes, merge vs overwrite, and sidecar.")
-        save_options.setMenu(self._build_save_options_menu())
-        self._save_selected_button = QPushButton("Save selected")
-        self._save_selected_button.setObjectName("primary")
-        self._save_selected_button.setToolTip(
-            "Write the checked photos that have a generated proposal, using the Save options.",
+        self._save_selected_button = QToolButton()
+        self._save_selected_button.setObjectName("primarysplit")
+        self._save_selected_button.setText("Save selected")
+        self._save_selected_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self._save_selected_button.clicked.connect(
+            lambda: self._save_selected(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
         )
-        self._save_selected_button.clicked.connect(self._save_selected)
+        self._save_selected_button.setMenu(self._save_options_menu)
 
         row = QHBoxLayout()
         row.addWidget(self._status, stretch=1)
@@ -1425,7 +1502,6 @@ class MainWindow(QMainWindow):
         row.addWidget(self._retry_button)
         row.addWidget(self._cancel_button)
         row.addWidget(self._generate_button)
-        row.addWidget(save_options)
         row.addWidget(self._save_selected_button)
         return row
 
@@ -1532,7 +1608,7 @@ class MainWindow(QMainWindow):
         changed = self._deselect(matched)
         if changed:
             self._status.setText(
-                f"Deselected {changed} photo(s) with {phrase}; "
+                f"Deselected {pluralize(changed, 'photo')} with {phrase}; "
                 f"{self._selected_count()} still selected.",
             )
         else:
@@ -1563,7 +1639,7 @@ class MainWindow(QMainWindow):
         changed = self._deselect(matched)
         if changed:
             self._status.setText(
-                f"Deselected {changed} photo(s) from the skip list; "
+                f"Deselected {pluralize(changed, 'photo')} from the skip list; "
                 f"{self._selected_count()} still selected.",
             )
         else:
@@ -1596,7 +1672,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "Could not write the CSV", str(exc))
             return
-        self._status.setText(f"Exported {len(rows)} photo(s) to {target.name}.")
+        self._status.setText(f"Exported {pluralize(len(rows), 'photo')} to {target.name}.")
 
     def _rebuild_tree(self) -> None:
         self._syncing = True
@@ -1607,6 +1683,7 @@ class MainWindow(QMainWindow):
         for node in build_tree([item.path for item in self._items.values()]):
             self._add_folder_node(self._tree, node)
         self._tree.setSortingEnabled(True)
+        self._sync_grid_checks()
         self._syncing = False
 
     def _add_folder_node(self, parent: object, node: FolderNode) -> None:
@@ -1646,6 +1723,7 @@ class MainWindow(QMainWindow):
             while parent is not None:
                 self._sync_folder_check(parent)
                 parent = parent.parent()
+        self._sync_grid_checks()
         self._syncing = False
         self._update_status()
 
@@ -1693,22 +1771,29 @@ class MainWindow(QMainWindow):
         self._grid_items = {}
         under = paths_under([item.path for item in self._items.values()], folder)
         pending: list[Path] = []
+        self._syncing = True
         for path in under:
             key = str(path)
             grid_item = QListWidgetItem(path.name)
             grid_item.setData(_PATH_ROLE, key)
+            grid_item.setFlags(grid_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             self._grid.addItem(grid_item)
             self._grid_items[key] = grid_item
             self._update_grid_item(self._items[key], grid_item)
             if key not in self._thumb_cache:
                 pending.append(path)
+        self._syncing = False
         self._right.setCurrentIndex(_PAGE_GRID)
-        self._status.setText(f"{len(under)} photo(s) in {folder.name or folder}.")
+        self._status.setText(f"{pluralize(len(under), 'photo')} in {folder.name or folder}.")
         if pending:
             self._start_thumbs(pending)
 
     def _update_grid_item(self, item: PhotoItem, grid_item: QListWidgetItem) -> None:
-        """Refresh a grid thumbnail: the image (or placeholder) plus its state badges."""
+        """Refresh a grid thumbnail: image (or placeholder), state badges, and checkbox."""
+        was_syncing = self._syncing
+        self._syncing = True
+        grid_item.setCheckState(_checked(item.selected))
+        self._syncing = was_syncing
         key = str(item.path)
         base = self._thumb_cache.get(key, self._placeholder_pixmap)
         badges = thumb_badges(item, has_sidecar=item.path.with_suffix(".xmp").exists())
@@ -1954,7 +2039,7 @@ class MainWindow(QMainWindow):
             self._status.setText("No checked photos have a proposal to save.")
             return
         saved = sum(int(self._write_item(item)) for item in targets)
-        self._status.setText(f"Saved {saved} of {len(targets)} checked photo(s).")
+        self._status.setText(f"Saved {saved} of {pluralize(len(targets), 'checked photo')}.")
         self._resort()
         self._update_status()
 
@@ -1992,7 +2077,7 @@ class MainWindow(QMainWindow):
             self._update_error_banner(current)
         self._cancelling = False
         self._set_running(running=True, total=len(items))
-        self._status.setText(f"Generating {len(items)} photo(s)...")
+        self._status.setText(f"Generating {pluralize(len(items), 'photo')}...")
 
         self._thread = QThread(self)
         self._worker = GenerateWorker(
@@ -2047,7 +2132,7 @@ class MainWindow(QMainWindow):
         # they look queued-again rather than stuck, and report what actually got done.
         reset = self._reset_working()
         if self._cancelling:
-            self._status.setText(f"Cancelled. {reset} photo(s) not generated.")
+            self._status.setText(f"Cancelled. {pluralize(reset, 'photo')} not generated.")
         else:
             self._status.setText("Generation finished.")
         self._cancelling = False

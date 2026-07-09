@@ -1322,7 +1322,7 @@ def test_finish_after_cancel_resets_working_photos_to_pending(
     assert window._items[str(a)].status == PENDING  # noqa: SLF001
     assert window._items[str(b)].status == READY  # noqa: SLF001
     assert "Cancelled" in window._status.text()  # noqa: SLF001
-    assert "1 photo(s) not generated" in window._status.text()  # noqa: SLF001
+    assert "1 photo not generated" in window._status.text()  # noqa: SLF001
 
 
 def test_on_file_done_applies_proposal_to_item(window: gui.MainWindow, tmp_path: Path) -> None:
@@ -1518,6 +1518,93 @@ def test_help_menu_links_the_documentation(window: gui.MainWindow) -> None:
     """Help offers a Documentation entry pointing at the hosted docs."""
     texts = [action.text() for action in window._help_menu.actions()]  # noqa: SLF001
     assert "Documentation" in texts
+
+
+def test_save_buttons_share_the_options_menu(window: gui.MainWindow) -> None:
+    """Both Save buttons carry the same arrow menu holding the write toggles."""
+    actions = window._save_options_menu.actions()  # noqa: SLF001
+    assert window._write_title in actions  # noqa: SLF001
+    assert window._overwrite in actions  # noqa: SLF001
+    assert window._embed in actions  # noqa: SLF001
+
+
+def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None:
+    """Toggling a save option rewrites the Save buttons' current-options summary."""
+    assert "title, description, keywords" in window._save_selected_button.toolTip()  # noqa: SLF001
+    assert "XMP sidecar" in window._save_button.toolTip()  # noqa: SLF001
+
+    window._write_description.setChecked(False)  # noqa: SLF001
+    window._embed.setChecked(True)  # noqa: SLF001
+
+    tip = window._save_selected_button.toolTip()  # noqa: SLF001
+    assert "title, keywords" in tip
+    assert "into the image file" in tip
+
+
+def test_grid_checkbox_unchecks_photo_and_tree(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unchecking a thumbnail deselects the photo and repaints its tree row."""
+    a = _jpeg(tmp_path / "a.jpg")
+    _jpeg(tmp_path / "b.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    grid_item = window._grid_items[str(a)]  # noqa: SLF001
+    assert grid_item.checkState() == Qt.CheckState.Checked
+    grid_item.setCheckState(Qt.CheckState.Unchecked)  # fires itemChanged
+
+    assert window._items[str(a)].selected is False  # noqa: SLF001
+    assert _check_state(window, a) == Qt.CheckState.Unchecked
+    # The parent folder is now partially checked.
+    top = window._tree.topLevelItem(0)  # noqa: SLF001
+    assert top is not None
+    assert top.checkState(0) == Qt.CheckState.PartiallyChecked
+
+
+def test_tree_uncheck_reflects_in_grid_checkboxes(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unchecking the folder in the tree unchecks every visible thumbnail."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": b})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    top = window._tree.topLevelItem(0)  # noqa: SLF001
+    assert top is not None
+    top.setCheckState(0, Qt.CheckState.Unchecked)
+
+    states = {item.checkState() for item in window._grid_items.values()}  # noqa: SLF001
+    assert states == {Qt.CheckState.Unchecked}
+
+
+def test_generating_status_pluralizes(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One photo reads "1 photo", several read "N photos" (no "(s)" anywhere)."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _stub_generation(monkeypatch)
+    _add_dir(window, {"a": a, "b": b})
+
+    window._run_generation([window._items[str(a)]])  # noqa: SLF001
+    assert window._status.text() == "Generating 1 photo..."  # noqa: SLF001
+    window._teardown_thread()  # noqa: SLF001
+
+    window._run_generation(  # noqa: SLF001
+        [window._items[str(a)], window._items[str(b)]],  # noqa: SLF001
+    )
+    assert window._status.text() == "Generating 2 photos..."  # noqa: SLF001
+    window._teardown_thread()  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
