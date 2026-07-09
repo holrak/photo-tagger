@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol
 from cyclopts import App, Parameter, validators
 from loguru import logger
 
-from photo_tagger import __version__
+from photo_tagger import __version__, telemetry
 from photo_tagger.ai import create_agent
 from photo_tagger.cache import InferenceCache, build_cache_namespace
 from photo_tagger.cli_options import (
@@ -41,6 +41,7 @@ from photo_tagger.cli_options import (
     LogConfig,
     OutputConfig,
     ProviderConfig,
+    TelemetryConfig,
     load_defaults,
     to_processing_options,
 )
@@ -84,6 +85,7 @@ _DEFAULT_LOG = _DEFAULTS.log
 _DEFAULT_DISPLAY = _DEFAULTS.display
 _DEFAULT_ARTIFACTS = _DEFAULTS.artifacts
 _DEFAULT_FILTER = _DEFAULTS.filter
+_DEFAULT_TELEMETRY = _DEFAULTS.telemetry
 _DEFAULT_EXTENSIONS = _DEFAULTS.extensions
 _DEFAULT_WORKERS = _DEFAULTS.workers
 _DEFAULT_RECURSIVE = _DEFAULTS.recursive
@@ -408,11 +410,24 @@ def _maybe_str(value: Path | None) -> str | None:
     return str(value) if value is not None else None
 
 
+def _maybe_show_telemetry_notice(*, enabled: bool) -> None:
+    """
+    Print the one-time telemetry disclosure to stderr on the first run telemetry is active.
+
+    Only shown when telemetry will actually send (config/flag on and no environment opt-out), so a
+    user who has disabled it never sees the notice. Written straight to stderr, not the loguru sink,
+    so it reaches the terminal regardless of the configured log level.
+    """
+    if not telemetry.should_send(config_enabled=enabled):
+        return
+    notice = telemetry.first_run_notice()
+    if notice is not None:
+        sys.stderr.write(notice + "\n")
+
+
 def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     *,
     inputs: list[Path] | None,
-    skip_from: Path | None,
-    append_to_skip_file: Path | None,
     image_extensions: str,
     recursive: bool,
     workers: int,
@@ -422,6 +437,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     provider: ProviderConfig,
     options: ProcessingOptions,
     log: LogConfig,
+    telemetry_enabled: bool,
 ) -> None:
     """Single-shot info log so the run's full configuration is captured up-front."""
     logger.info(
@@ -441,8 +457,9 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         lock_file=_maybe_str(artifacts.lock_file),
         json_output=display.json_output,
         progress_bar=display.progress_bar,
-        skip_from=_maybe_str(skip_from),
-        append_to_skip_file=_maybe_str(append_to_skip_file),
+        telemetry=telemetry_enabled,
+        skip_from=_maybe_str(artifacts.skip_from),
+        append_to_skip_file=_maybe_str(artifacts.append_to_skip_file),
         skip_tagged=filter_.skip_tagged,
         newer_than=filter_.newer_than,
         older_than=filter_.older_than,
@@ -473,26 +490,6 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
             name=("--input", "-i"),
             validator=validators.Path(exists=True),
             help="One or more paths: files and/or directories (repeat this option)",
-        ),
-    ] = None,
-    skip_from: Annotated[
-        Path | None,
-        Parameter(
-            name=("--skip-from",),
-            validator=validators.Path(exists=True, file_okay=True, dir_okay=False),
-            help="Path to newline-delimited text file listing filenames to skip",
-        ),
-    ] = None,
-    append_to_skip_file: Annotated[
-        Path | None,
-        Parameter(
-            name=("--append-to-skip-file",),
-            validator=validators.Path(file_okay=True, dir_okay=False),
-            help=(
-                "Append the name of each successfully-processed file to this path. "
-                "Created if it does not exist. Pass the same path to --skip-from on later "
-                "runs to resume work without redoing finished photos"
-            ),
         ),
     ] = None,
     *,
@@ -528,6 +525,7 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
     output: Annotated[OutputConfig, Parameter(name="*")] = _DEFAULT_OUTPUT,
     inference: Annotated[InferenceConfig, Parameter(name="*")] = _DEFAULT_INFERENCE,
     log: Annotated[LogConfig, Parameter(name="*")] = _DEFAULT_LOG,
+    telemetry_config: Annotated[TelemetryConfig, Parameter(name="*")] = _DEFAULT_TELEMETRY,
 ) -> None:
     """
     Tag images with AI and write Lightroom-compatible metadata (sidecar or embedded).
@@ -615,8 +613,6 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
         try:
             _tag_inside_lock(
                 inputs=inputs,
-                skip_from=skip_from,
-                append_to_skip_file=append_to_skip_file,
                 image_extensions=image_extensions,
                 recursive=recursive,
                 workers=workers,
@@ -627,6 +623,7 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
                 output=output,
                 inference=inference,
                 log=log,
+                telemetry_config=telemetry_config,
             )
         except PhotoTaggerError as exc:
             raise SystemExit(1) from exc
@@ -635,8 +632,6 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
 def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one.
     *,
     inputs: list[Path] | None,
-    skip_from: Path | None,
-    append_to_skip_file: Path | None,
     image_extensions: str,
     recursive: bool,
     workers: int,
@@ -647,15 +642,15 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     output: OutputConfig,
     inference: InferenceConfig,
     log: LogConfig,
+    telemetry_config: TelemetryConfig,
 ) -> None:
     """Body of ``tag`` that runs once the optional file lock has been acquired."""
+    _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
     options = to_processing_options(output, inference)
     newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
     older_than = _parse_filter_date(filter_.older_than, flag="--older-than")
     _log_startup(
         inputs=inputs,
-        skip_from=skip_from,
-        append_to_skip_file=append_to_skip_file,
         image_extensions=image_extensions,
         recursive=recursive,
         workers=workers,
@@ -665,11 +660,12 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         provider=provider,
         options=options,
         log=log,
+        telemetry_enabled=telemetry_config.enabled,
     )
 
     image_files = apply_skip_file(
         resolve_image_batch(inputs, image_extensions, recursive=recursive),
-        skip_from,
+        artifacts.skip_from,
     )
     image_files = apply_date_filter(
         image_files,
@@ -705,8 +701,8 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     started_at = datetime.now(tz=UTC)
 
     def _on_complete(totals: BatchTotals) -> None:
-        # Runs once before run_batch raises SystemExit, so the JSON file is written
-        # whether the batch succeeded fully or only partially.
+        # Runs once before run_batch raises SystemExit, so the summary file is written and the
+        # telemetry beacon fired whether the batch succeeded fully or only partially.
         _write_summary_file(
             artifacts.summary_file,
             totals,
@@ -714,6 +710,17 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
             model_name=provider.model_name,
             provider_name=provider.provider_name,
             user_prompt_chars=len(user_prompt),
+        )
+        telemetry.emit(
+            telemetry.RunInfo(
+                interface="cli",
+                provider=provider.provider_name,
+                model=provider.model_name,
+                batch_size=totals.total_files,
+                duration_seconds=(datetime.now(tz=UTC) - started_at).total_seconds(),
+            ),
+            enabled=telemetry_config.enabled,
+            block=True,
         )
 
     csv_writer = _open_csv_report(artifacts.csv_file)
@@ -726,7 +733,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
                 image_files,
                 agent,
                 options,
-                on_success=make_skip_list_appender(append_to_skip_file),
+                on_success=make_skip_list_appender(artifacts.append_to_skip_file),
                 on_complete=_on_complete,
                 user_prompt=user_prompt,
                 workers=max(1, workers),

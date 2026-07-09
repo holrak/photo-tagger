@@ -16,7 +16,10 @@ from unittest.mock import patch
 
 import pytest
 
-from photo_tagger import main as main_module
+from photo_tagger import (
+    main as main_module,
+    telemetry,
+)
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
 
 
@@ -733,3 +736,89 @@ def test_gui_launches_when_available() -> None:
     ):
         main_module.gui()
     assert exc_info.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# telemetry wiring
+# ---------------------------------------------------------------------------
+
+
+def _run_batch_firing_complete(
+    image_files: list[Path],
+    _agent: object,
+    _options: object,
+    **kwargs: object,
+) -> object:
+    """Stand-in for run_batch that drives the on_complete callback so the beacon fires."""
+    on_complete = kwargs.get("on_complete")
+    if on_complete is not None:
+        on_complete(BatchTotals(total_files=len(image_files)))  # type: ignore[operator]
+    return None
+
+
+def test_cli_emits_telemetry_on_completion(tmp_path: Path) -> None:
+    """A successful run reports interface, provider, model, and batch size to telemetry."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    emitted: dict[str, Any] = {}
+
+    def fake_emit(run: Any, *, enabled: bool, block: bool = False) -> None:  # noqa: ANN401
+        emitted["run"] = run
+        emitted["enabled"] = enabled
+        emitted["block"] = block
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "run_batch", side_effect=_run_batch_firing_complete),
+        patch.object(telemetry, "emit", side_effect=fake_emit),
+    ):
+        _run_app(["--input", str(image), "--provider", "ollama", "--model", "my-vlm"])
+
+    assert emitted["enabled"] is True
+    assert emitted["block"] is True
+    assert emitted["run"].interface == "cli"
+    assert emitted["run"].provider == "ollama"
+    assert emitted["run"].model == "my-vlm"
+    assert emitted["run"].batch_size == 1
+
+
+def test_cli_no_telemetry_flag_disables_and_silences_notice(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--no-telemetry passes enabled=False to emit and suppresses the first-run notice."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    emitted: dict[str, Any] = {}
+
+    def fake_emit(_run: Any, *, enabled: bool, block: bool = False) -> None:  # noqa: ANN401
+        emitted["enabled"] = enabled
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "run_batch", side_effect=_run_batch_firing_complete),
+        patch.object(telemetry, "emit", side_effect=fake_emit),
+    ):
+        _run_app(["--input", str(image), "--no-telemetry"])
+
+    assert emitted["enabled"] is False
+    assert "anonymous usage stats" not in capsys.readouterr().err
+
+
+def test_cli_telemetry_notice_shown_only_on_first_run(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With telemetry on (the default), the disclosure prints once and stays quiet after."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image)])
+        first_run_err = capsys.readouterr().err
+        _run_app(["--input", str(image)])
+        second_run_err = capsys.readouterr().err
+
+    assert "anonymous usage stats" in first_run_err
+    assert "anonymous usage stats" not in second_run_err

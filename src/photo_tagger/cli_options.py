@@ -282,8 +282,28 @@ class DisplayConfig:
 
 @dataclass
 class ArtifactConfig:
-    """Optional sidecar files the run reads (prompt) or writes (summary, cache)."""
+    """Optional sidecar files the run reads (prompt, skip list) or writes (summary, cache)."""
 
+    skip_from: Annotated[
+        Path | None,
+        Parameter(
+            name=("--skip-from",),
+            validator=validators.Path(exists=True, file_okay=True, dir_okay=False),
+            help="Path to newline-delimited text file listing filenames to skip",
+        ),
+    ] = None
+    append_to_skip_file: Annotated[
+        Path | None,
+        Parameter(
+            name=("--append-to-skip-file",),
+            validator=validators.Path(file_okay=True, dir_okay=False),
+            help=(
+                "Append the name of each successfully-processed file to this path. "
+                "Created if it does not exist. Pass the same path to --skip-from on later "
+                "runs to resume work without redoing finished photos"
+            ),
+        ),
+    ] = None
     prompt_file: Annotated[
         Path | None,
         Parameter(
@@ -348,6 +368,25 @@ class ArtifactConfig:
     ] = None
 
 
+@dataclass
+class TelemetryConfig:
+    """Anonymous, opt-out usage telemetry toggle."""
+
+    enabled: Annotated[
+        bool,
+        Parameter(
+            name=("--telemetry",),
+            negative="--no-telemetry",
+            help=(
+                "Send anonymous usage stats (model name, batch size, OS, CPU arch, timing) to help "
+                "guide development. No photos, file paths, filenames, tags, or personal data are "
+                "ever sent. Disable with --no-telemetry, PHOTO_TAGGER_NO_TELEMETRY=1, or the "
+                "cross-tool DO_NOT_TRACK=1"
+            ),
+        ),
+    ] = True
+
+
 def to_processing_options(output: OutputConfig, inference: InferenceConfig) -> ProcessingOptions:
     """Combine the CLI's output + inference groups into the pipeline's options dataclass."""
     return ProcessingOptions(
@@ -379,6 +418,7 @@ class Defaults:
     display: DisplayConfig
     artifacts: ArtifactConfig
     filter: FilterConfig
+    telemetry: TelemetryConfig
     extensions: str
     workers: int
     recursive: bool
@@ -400,6 +440,7 @@ def load_defaults(config: dict[str, Any] | None = None) -> Defaults:
         display=apply_overrides(DisplayConfig(), file_config.get("display", {})),
         artifacts=apply_overrides(ArtifactConfig(), file_config.get("artifacts", {})),
         filter=apply_overrides(FilterConfig(), file_config.get("filter", {})),
+        telemetry=apply_overrides(TelemetryConfig(), file_config.get("telemetry", {})),
         extensions=file_config.get("extensions", "cr3,jpg"),
         workers=file_config.get("workers", 1),
         recursive=file_config.get("recursive", False),
