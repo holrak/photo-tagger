@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -54,16 +55,19 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
     QStackedWidget,
     QTextEdit,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from photo_tagger import __version__, telemetry
@@ -215,6 +219,12 @@ QPushButton#primary:disabled {
 }
 QLineEdit, QPlainTextEdit, QComboBox { padding: 4px 6px; border-radius: 5px; }
 QTreeWidget::item { padding: 2px; }
+QToolButton { border: none; background: transparent; padding: 4px; font-weight: 600; }
+QToolButton:hover { color: #6366f1; }
+QProgressBar {
+    border: 1px solid rgba(130, 130, 140, 60%); border-radius: 5px; text-align: center;
+}
+QProgressBar::chunk { background: #6366f1; border-radius: 4px; }
 QLabel#preview { background: #1f1f24; border-radius: 8px; color: #9a9aa5; }
 QLabel#hint, QLabel#status { color: #8a8a8a; }
 QLabel#empty { color: #8a8a8a; font-size: 15px; }
@@ -414,7 +424,13 @@ class _SortableTreeItem(QTreeWidgetItem):  # NOSONAR S8500 - Qt sorts items via 
 
 
 class MainWindow(QMainWindow):
-    """The main window: a toolbar, a checkable file tree, and an editable detail pane."""
+    """
+    The main window, laid out along the add -> generate -> review -> save workflow.
+
+    A one-row header picks the provider and model (URL/key live in a Connection dialog), the left
+    panel holds the checkable file tree with its add/select controls, the right pane reviews one
+    photo (or a folder grid), and the bottom bar carries the batch actions with a progress bar.
+    """
 
     def __init__(self) -> None:
         """Build the widgets, enable drag-and-drop, and wire the actions."""
@@ -446,23 +462,14 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.addLayout(self._build_toolbar())
+        layout.addLayout(self._build_header())
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_tree_panel())
         splitter.addWidget(self._build_right_pane())
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
         layout.addWidget(splitter, stretch=1)
-
-        status_row = QHBoxLayout()
-        self._status = QLabel("Drag photos or folders here to begin.")
-        self._status.setObjectName("status")
-        logs_button = QPushButton("Open logs")
-        logs_button.setToolTip(f"Open the log folder ({_LOG_FOLDER}) in your file browser.")
-        logs_button.clicked.connect(self._open_logs)
-        status_row.addWidget(self._status, stretch=1)
-        status_row.addWidget(logs_button)
-        layout.addLayout(status_row)
+        layout.addLayout(self._build_bottom_bar())
         self._build_menus()
         self._show_empty()
 
@@ -472,9 +479,17 @@ class MainWindow(QMainWindow):
         """Build the menu bar: File actions, a Settings telemetry toggle, and Help."""
         menubar = self.menuBar()
 
-        file_menu = menubar.addMenu("File")
+        # Kept on self: QAction.menu() hands out a transient wrapper that shiboken may delete,
+        # so tests (and future code) need a stable reference to the menu itself.
+        file_menu = self._file_menu = menubar.addMenu("File")
         file_menu.addAction("Add Photos...", self._choose_files)
         file_menu.addAction("Add Folder...", self._choose_folder)
+        file_menu.addSeparator()
+        export_action = file_menu.addAction("Export CSV Report...", self._export_csv)
+        export_action.setToolTip(
+            "Save a CSV report of every photo: generated and existing metadata, EXIF, and "
+            "token usage.",
+        )
         file_menu.addSeparator()
         file_menu.addAction("Clear List", self._clear)
         file_menu.addSeparator()
@@ -516,14 +531,8 @@ class MainWindow(QMainWindow):
             '<a href="https://github.com/jbsilva/photo-tagger">github.com/jbsilva/photo-tagger</a>',
         )
 
-    def _build_toolbar(self) -> QVBoxLayout:
-        # Two rows: connection settings on top, actions below, so neither gets cramped.
-        bar = QVBoxLayout()
-        bar.addLayout(self._build_connection_row())
-        bar.addLayout(self._build_action_row())
-        return bar
-
-    def _build_connection_row(self) -> QHBoxLayout:
+    def _build_header(self) -> QHBoxLayout:
+        """One compact row: the model choice the user changes often, the rest behind Connection."""
         provider = self._defaults.provider
 
         self._provider = QComboBox()
@@ -537,7 +546,7 @@ class MainWindow(QMainWindow):
 
         self._model = QComboBox()
         self._model.setEditable(True)
-        self._model.setMinimumWidth(220)
+        self._model.setMinimumWidth(260)
         self._model.setCurrentText(provider.model_name)
         self._model.setToolTip(
             "Model identifier. Type it, or press Refresh to list what the provider serves.",
@@ -546,9 +555,32 @@ class MainWindow(QMainWindow):
         refresh.setToolTip("Query the provider for the models it currently serves.")
         refresh.clicked.connect(self._refresh_models)
 
+        self._connection_dialog = self._build_connection_dialog()
+        connection = QPushButton("Connection...")
+        connection.setToolTip("Server URL, API key, and a connection test.")
+        connection.clicked.connect(self._connection_dialog.exec)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Provider"))
+        row.addWidget(self._provider)
+        row.addWidget(QLabel("Model"))
+        row.addWidget(self._model, stretch=1)
+        row.addWidget(refresh)
+        row.addWidget(connection)
+        return row
+
+    def _build_connection_dialog(self) -> QDialog:
+        """URL, API key, and the connection test: set-once settings, out of the main window."""
+        provider = self._defaults.provider
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Connection settings")
+        dialog.setMinimumWidth(460)
+        form = QFormLayout(dialog)
+
         self._url = QLineEdit(provider.api_base_url or "")
         self._url.setPlaceholderText("(provider default URL)")
         self._url.setToolTip("Provider API base URL. Leave blank to use the provider's default.")
+        form.addRow("Base URL", self._url)
 
         # Pre-filled from a config-file key if one is set, never from an environment variable: an
         # env key stays in the environment and is resolved at call time, so it never lands in the
@@ -556,72 +588,31 @@ class MainWindow(QMainWindow):
         self._api_key = QLineEdit(provider.api_key or "")
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._api_key.setClearButtonEnabled(True)
-        self._api_key.setMinimumWidth(170)
         self._api_key.setPlaceholderText("(uses provider env var)")
         self._api_key.setToolTip(
             "API key for the provider. Leave blank to use the provider's environment variable "
             "(OPENAI_API_KEY, LM_STUDIO_API_KEY, or OLLAMA_API_KEY). Required for OpenAI. A typed "
             "key is used for this session only and is never written to disk.",
         )
+        form.addRow("API key", self._api_key)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Provider"))
-        row.addWidget(self._provider)
-        row.addWidget(QLabel("Model"))
-        row.addWidget(self._model)
-        row.addWidget(refresh)
-        row.addWidget(QLabel("URL"))
-        row.addWidget(self._url, stretch=1)
-        row.addWidget(QLabel("API key"))
-        row.addWidget(self._api_key)
-        return row
-
-    def _build_action_row(self) -> QHBoxLayout:
         self._test_button = QPushButton("Test connection")
         self._test_button.setToolTip("Check ExifTool and that the provider serves the model.")
         self._test_button.clicked.connect(self._test_connection)
-        self._retry_button = QPushButton("Retry failed")
-        self._retry_button.setToolTip("Re-run the model on every photo that failed to generate.")
-        self._retry_button.clicked.connect(self._retry_failed)
-        self._generate_button = QPushButton("Generate selected")
-        self._generate_button.setObjectName("primary")
-        self._generate_button.setToolTip("Run the model on the checked photos.")
-        self._generate_button.clicked.connect(self._generate)
-        self._cancel_button = QPushButton("Cancel")
-        self._cancel_button.setToolTip(
-            "Stop generating. The photo currently in flight finishes; the rest are left "
-            "untouched so you can resume them later.",
-        )
-        self._cancel_button.setEnabled(False)
-        self._cancel_button.clicked.connect(self._cancel_generation)
-
-        row = QHBoxLayout()
-        row.addWidget(self._test_button)
-        row.addWidget(self._retry_button)
-        row.addStretch(1)
-        row.addWidget(self._cancel_button)
-        row.addWidget(self._generate_button)
-        return row
+        close = QPushButton("Close")
+        close.setDefault(True)
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self._test_button)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        form.addRow(buttons)
+        return dialog
 
     def _build_tree_panel(self) -> QWidget:
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.addLayout(self._build_tree_controls())
-
-        options = QHBoxLayout()
-        self._extensions = QLineEdit(DEFAULT_GUI_EXTENSIONS)
-        self._extensions.setToolTip(
-            "Extensions to scan for in folders (comma-separated).\n"
-            "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg.",
-        )
-        self._recursive = QCheckBox("Recurse")
-        self._recursive.setChecked(True)
-        self._recursive.setToolTip("Descend into subfolders when adding a folder.")
-        options.addWidget(QLabel("File types"))
-        options.addWidget(self._extensions, stretch=1)
-        options.addWidget(self._recursive)
-        box.addLayout(options)
-        box.addLayout(self._build_skip_controls())
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Photos", "Status"])
@@ -654,37 +645,66 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         for label, tip, slot in (
             ("Add files...", "Add individual photos.", self._choose_files),
-            ("Add folder...", "Add a folder of photos.", self._choose_folder),
-            ("Remove", "Remove the selected folder or photo from the list.", self._remove_selected),
-            ("Clear", "Remove every photo from the list.", self._clear),
-            (
-                "Export CSV...",
-                "Save a CSV report of every photo: generated and existing metadata, EXIF, and "
-                "token usage.",
-                self._export_csv,
-            ),
+            ("Add folder...", "Add a folder of photos (see Scan options).", self._choose_folder),
         ):
             button = QPushButton(label)
             button.setToolTip(tip)
             button.clicked.connect(slot)
             controls.addWidget(button)
+
+        scan = QPushButton("Scan options")
+        scan.setToolTip("File types and subfolder recursion used when adding a folder.")
+        scan.setMenu(self._build_scan_menu())
+        controls.addWidget(scan)
         controls.addStretch(1)
+
+        select = QPushButton("Select")
+        select.setToolTip("Check or uncheck photos in bulk.")
+        select.setMenu(self._build_select_menu())
+        controls.addWidget(select)
+
+        remove = QPushButton("Remove")
+        remove.setToolTip("Remove the selected folder or photo from the list (or press Delete).")
+        remove.clicked.connect(self._remove_selected)
+        controls.addWidget(remove)
         return controls
 
-    def _build_skip_controls(self) -> QHBoxLayout:
-        """One-click filters that uncheck photos in bulk, mirroring the CLI's skip flags."""
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Deselect"))
-
-        tagged = QPushButton("Already tagged")
-        tagged.setToolTip(
-            "Uncheck photos that already have the chosen metadata (in the image or its XMP "
-            "sidecar). Pick which fields count from the menu, e.g. 'a title and a description' "
-            "to skip those while keeping keyword-only photos. Mirrors the CLI's --skip-tagged.",
+    def _build_scan_menu(self) -> QMenu:
+        """Build the small popover form holding the folder-scan settings (types, recursion)."""
+        menu = QMenu(self)
+        panel = QWidget()
+        form = QFormLayout(panel)
+        self._extensions = QLineEdit(DEFAULT_GUI_EXTENSIONS)
+        self._extensions.setMinimumWidth(280)
+        self._extensions.setToolTip(
+            "Extensions to scan for in folders (comma-separated).\n"
+            "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg.",
         )
-        menu = QMenu(tagged)
+        form.addRow("File types", self._extensions)
+        self._recursive = QCheckBox("Include subfolders")
+        self._recursive.setChecked(True)
+        self._recursive.setToolTip("Descend into subfolders when adding a folder.")
+        form.addRow("", self._recursive)
+        host = QWidgetAction(menu)
+        host.setDefaultWidget(panel)
+        menu.addAction(host)
+        return menu
+
+    def _build_select_menu(self) -> QMenu:
+        """Bulk check/uncheck actions, including the CLI's --skip-tagged/--skip-from mirrors."""
+        menu = QMenu(self)
+        menu.addAction("Check All", lambda: self._set_all_checked(checked=True))
+        menu.addAction("Uncheck All", lambda: self._set_all_checked(checked=False))
+        menu.addSeparator()
+
+        self._tagged_menu = menu.addMenu("Uncheck Already Tagged")
+        self._tagged_menu.setToolTip(
+            "Uncheck photos that already have the chosen metadata (in the image or its XMP "
+            "sidecar), e.g. 'a title and a description' to skip those while keeping "
+            "keyword-only photos. Mirrors the CLI's --skip-tagged.",
+        )
         for text, required, match_all, phrase in _TAGGED_PRESETS:
-            action = menu.addAction(text)
+            action = self._tagged_menu.addAction(text)
             action.triggered.connect(
                 lambda _checked=False, req=required, all_=match_all, ph=phrase: (
                     self._deselect_tagged(
@@ -694,19 +714,23 @@ class MainWindow(QMainWindow):
                     )
                 ),
             )
-        tagged.setMenu(menu)
-        controls.addWidget(tagged)
 
-        from_file = QPushButton("From file...")
+        from_file = menu.addAction("Uncheck From Skip List...", self._deselect_from_file)
         from_file.setToolTip(
             "Uncheck photos whose filename or full path is listed in a text file (one per "
             "line), like the CLI's --skip-from.",
         )
-        from_file.clicked.connect(self._deselect_from_file)
-        controls.addWidget(from_file)
+        return menu
 
-        controls.addStretch(1)
-        return controls
+    def _set_all_checked(self, *, checked: bool) -> None:
+        """Check or uncheck every photo at once."""
+        if not self._items:
+            self._status.setText("Add photos before selecting.")
+            return
+        for item in self._items.values():
+            item.selected = checked
+        self._rebuild_tree()
+        self._update_status()
 
     def _build_right_pane(self) -> QWidget:
         """Build a stack showing the idle placeholder, one photo's detail, or a folder's grid."""
@@ -766,7 +790,7 @@ class MainWindow(QMainWindow):
         self._preview.setMinimumHeight(240)
         box.addWidget(self._preview)
         box.addLayout(self._build_compare_grid())
-        box.addLayout(self._build_diff_form())
+        box.addLayout(self._build_details_section())
         box.addLayout(self._build_save_row())
 
         scroll = QScrollArea()
@@ -826,8 +850,24 @@ class MainWindow(QMainWindow):
         grid.addWidget(self._keywords, 4, 2)
         return grid
 
-    def _build_diff_form(self) -> QFormLayout:
-        form = QFormLayout()
+    def _build_details_section(self) -> QVBoxLayout:
+        """Collapsible keyword-change details: the diff and the resulting hierarchy paths."""
+        box = QVBoxLayout()
+        self._details_toggle = QToolButton()
+        self._details_toggle.setText("Keyword changes")
+        self._details_toggle.setCheckable(True)
+        self._details_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self._details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._details_toggle.setToolTip(
+            "Show exactly what saving will change: added and removed keywords, plus the "
+            "Lightroom hierarchy paths that will be written.",
+        )
+        self._details_toggle.toggled.connect(self._on_details_toggled)
+        box.addWidget(self._details_toggle)
+
+        self._details_panel = QWidget()
+        form = QFormLayout(self._details_panel)
+        form.setContentsMargins(0, 0, 0, 0)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         self._diff = QTextEdit()
         self._diff.setReadOnly(True)
@@ -835,70 +875,116 @@ class MainWindow(QMainWindow):
         self._diff.setToolTip("Keyword changes a save will make: green added, red removed.")
         self._hierarchy = _readonly_box(60)
         self._hierarchy.setToolTip("Lightroom hierarchy paths that saving will write.")
-        form.addRow("Keyword changes", self._diff)
+        form.addRow("Changes", self._diff)
         form.addRow("Hierarchy", self._hierarchy)
-        return form
+        self._details_panel.hide()
+        box.addWidget(self._details_panel)
+        return box
 
-    def _build_write_fields_row(self) -> QHBoxLayout:
-        """Checkboxes choosing which fields a save writes, like the CLI's --no-write-* flags."""
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Write"))
-        self._write_title = QCheckBox("Title")
+    def _on_details_toggled(self, expanded: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
+        """Expand or collapse the keyword-change details under the disclosure arrow."""
+        arrow = Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        self._details_toggle.setArrowType(arrow)
+        self._details_panel.setVisible(expanded)
+
+    def _build_save_options_menu(self) -> QMenu:
+        """Build the menu deciding what a save writes: field toggles, merge mode, sidecar."""
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        self._write_title = QAction("Write Title", self)
         self._write_title.setToolTip("Write the title. Uncheck to leave the existing title as is.")
-        self._write_description = QCheckBox("Description")
+        self._write_description = QAction("Write Description", self)
         self._write_description.setToolTip(
             "Write the description. Uncheck to leave the existing description as is.",
         )
-        self._write_keywords = QCheckBox("Keywords")
+        self._write_keywords = QAction("Write Keywords", self)
         self._write_keywords.setToolTip(
             "Write keywords. Uncheck to leave existing keywords untouched, e.g. to refresh only "
             "the title and description.",
         )
-        for checkbox in (self._write_title, self._write_description, self._write_keywords):
-            checkbox.setChecked(True)
-            row.addWidget(checkbox)
-        # Connect only after setChecked above, so building the row does not fire the handler
+        for action in (self._write_title, self._write_description, self._write_keywords):
+            action.setCheckable(True)
+            action.setChecked(True)
+            menu.addAction(action)
+        # Connect only after setChecked above, so building the menu does not fire the handler
         # before _overwrite (which it toggles) has been created further down.
         self._write_keywords.toggled.connect(self._on_write_keywords_toggled)
-        row.addStretch(1)
-        return row
+        menu.addSeparator()
 
-    def _build_save_row(self) -> QVBoxLayout:
-        box = QVBoxLayout()
-        box.addLayout(self._build_write_fields_row())
-
-        toggles = QHBoxLayout()
-        self._overwrite = QCheckBox("Overwrite existing keywords")
-        self._overwrite.setToolTip("Replace existing keywords instead of merging the new ones in.")
+        self._overwrite = QAction("Overwrite Existing Keywords", self)
+        self._overwrite.setToolTip(
+            "Replace existing keywords instead of merging the new ones in.",
+        )
         self._overwrite.toggled.connect(self._refresh_derived)
-        self._embed = QCheckBox("Embed in photo")
+        self._embed = QAction("Embed in Photo", self)
         self._embed.setToolTip("Write into the image file instead of an XMP sidecar.")
-        toggles.addWidget(self._overwrite)
-        toggles.addWidget(self._embed)
-        toggles.addStretch(1)
-        box.addLayout(toggles)
+        for action in (self._overwrite, self._embed):
+            action.setCheckable(True)
+            menu.addAction(action)
+        return menu
 
-        buttons = QHBoxLayout()
+    def _build_save_row(self) -> QHBoxLayout:
+        """Per-photo actions at the bottom of the detail pane; batch actions live below."""
+        row = QHBoxLayout()
+        row.addStretch(1)
         self._generate_one_button = QPushButton("Generate this photo")
         self._generate_one_button.setToolTip(
             "Run the model on just this photo, regardless of which photos are checked.",
         )
         self._generate_one_button.clicked.connect(self._generate_current)
         self._save_button = QPushButton("Save this photo")
-        self._save_button.setToolTip("Write the checked fields (see the Write row) to this photo.")
+        self._save_button.setToolTip(
+            "Write this photo's fields, honoring the Save options next to Save selected.",
+        )
         self._save_button.clicked.connect(self._save_current)
+        row.addWidget(self._generate_one_button)
+        row.addWidget(self._save_button)
+        return row
+
+    def _build_bottom_bar(self) -> QHBoxLayout:
+        """Status on the left; the batch workflow (generate, then save) on the right."""
+        self._status = QLabel("Drag photos or folders here to begin.")
+        self._status.setObjectName("status")
+        self._progress = QProgressBar()
+        self._progress.setMaximumWidth(220)
+        self._progress.setFormat("%v / %m")
+        self._progress.setVisible(False)
+
+        self._retry_button = QPushButton("Retry failed")
+        self._retry_button.setToolTip("Re-run the model on every photo that failed to generate.")
+        self._retry_button.clicked.connect(self._retry_failed)
+        self._cancel_button = QPushButton("Cancel")
+        self._cancel_button.setToolTip(
+            "Stop generating. The photo currently in flight finishes; the rest are left "
+            "untouched so you can resume them later.",
+        )
+        self._cancel_button.setEnabled(False)
+        self._cancel_button.clicked.connect(self._cancel_generation)
+
+        self._generate_button = QPushButton("Generate selected")
+        self._generate_button.setObjectName("primary")
+        self._generate_button.setToolTip("Run the model on the checked photos.")
+        self._generate_button.clicked.connect(self._generate)
+
+        save_options = QPushButton("Save options")
+        save_options.setToolTip("Which fields a save writes, merge vs overwrite, and sidecar.")
+        save_options.setMenu(self._build_save_options_menu())
         self._save_selected_button = QPushButton("Save selected")
         self._save_selected_button.setObjectName("primary")
         self._save_selected_button.setToolTip(
-            "Write the checked photos that have a generated proposal, using the toggles above.",
+            "Write the checked photos that have a generated proposal, using the Save options.",
         )
         self._save_selected_button.clicked.connect(self._save_selected)
-        buttons.addWidget(self._generate_one_button)
-        buttons.addWidget(self._save_button)
-        buttons.addStretch(1)
-        buttons.addWidget(self._save_selected_button)
-        box.addLayout(buttons)
-        return box
+
+        row = QHBoxLayout()
+        row.addWidget(self._status, stretch=1)
+        row.addWidget(self._progress)
+        row.addWidget(self._retry_button)
+        row.addWidget(self._cancel_button)
+        row.addWidget(self._generate_button)
+        row.addWidget(save_options)
+        row.addWidget(self._save_selected_button)
+        return row
 
     # --- drag and drop ---------------------------------------------------------------------
 
@@ -1300,21 +1386,26 @@ class MainWindow(QMainWindow):
             # Keywords are not being written, so the diff and hierarchy do not apply.
             self._diff.setHtml("(keywords will not be written)")
             self._hierarchy.setPlainText(_NONE)
+            self._details_toggle.setText("Keyword changes (not written)")
             return
         edited = parse_keyword_lines(self._keywords.toPlainText())
         overwrite = self._overwrite.isChecked()
         existing = self._current.existing_keywords
         paths = hierarchy_preview(existing, edited, overwrite=overwrite)
         self._hierarchy.setPlainText(paths or _NONE)
-        self._diff.setHtml(_diff_html(existing, edited, overwrite=overwrite))
+        diff = keyword_diff(existing, edited, overwrite=overwrite)
+        self._diff.setHtml(_diff_html(diff))
+        # A collapsed section still tells the user whether saving changes anything.
+        added = sum(1 for _kw, state in diff if state == ADDED)
+        removed = sum(1 for _kw, state in diff if state == REMOVED)
+        summary = f"+{added} / -{removed}" if added or removed else "no change"
+        self._details_toggle.setText(f"Keyword changes ({summary})")
 
     def _show_detail(self, *, enabled: bool) -> None:
         for widget in (
             self._title,
             self._description,
             self._keywords,
-            self._overwrite,
-            self._embed,
             self._save_button,
             self._generate_one_button,
         ):
@@ -1436,7 +1527,7 @@ class MainWindow(QMainWindow):
             # Clear a stale failure banner the moment its photo is re-queued.
             self._update_error_banner(current)
         self._cancelling = False
-        self._set_running(running=True)
+        self._set_running(running=True, total=len(items))
         self._status.setText(f"Generating {len(items)} photo(s)...")
 
         self._thread = QThread(self)
@@ -1460,6 +1551,7 @@ class MainWindow(QMainWindow):
             return
         apply_proposal(item, proposal)
         self._refresh_status_cell(item)
+        self._advance_progress()
         if self._current is item:
             self._show_item(item)
         self._update_status()
@@ -1471,6 +1563,7 @@ class MainWindow(QMainWindow):
         item.status = FAILED
         item.error = message
         self._refresh_status_cell(item)
+        self._advance_progress()
         if self._current is item:
             self._update_error_banner(item)
         self._update_status()
@@ -1506,12 +1599,21 @@ class MainWindow(QMainWindow):
                 reset += 1
         return reset
 
-    def _set_running(self, *, running: bool) -> None:
+    def _set_running(self, *, running: bool, total: int = 0) -> None:
         self._generate_button.setEnabled(not running)
         self._generate_one_button.setEnabled(not running)
         self._retry_button.setEnabled(not running)
         self._test_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)
+        self._progress.setVisible(running)
+        if running:
+            self._progress.setRange(0, total)
+            self._progress.setValue(0)
+
+    def _advance_progress(self) -> None:
+        """Tick the run progress bar for one finished (or failed) photo."""
+        if self._thread is not None:
+            self._progress.setValue(self._progress.value() + 1)
 
     def _teardown_thread(self) -> None:
         if self._thread is not None:
@@ -1685,10 +1787,10 @@ _DIFF_STYLE = {
 }
 
 
-def _diff_html(existing: KeywordSet, edited_keywords: list[str], *, overwrite: bool) -> str:
+def _diff_html(diff: list[tuple[str, str]]) -> str:
     """Render the keyword diff as HTML: green added, red struck-through removed, grey kept."""
     rows: list[str] = []
-    for keyword, state in keyword_diff(existing, edited_keywords, overwrite=overwrite):
+    for keyword, state in diff:
         safe = html.escape(keyword)
         style, marker = _DIFF_STYLE.get(state, ("color:#8a8a8a", "&nbsp;&nbsp;&nbsp;"))
         rows.append(f'<span style="{style}">{marker}{safe}</span>')

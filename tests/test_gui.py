@@ -447,13 +447,8 @@ def test_already_tagged_menu_actions_route_to_each_preset(
     window: gui.MainWindow,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each menu entry triggers _deselect_tagged with its own preset (no late-binding bug)."""
-    from PySide6.QtWidgets import QPushButton  # noqa: PLC0415
-
-    # The "Already tagged" button is the only one carrying a popup menu.
-    menu_buttons = [b for b in window.findChildren(QPushButton) if b.menu() is not None]
-    assert len(menu_buttons) == 1
-    actions = menu_buttons[0].menu().actions()
+    """Each preset in the Select menu triggers _deselect_tagged with it (no late-binding bug)."""
+    actions = window._tagged_menu.actions()  # noqa: SLF001
     assert len(actions) == len(gui._TAGGED_PRESETS)  # noqa: SLF001
 
     captured: list[tuple[frozenset[str], bool, str]] = []
@@ -466,6 +461,27 @@ def test_already_tagged_menu_actions_route_to_each_preset(
         action.trigger()
 
     assert captured == [(r, m, p) for _label, r, m, p in gui._TAGGED_PRESETS]  # noqa: SLF001
+
+
+def test_select_menu_checks_and_unchecks_all(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Uncheck All clears every checkbox (model and rendered tree); Check All restores them."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+
+    window._set_all_checked(checked=False)  # noqa: SLF001
+    assert all(not item.selected for item in window._items.values())  # noqa: SLF001
+    assert _check_state(window, a) == Qt.CheckState.Unchecked
+
+    window._set_all_checked(checked=True)  # noqa: SLF001
+    assert all(item.selected for item in window._items.values())  # noqa: SLF001
+    assert _check_state(window, b) == Qt.CheckState.Checked
+
+
+def test_set_all_checked_with_no_photos_nags(window: gui.MainWindow) -> None:
+    """With nothing added, the bulk-select actions report it instead of rebuilding the tree."""
+    window._set_all_checked(checked=False)  # noqa: SLF001
+    assert "Add photos" in window._status.text()  # noqa: SLF001
 
 
 def test_apply_skip_file_unchecks_listed_photos(
@@ -1359,3 +1375,91 @@ def test_telemetry_toggle_reflects_saved_off_preference(qapp: QApplication) -> N
         assert win._telemetry_action.isChecked() is False  # noqa: SLF001
     finally:
         win.close()
+
+
+# ---------------------------------------------------------------------------
+# Redesigned chrome: progress bar, details disclosure, save options, menus
+# ---------------------------------------------------------------------------
+
+
+def test_progress_bar_tracks_the_run(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The progress bar appears for a run, ticks once per finished photo, and hides after."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_generation(monkeypatch)
+    _add_dir(window, {"a": img})
+    assert window._progress.isHidden()  # noqa: SLF001 - idle: no bar
+
+    window._run_generation([window._items[str(img)]])  # noqa: SLF001
+    assert not window._progress.isHidden()  # noqa: SLF001
+    assert window._progress.maximum() == 1  # noqa: SLF001
+    assert window._progress.value() == 0  # noqa: SLF001
+
+    window._on_file_done(  # noqa: SLF001
+        Proposal(
+            path=img,
+            existing_title=None,
+            existing_description=None,
+            existing_keywords=KeywordSet(),
+            title="T",
+            description="D",
+            keywords=[],
+        ),
+    )
+    assert window._progress.value() == 1  # noqa: SLF001
+
+    window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
+    assert window._progress.isHidden()  # noqa: SLF001
+
+
+def test_details_disclosure_expands_and_collapses(window: gui.MainWindow) -> None:
+    """The keyword-change details start collapsed and follow the disclosure toggle."""
+    assert window._details_panel.isHidden()  # noqa: SLF001
+    window._details_toggle.setChecked(True)  # noqa: SLF001
+    assert not window._details_panel.isHidden()  # noqa: SLF001
+    assert window._details_toggle.arrowType() == Qt.ArrowType.DownArrow  # noqa: SLF001
+    window._details_toggle.setChecked(False)  # noqa: SLF001
+    assert window._details_panel.isHidden()  # noqa: SLF001
+    assert window._details_toggle.arrowType() == Qt.ArrowType.RightArrow  # noqa: SLF001
+
+
+def test_details_toggle_summarizes_keyword_changes(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The collapsed disclosure still shows how many keywords a save would add or remove."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=["Beach"])
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    window._keywords.setPlainText("Beach\nEagle")  # noqa: SLF001 - one new keyword
+    assert "+1" in window._details_toggle.text()  # noqa: SLF001
+
+    window._keywords.setPlainText("Beach")  # noqa: SLF001 - back to the existing set
+    assert "no change" in window._details_toggle.text()  # noqa: SLF001
+
+
+def test_save_options_default_to_writing_all_fields(window: gui.MainWindow) -> None:
+    """The Save options menu defaults match the CLI: write every field, merge, sidecar."""
+    for action in (window._write_title, window._write_description, window._write_keywords):  # noqa: SLF001
+        assert action.isCheckable()
+        assert action.isChecked()
+    assert not window._overwrite.isChecked()  # noqa: SLF001 - merge, not overwrite
+    assert not window._embed.isChecked()  # noqa: SLF001 - sidecar, not embed
+
+
+def test_file_menu_offers_csv_export(window: gui.MainWindow) -> None:
+    """The CSV export moved off the toolbar and lives in the File menu."""
+    texts = [action.text() for action in window._file_menu.actions()]  # noqa: SLF001
+    assert "Export CSV Report..." in texts
+
+
+def test_scan_options_hold_extensions_and_recursion(window: gui.MainWindow) -> None:
+    """The scan-options popover carries the folder-scan settings with the CLI-like defaults."""
+    assert window._extensions.text() == gui.DEFAULT_GUI_EXTENSIONS  # noqa: SLF001
+    assert window._recursive.isChecked()  # noqa: SLF001
