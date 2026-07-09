@@ -53,6 +53,7 @@ httpx
 iconset
 iconutil
 importorskip
+importorskips
 imread
 inlinehilite
 internvl
@@ -61,8 +62,11 @@ IPTC
 isort
 jbsilva
 LANCZOS
+libegl
 libimage
+libopengl
 libraw
+libxkbcommon
 Lightroom
 linecap
 linejoin
@@ -152,6 +156,7 @@ venv
 viewports
 workpath
 xdist
+xkbcommon
 xmpmeta
 zuban
 zubanls

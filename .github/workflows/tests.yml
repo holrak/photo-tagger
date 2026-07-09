@@ -5,12 +5,22 @@ on:
     branches: ["**"]
   pull_request:
 
+# A PR branch runs under both triggers; cancel the superseded run instead of paying for it twice.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -24,8 +34,8 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install dependencies
-        # NOSONAR S8541,S8544 - uv sync reads uv.lock (committed)
-        run: uv sync --group test
+        # --locked fails on a drifted uv.lock instead of silently re-resolving it.
+        run: uv sync --locked --group test
 
       - name: Run tests
         # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
@@ -33,7 +43,8 @@ jobs:
 
       - name: Upload coverage to Codecov
         # Upload even when a test fails: pytest-cov still writes the report at session end.
-        if: ${{ !cancelled() }}
+        # One OS is enough for coverage; the macOS leg only gates behavior.
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -41,14 +52,52 @@ jobs:
 
       - name: Upload coverage report
         # Shared with the sonarcloud job so the suite runs once and both tools report the same data.
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: reports/coverage.xml
           retention-days: 1
 
+  gui-tests:
+    # The offscreen Qt suite: without this job the [gui] extra never gets installed in CI, so
+    # tests/test_gui.py importorskips PySide6 and the whole desktop app ships untested.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install Qt runtime libraries and ExifTool
+        # Qt's offscreen platform still links EGL/xkbcommon; some GUI tests read real metadata.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libopengl0 libxkbcommon0 exiftool
+
+      - name: Install dependencies (with the gui extra)
+        run: uv sync --locked --group test --extra gui
+
+      - name: Ensure PySide6 is importable
+        # Fail loudly here rather than letting importorskip silently skip the whole suite.
+        run: uv run python -c "import PySide6"
+
+      - name: Run GUI tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest tests/test_gui.py
+
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -62,8 +111,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install dev dependencies
-        # NOSONAR S8541,S8544 - uv sync reads uv.lock (committed)
-        run: uv sync --group dev --group test
+        run: uv sync --locked --group dev --group test
 
       - name: ruff check
         # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
@@ -77,6 +125,13 @@ jobs:
         # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
         run: uv run zuban check
 
+      - name: pycroscope static analysis
+        # Same invocation as the pre-commit hook; a hookless fork PR must not bypass it.
+        run: uv run pycroscope --config-file pyproject.toml
+
+      - name: Check version sync
+        run: uv run scripts/check_version_sync.py
+
   sonarcloud:
     # Reuse the coverage report from unit-tests instead of running the suite twice.
     needs: unit-tests
@@ -84,6 +139,7 @@ jobs:
     # not source). The lint + unit-tests jobs still gate those PRs.
     if: github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         # Full history so SonarQube Cloud can blame issues to commits and detect new code.
@@ -100,8 +156,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install dev dependencies
-        # NOSONAR S8541,S8544 - uv sync reads uv.lock (committed)
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Create reports directory
         run: mkdir -p reports

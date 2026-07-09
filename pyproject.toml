@@ -76,6 +76,12 @@ Issues = "https://github.com/jbsilva/photo-tagger/issues"
 [project.scripts]
 photo-tagger = "photo_tagger.main:app"
 
+[project.gui-scripts]
+# A windowed entry point for the desktop app: on Windows it launches without a console window,
+# and it gives the conda-forge photo-tagger-gui output and desktop shortcuts a direct target.
+# Requires the [gui] extra (PySide6); the plain CLI install does not ship Qt.
+photo-tagger-gui = "photo_tagger.gui:launch"
+
 [tool.uv]
 exclude-newer = "1 day"
 

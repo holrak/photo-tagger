@@ -12,10 +12,15 @@
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
 
   // config:best-practices applies this repo's policy by default: GitHub Actions pinned to a full
-  // commit SHA (with the version kept in the trailing comment), and weekly uv.lock maintenance. It
-  // also enables the Dependency Dashboard issue. ":enablePreCommit" is separate because the
-  // pre-commit manager is off by default.
+  // commit SHA (with the version kept in the trailing comment). It also enables the Dependency
+  // Dashboard issue. ":enablePreCommit" is separate because the pre-commit manager is off by
+  // default.
   extends: ["config:best-practices", ":enablePreCommit"],
+
+  // best-practices does NOT refresh transitive pins on its own; without this, uv.lock entries
+  // that no direct constraint covers only ever move via security alerts. Uses the same weekly
+  // window as the schedule below.
+  lockFileMaintenance: { enabled: true },
 
   timezone: "Europe/Berlin",
 
