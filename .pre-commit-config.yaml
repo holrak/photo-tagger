@@ -11,7 +11,7 @@ repos:
       - id: trailing-whitespace
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.11.23
+    rev: 0.11.28
     hooks:
       - id: uv-lock
 
@@ -29,7 +29,7 @@ repos:
         exclude: ^(src/photo_tagger/errors\.py|tests/test_locking\.py)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.18
+    rev: v0.15.20
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -79,13 +79,13 @@ repos:
         always_run: true
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.47.2
+    rev: v1.48.0
     hooks:
       - id: typos
 
   # Renovate config validator. Catches a typo in renovate.json5 before it silently breaks updates.
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 43.235.1
+    rev: 43.256.2
     hooks:
       - id: renovate-config-validator
         args: [--strict]
