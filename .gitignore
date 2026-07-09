@@ -6,6 +6,10 @@ dist/
 wheels/
 *.egg-info
 
+# macOS app-bundle build artifacts (the generated icon; PyInstaller build/ and dist/ are above)
+packaging/icon.icns
+packaging/icon.iconset/
+
 # Virtual environments
 .venv
 

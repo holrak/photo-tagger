@@ -298,6 +298,23 @@ photo that fails shows why and can be retried, and **Open logs** opens the run l
 the same config file and environment variables as the CLI. PySide6 is only pulled in by the `gui`
 extra, so the plain CLI install stays lightweight.
 
+### Build a standalone macOS app
+
+For a double-clickable `Photo Tagger.app` that needs no Python install to run:
+
+```bash
+./packaging/build_macos_app.sh
+```
+
+This bundles Python, PySide6, and everything else into `dist/Photo Tagger.app` with PyInstaller (its
+source and spec live in [`packaging/`](packaging/)). Two things to know:
+
+- It is **unsigned**, so the first launch needs a right-click > **Open** (Gatekeeper asks once); it
+  opens normally after that.
+- ExifTool is **not** bundled - install it with `brew install exiftool`. The app adds Homebrew's bin
+  directories to `PATH` on launch so it is found even when started from Finder (which otherwise
+  gives apps a minimal `PATH`); **Test connection** reports a clear error if it is still missing.
+
 ## Telemetry
 
 photo-tagger sends a single anonymous beacon at the end of each run so development can be guided by

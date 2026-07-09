@@ -1,6 +1,7 @@
 addopts
 annotationlib
 APFS
+ARGB
 arithmatex
 autouse
 bakllava
@@ -19,10 +20,12 @@ CREAT
 cyclopts
 Cyclopts
 dataclass
+datas
 debugpy
 dedup
 dedups
 delenv
+distpath
 docformatter
 docstrings
 downscales
@@ -38,11 +41,14 @@ frontends
 frontmatter
 fstrings
 ftruncate
+genai
 getpid
 getpixel
 gpgconf
 headlessly
 httpx
+iconset
+iconutil
 importorskip
 imread
 inlinehilite
@@ -60,6 +66,7 @@ litellm
 llava
 lmstudio
 LMSTUDIO
+logfire
 loguru
 lucide
 magiclink
@@ -69,6 +76,7 @@ moondream
 mtimes
 mypy
 nixpkgs
+noconfirm
 NOSONAR
 numprocesses
 ollama
@@ -87,6 +95,7 @@ pycroscope
 pydantic
 pyexiftool
 pygments
+pyinstaller
 pymdownx
 pypa
 pypi
@@ -104,6 +113,7 @@ roundtrips
 scannerwork
 scriptable
 sdist
+selftest
 shiboken
 smartsymbols
 smolvlm
@@ -127,6 +137,7 @@ unwritable
 usefixtures
 venv
 viewports
+workpath
 xdist
 xmpmeta
 zuban

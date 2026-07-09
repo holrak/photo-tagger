@@ -10,5 +10,5 @@
     }
   ],
   "dictionaries": ["project-words"],
-  "ignorePaths": [".cspell", "*.pyc", "__pycache__"]
+  "ignorePaths": [".cspell", "*.pyc", "__pycache__", "*.spec"]
 }
