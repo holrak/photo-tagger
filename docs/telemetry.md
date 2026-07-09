@@ -18,7 +18,7 @@ The beacon contains these fields, and nothing else:
 | ------------------ | ------------------- | ------------------------------------------------------------ |
 | `schema_version`   | `1`                 | Payload format version, so the collector can branch.         |
 | `install_id`       | a UUID              | Random id generated once per install (see below).            |
-| `app_version`      | `0.4.0`             | The photo-tagger version.                                    |
+| `app_version`      | `0.5.0`             | The photo-tagger version.                                    |
 | `interface`        | `cli` or `gui`      | Which frontend ran the batch.                                |
 | `provider`         | `lmstudio`          | The selected backend.                                        |
 | `model`            | `qwen/qwen3-vl-30b` | The model identifier.                                        |

@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-07-09
 
 ### Added
 
@@ -212,4 +212,4 @@ Initial release.
 [0.2.2]: https://github.com/jbsilva/photo-tagger/compare/v0.2.1...v0.2.2
 [0.3.0]: https://github.com/jbsilva/photo-tagger/compare/v0.2.2...v0.3.0
 [0.4.0]: https://github.com/jbsilva/photo-tagger/compare/v0.3.0...v0.4.0
-[unreleased]: https://github.com/jbsilva/photo-tagger/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/jbsilva/photo-tagger/compare/v0.4.0...v0.5.0
