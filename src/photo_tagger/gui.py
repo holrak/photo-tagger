@@ -142,10 +142,23 @@ _GENERATE_RETRIES = 2
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 _IS_DIR_ROLE = Qt.ItemDataRole.UserRole + 1
 _STATUS_RANK_ROLE = Qt.ItemDataRole.UserRole + 2  # lifecycle rank for sorting the Status column
-_PAGE_DETAIL = 0  # right-pane stack index for one photo's detail
-_PAGE_GRID = 1  # right-pane stack index for a folder's thumbnail grid
+_PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" placeholder
+_PAGE_DETAIL = 1  # right-pane stack index for one photo's detail
+_PAGE_GRID = 2  # right-pane stack index for a folder's thumbnail grid
 _DIR_MARK = "dir"  # truthy sentinel stored on folder tree items; files leave the role unset
 _NONE = "(none)"  # placeholder shown when a photo has no existing title/description/keywords
+
+# Right-pane placeholder copy. It adapts to the list: a getting-started nudge while empty, and a
+# "pick a photo" nudge once photos are loaded but none is open. This is what fills the right pane
+# when there is nothing to inspect, instead of an empty (and confusing) detail form.
+_EMPTY_START = (
+    "Add photos to get started.\n\n"
+    "Drag photos or folders onto the window, or use Add files and Add folder."
+)
+_EMPTY_PICK = (
+    "Select a photo to review it.\n\n"
+    "Generate proposes a title, description, and keywords you can edit before saving."
+)
 
 # Short status word shown in the tree's second column.
 _STATUS_LABEL = {
@@ -204,6 +217,7 @@ QLineEdit, QPlainTextEdit, QComboBox { padding: 4px 6px; border-radius: 5px; }
 QTreeWidget::item { padding: 2px; }
 QLabel#preview { background: #1f1f24; border-radius: 8px; color: #9a9aa5; }
 QLabel#hint, QLabel#status { color: #8a8a8a; }
+QLabel#empty { color: #8a8a8a; font-size: 15px; }
 QLabel#section { font-weight: 600; }
 QLabel#error {
     background: rgba(248, 81, 73, 18%); color: #f85149;
@@ -450,7 +464,7 @@ class MainWindow(QMainWindow):
         status_row.addWidget(logs_button)
         layout.addLayout(status_row)
         self._build_menus()
-        self._show_detail(enabled=False)
+        self._show_empty()
 
     # --- construction ----------------------------------------------------------------------
 
@@ -695,11 +709,31 @@ class MainWindow(QMainWindow):
         return controls
 
     def _build_right_pane(self) -> QWidget:
-        """Build a stack showing either one photo's detail or a folder's thumbnail grid."""
+        """Build a stack showing the idle placeholder, one photo's detail, or a folder's grid."""
         self._right = QStackedWidget()
+        self._right.addWidget(self._build_empty_state())  # _PAGE_EMPTY
         self._right.addWidget(self._build_detail_panel())  # _PAGE_DETAIL
         self._right.addWidget(self._build_grid())  # _PAGE_GRID
         return self._right
+
+    def _build_empty_state(self) -> QWidget:
+        """Build the idle placeholder shown when no photo is open, so the pane is never empty."""
+        page = QWidget()
+        box = QVBoxLayout(page)
+        box.addStretch(1)
+        icon = QLabel()
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = _app_icon().pixmap(96, 96)
+        if not pixmap.isNull():
+            icon.setPixmap(pixmap)
+        box.addWidget(icon)
+        self._empty_message = QLabel(_EMPTY_START)
+        self._empty_message.setObjectName("empty")
+        self._empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_message.setWordWrap(True)
+        box.addWidget(self._empty_message)
+        box.addStretch(1)
+        return page
 
     def _build_grid(self) -> QListWidget:
         grid = QListWidget()
@@ -923,8 +957,7 @@ class MainWindow(QMainWindow):
             self._items.pop(key, None)
             self._preview_cache.pop(key, None)
             if self._current is not None and str(self._current.path) == key:
-                self._current = None
-                self._show_detail(enabled=False)
+                self._show_empty()
         self._rebuild_tree()
         self._update_status()
 
@@ -939,8 +972,7 @@ class MainWindow(QMainWindow):
         self._grid_items = {}
         self._current = None
         self._rebuild_tree()
-        self._show_detail(enabled=False)
-        self._right.setCurrentIndex(_PAGE_DETAIL)
+        self._show_empty()
         self._status.setText("Drag photos or folders here to begin.")
 
     def _deselect(self, paths: set[Path]) -> int:
@@ -1109,11 +1141,10 @@ class MainWindow(QMainWindow):
             self._show_grid(Path(path))
             return
         self._stop_thumbs()
-        self._right.setCurrentIndex(_PAGE_DETAIL)
         if path is None:
-            self._current = None
-            self._show_detail(enabled=False)
+            self._show_empty()
             return
+        self._right.setCurrentIndex(_PAGE_DETAIL)
         self._current = self._items[path]
         self._show_item(self._items[path])
 
@@ -1290,6 +1321,13 @@ class MainWindow(QMainWindow):
             widget.setEnabled(enabled)
         if not enabled:
             self._error_banner.hide()
+
+    def _show_empty(self) -> None:
+        """Show the idle placeholder page instead of an empty detail form, and clear selection."""
+        self._current = None
+        self._show_detail(enabled=False)
+        self._empty_message.setText(_EMPTY_PICK if self._items else _EMPTY_START)
+        self._right.setCurrentIndex(_PAGE_EMPTY)
 
     def _commit_current(self) -> None:
         """Copy the visible editable fields back onto the selected item."""

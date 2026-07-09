@@ -618,6 +618,57 @@ def test_selecting_shows_metadata_source(
 
 
 # ---------------------------------------------------------------------------
+# Empty / placeholder state (the idle right pane)
+# ---------------------------------------------------------------------------
+
+
+def test_empty_state_is_shown_at_startup(window: gui.MainWindow) -> None:
+    """A fresh window shows the placeholder page, not an empty detail form."""
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+    assert "Add photos" in window._empty_message.text()  # noqa: SLF001
+
+
+def test_empty_state_nudges_to_pick_a_photo_once_loaded(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """With photos loaded but none open, the placeholder asks the user to pick one."""
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    window._on_current_changed(None, None)  # noqa: SLF001 - selection cleared, no photo open
+
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+    assert "Select a photo" in window._empty_message.text()  # noqa: SLF001
+
+
+def test_clear_returns_to_the_empty_state(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Clearing the list returns the right pane to the getting-started placeholder."""
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    window._clear()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+    assert "Add photos" in window._empty_message.text()  # noqa: SLF001
+
+
+def test_removing_the_open_photo_returns_to_the_empty_state(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing the photo being inspected drops back to the placeholder, not a stale form."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001 - open it -> detail page
+    assert window._right.currentIndex() == gui._PAGE_DETAIL  # noqa: SLF001
+
+    window._tree.setCurrentItem(window._leaf_for(img))  # noqa: SLF001
+    window._remove_selected()  # noqa: SLF001
+
+    assert window._current is None  # noqa: SLF001
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
 # Export CSV
 # ---------------------------------------------------------------------------
 
