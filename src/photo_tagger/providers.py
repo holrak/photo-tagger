@@ -235,6 +235,9 @@ _BACKENDS: dict[str, ProviderBackend] = {
 # Names in CLI/registration order, handy for help text and the consistency test.
 PROVIDER_NAMES: tuple[str, ...] = tuple(_BACKENDS)
 
+# Human spellings of the internal names, for anything user-facing (GUI combo, doctor output).
+PROVIDER_LABELS: dict[str, str] = {"ollama": "Ollama", "lmstudio": "LM Studio", "openai": "OpenAI"}
+
 
 def get_backend(name: str) -> ProviderBackend:
     """Look up a backend by name, raising :class:`ProviderError` for unknown names."""

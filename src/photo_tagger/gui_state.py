@@ -18,6 +18,7 @@ from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import select_camera_fields, select_location
 from photo_tagger.models import KeywordSet
+from photo_tagger.providers import PROVIDER_LABELS as _PROVIDER_LABELS
 
 
 if TYPE_CHECKING:
@@ -36,8 +37,8 @@ FAILED = "failed"  # generation or save failed
 # because matching is case-insensitive but not variant-aware (jpg does not cover jpeg).
 DEFAULT_GUI_EXTENSIONS = "jpg,jpeg,png,dng,cr3,nef,arw,heic,heif,tif,tiff,webp"
 
-# Display labels for the provider combo box. Maps the internal name to a human spelling.
-PROVIDER_LABELS = {"ollama": "Ollama", "lmstudio": "LM Studio", "openai": "OpenAI"}
+# Re-exported so the GUI keeps one import site for its combo labels.
+PROVIDER_LABELS = _PROVIDER_LABELS
 
 # Substrings that hint a model is vision-capable, used to surface likely picks first.
 _VISION_HINTS = (

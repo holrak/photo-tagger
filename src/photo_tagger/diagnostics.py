@@ -15,7 +15,7 @@ from rich.console import Console
 from photo_tagger import __version__
 from photo_tagger.config import exiftool_executable
 from photo_tagger.errors import ProviderError
-from photo_tagger.providers import get_backend
+from photo_tagger.providers import PROVIDER_LABELS, get_backend
 
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ def check_provider(
     base_url = api_base_url or backend.default_base_url
     resolved_key = backend.resolve_api_key(api_key)
 
-    label = f"Model '{model_name}' on {provider_name}"
+    label = f"Model '{model_name}' on {PROVIDER_LABELS.get(provider_name, provider_name)}"
     if backend.requires_api_key and not resolved_key:
         return CheckResult(
             label,

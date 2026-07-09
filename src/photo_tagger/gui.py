@@ -75,7 +75,7 @@ from photo_tagger.ai import analyze_image_with_ai, create_agent
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.config import DEFAULT_USER_PROMPT
 from photo_tagger.csv_report import write_report
-from photo_tagger.diagnostics import run_checks
+from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
 from photo_tagger.errors import DiscoveryError, PhotoTaggerError, ProviderError
 from photo_tagger.gui_state import (
@@ -574,10 +574,13 @@ class MainWindow(QMainWindow):
         provider = self._defaults.provider
         dialog = QDialog(self)
         dialog.setWindowTitle("Connection settings")
-        dialog.setMinimumWidth(460)
+        dialog.setMinimumWidth(520)
         form = QFormLayout(dialog)
+        # macOS style defaults to fixed-size fields; let them fill the dialog width instead.
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
         self._url = QLineEdit(provider.api_base_url or "")
+        self._url.setMinimumWidth(380)
         self._url.setPlaceholderText("(provider default URL)")
         self._url.setToolTip("Provider API base URL. Leave blank to use the provider's default.")
         form.addRow("Base URL", self._url)
@@ -588,6 +591,7 @@ class MainWindow(QMainWindow):
         self._api_key = QLineEdit(provider.api_key or "")
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._api_key.setClearButtonEnabled(True)
+        self._api_key.setMinimumWidth(380)
         self._api_key.setPlaceholderText("(uses provider env var)")
         self._api_key.setToolTip(
             "API key for the provider. Leave blank to use the provider's environment variable "
@@ -1654,10 +1658,10 @@ class MainWindow(QMainWindow):
             )
         finally:
             QApplication.restoreOverrideCursor()
-        lines = [f"{'OK  ' if r.ok else 'FAIL'}  {r.name}: {r.detail}" for r in results]
         box = QMessageBox(self)
         box.setWindowTitle("Connection check")
-        box.setText("\n".join(lines))
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(_check_results_html(results))
         all_ok = all(r.ok for r in results)
         box.setIcon(QMessageBox.Icon.Information if all_ok else QMessageBox.Icon.Warning)
         box.exec()
@@ -1785,6 +1789,26 @@ _DIFF_STYLE = {
     ADDED: ("color:#3fb950", "+&nbsp;"),
     REMOVED: ("color:#f85149;text-decoration:line-through", "&minus;&nbsp;"),
 }
+
+
+def _check_results_html(results: list[CheckResult]) -> str:
+    """
+    Render connection-check results as rich text: a colored mark, the check, then its detail.
+
+    Each check gets its own block with the detail on a second line, so long endpoint URLs and error
+    messages stay readable instead of running together on one line.
+    """
+    blocks: list[str] = []
+    for result in results:
+        mark = (
+            '<span style="color:#3fb950;">&#10004;</span>'
+            if result.ok
+            else '<span style="color:#f85149;">&#10008;</span>'
+        )
+        name = html.escape(result.name)
+        detail = html.escape(result.detail)
+        blocks.append(f'{mark} <b>{name}</b><br><span style="color:#8a8a8a;">{detail}</span>')
+    return "<br><br>".join(blocks)
 
 
 def _diff_html(diff: list[tuple[str, str]]) -> str:
