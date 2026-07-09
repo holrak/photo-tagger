@@ -19,6 +19,7 @@ from photo_tagger.gui_state import (
     Proposal,
     apply_proposal,
     build_tree,
+    count_generated,
     descendant_files,
     deselect_paths,
     expand_inputs,
@@ -395,3 +396,14 @@ def test_status_summary_counts_states() -> None:
     assert "2 generated" in summary
     assert "1 saved" in summary
     assert "1 failed" in summary
+
+
+def test_count_generated_counts_only_proposed_photos() -> None:
+    """Only photos carrying an AI proposal count toward the GUI's reported batch size."""
+    items = [
+        PhotoItem(path=Path("/a.jpg"), has_proposal=True),
+        PhotoItem(path=Path("/b.jpg"), has_proposal=True),
+        PhotoItem(path=Path("/c.jpg")),  # added but never generated
+    ]
+    assert count_generated(items) == 2  # noqa: PLR2004 - two of three were generated
+    assert count_generated([]) == 0

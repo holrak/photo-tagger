@@ -19,6 +19,7 @@ from coverage and the static analyzers.
 
 import html
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -56,7 +57,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from photo_tagger import __version__
+from photo_tagger import __version__, telemetry
 from photo_tagger.ai import analyze_image_with_ai, create_agent
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.config import DEFAULT_USER_PROMPT
@@ -79,6 +80,7 @@ from photo_tagger.gui_state import (
     Proposal,
     apply_proposal,
     build_tree,
+    count_generated,
     deselect_paths,
     expand_inputs,
     format_existing_keywords,
@@ -404,6 +406,8 @@ class MainWindow(QMainWindow):
         self._thumb_thread: QThread | None = None
         self._thumb_worker: ThumbnailWorker | None = None
         self._syncing = False
+        # Wall-clock start of this GUI session, reported as the run duration on close.
+        self._session_start = time.monotonic()
 
         self.setWindowTitle(f"Photo Tagger {__version__}")
         self.setWindowIcon(_app_icon())
@@ -1514,7 +1518,35 @@ class MainWindow(QMainWindow):
             self._worker.stop()
         self._stop_thumbs()
         self._teardown_thread()
+        self._emit_telemetry()
         super().closeEvent(event)
+
+    def maybe_show_telemetry_notice(self) -> None:
+        """
+        Show the one-time telemetry disclosure dialog on the first run telemetry is active.
+
+        Called from :func:`launch` after the window is shown, not from ``__init__``, so the headless
+        test suite (which constructs the window directly) never triggers a modal dialog.
+        """
+        if not telemetry.should_send(config_enabled=self._defaults.telemetry.enabled):
+            return
+        notice = telemetry.first_run_notice()
+        if notice is not None:
+            QMessageBox.information(self, "Anonymous usage telemetry", notice)
+
+    def _emit_telemetry(self) -> None:
+        """Fire a best-effort GUI usage beacon on close; never blocks and never raises."""
+        telemetry.emit(
+            telemetry.RunInfo(
+                interface="gui",
+                provider=self._provider_name(),
+                model=self._model.currentText().strip(),
+                batch_size=count_generated(self._items.values()),
+                duration_seconds=time.monotonic() - self._session_start,
+            ),
+            enabled=self._defaults.telemetry.enabled,
+            block=False,
+        )
 
 
 def _make_placeholder() -> QIcon:
@@ -1557,4 +1589,5 @@ def launch(argv: list[str] | None = None) -> int:
     app.setStyleSheet(_STYLESHEET)
     window = MainWindow()
     window.show()
+    window.maybe_show_telemetry_notice()
     return app.exec()

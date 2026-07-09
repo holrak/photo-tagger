@@ -453,3 +453,8 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
         f"{len(items)} files · {selected} selected · {generated} generated "
         f"· {saved} saved · {failed} failed"
     )
+
+
+def count_generated(items: Iterable[PhotoItem]) -> int:
+    """Count photos with an AI proposal: the batch size the GUI session reports to telemetry."""
+    return sum(1 for item in items if item.has_proposal)
