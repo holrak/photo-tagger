@@ -63,7 +63,7 @@ def test_prepare_image_for_agent_resizes_when_max_size_smaller(tmp_path: Path) -
 
 def test_prepare_image_for_agent_raises_on_missing_file(tmp_path: Path) -> None:
     """Missing files surface as exceptions, not silent empty buffers."""
-    with pytest.raises(Exception):  # noqa: B017, PT011 - any IO error is acceptable here
+    with pytest.raises(FileNotFoundError):
         prepare_image_for_agent(tmp_path / "nope.png")
 
 
