@@ -35,11 +35,12 @@ jobs:
 
       - name: Install dependencies
         # --locked fails on a drifted uv.lock instead of silently re-resolving it.
-        run: uv sync --locked --group test
+        # --no-build keeps third-party sdist build code from running during install;
+        # --no-binary-package exempts photo-tagger itself, which only exists as source.
+        run: uv sync --locked --no-build --no-binary-package photo-tagger --group test
 
       - name: Run tests
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
-        run: uv run pytest
+        run: uv run --locked --no-build --no-binary-package photo-tagger pytest
 
       - name: Upload coverage to Codecov
         # Upload even when a test fails: pytest-cov still writes the report at session end.
@@ -84,16 +85,16 @@ jobs:
             libegl1 libopengl0 libxkbcommon0 exiftool
 
       - name: Install dependencies (with the gui extra)
-        run: uv sync --locked --group test --extra gui
+        run: uv sync --locked --no-build --no-binary-package photo-tagger --group test --extra gui
 
       - name: Ensure PySide6 is importable
         # Fail loudly here rather than letting importorskip silently skip the whole suite.
-        run: uv run python -c "import PySide6"
+        run: uv run --locked --no-build --no-binary-package photo-tagger python -c "import PySide6"
 
       - name: Run GUI tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: uv run pytest tests/test_gui.py
+        run: uv run --locked --no-build --no-binary-package photo-tagger pytest tests/test_gui.py
 
   lint:
     runs-on: ubuntu-latest
@@ -111,26 +112,27 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install dev dependencies
-        run: uv sync --locked --group dev --group test
+        run: uv sync --locked --no-build --no-binary-package photo-tagger --group dev --group test
 
       - name: ruff check
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
-        run: uv run ruff check .
+        run: uv run --locked --no-build --no-binary-package photo-tagger ruff check .
 
       - name: ruff format
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
-        run: uv run ruff format --check .
+        run: uv run --locked --no-build --no-binary-package photo-tagger ruff format --check .
 
       - name: zuban type check
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
-        run: uv run zuban check
+        run: uv run --locked --no-build --no-binary-package photo-tagger zuban check
 
       - name: pycroscope static analysis
         # Same invocation as the pre-commit hook; a hookless fork PR must not bypass it.
-        run: uv run pycroscope --config-file pyproject.toml
+        run: >-
+          uv run --locked --no-build --no-binary-package photo-tagger
+          pycroscope --config-file pyproject.toml
 
       - name: Check version sync
-        run: uv run scripts/check_version_sync.py
+        run: >-
+          uv run --locked --no-build --no-binary-package photo-tagger
+          scripts/check_version_sync.py
 
   sonarcloud:
     # Reuse the coverage report from unit-tests instead of running the suite twice.
@@ -156,7 +158,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install dev dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --no-build --no-binary-package photo-tagger --group dev
 
       - name: Create reports directory
         run: mkdir -p reports
@@ -164,18 +166,16 @@ jobs:
       # ruff and bandit reports feed sonar.python.{ruff,bandit}.reportPaths. exit-zero keeps the
       # JSON written and the job green: the lint job is the gate for ruff, CodeQL/bandit for security.
       - name: Generate ruff report
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
         run: |
-          uv run ruff check \
+          uv run --locked --no-build --no-binary-package photo-tagger ruff check \
             --output-format=json \
             --output-file=reports/ruff_report.json \
             --exit-zero \
             .
 
       - name: Generate bandit report
-        # NOSONAR S8541,S8544 - uv run uses the locked env from uv.lock
         run: |
-          uv run bandit \
+          uv run --locked --no-build --no-binary-package photo-tagger bandit \
             --configfile pyproject.toml \
             --recursive \
             --format json \
