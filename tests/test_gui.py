@@ -1491,6 +1491,21 @@ def test_language_choice_persists_to_the_config_file(
     assert "language" not in target.read_text(encoding="utf-8")
 
 
+def test_output_language_menu_lists_english_first_then_other(window: gui.MainWindow) -> None:
+    """
+    The menu offers one-click language entries: English (checked) first, Other...
+
+    last.
+    """
+    actions = window._output_language_menu.actions()  # noqa: SLF001
+    labels = [action.text() for action in actions if not action.isSeparator()]
+    assert labels[0] == "English"
+    assert labels[-1] == "Other..."
+    assert "Brazilian Portuguese" in labels
+    # No explicit choice saved: the default entry starts checked.
+    assert window._output_language_actions["English"].isChecked()  # noqa: SLF001
+
+
 def test_output_language_defaults_to_english_and_persists(
     window: gui.MainWindow,
     monkeypatch: pytest.MonkeyPatch,
@@ -1498,7 +1513,6 @@ def test_output_language_defaults_to_english_and_persists(
 ) -> None:
     """The metadata language starts at English; a choice persists and English unpins it."""
     assert window._output_language == "English"  # noqa: SLF001
-    assert window._output_language_combo.currentText() == "English"  # noqa: SLF001
     target = tmp_path / "config.toml"
     target.write_text('# keep me\nextensions = "jpg"\n', encoding="utf-8")
     monkeypatch.setattr(gui, "find_config_file", lambda: target)
@@ -1508,10 +1522,35 @@ def test_output_language_defaults_to_english_and_persists(
     assert 'output_language = "Brazilian Portuguese"' in text
     assert "# keep me" in text
     assert window._output_language == "Brazilian Portuguese"  # noqa: SLF001
+    assert window._output_language_actions["Brazilian Portuguese"].isChecked()  # noqa: SLF001
     assert "Brazilian Portuguese" in window._status.text()  # noqa: SLF001
 
     window._set_output_language("English")  # noqa: SLF001
     assert "output_language" not in target.read_text(encoding="utf-8")
+    assert window._output_language_actions["English"].isChecked()  # noqa: SLF001
+
+
+def test_output_language_custom_value_gets_its_own_checked_entry(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    A language typed via Other...
+
+    joins the menu as a new checked entry above Other.
+    """
+    target = tmp_path / "config.toml"
+    monkeypatch.setattr(gui, "find_config_file", lambda: target)
+
+    window._set_output_language("Swahili")  # noqa: SLF001
+
+    action = window._output_language_actions["Swahili"]  # noqa: SLF001
+    assert action.isChecked()
+    menu_actions = window._output_language_menu.actions()  # noqa: SLF001
+    assert action in menu_actions
+    assert menu_actions.index(action) < len(menu_actions) - 1  # above the Other... row
+    assert 'output_language = "Swahili"' in target.read_text(encoding="utf-8")
 
 
 def test_output_language_blank_means_the_default(
@@ -1519,12 +1558,17 @@ def test_output_language_blank_means_the_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Clearing the combo falls back to English instead of sending an empty language."""
+    """
+    A blank Other...
+
+    entry falls back to English instead of sending an empty language.
+    """
     target = tmp_path / "config.toml"
     monkeypatch.setattr(gui, "find_config_file", lambda: target)
     window._set_output_language("German")  # noqa: SLF001
     window._set_output_language("   ")  # noqa: SLF001
     assert window._output_language == "English"  # noqa: SLF001
+    assert window._output_language_actions["English"].isChecked()  # noqa: SLF001
     assert "output_language" not in target.read_text(encoding="utf-8")
 
 

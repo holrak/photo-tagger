@@ -18,7 +18,7 @@ import tomlkit
 from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
-from photo_tagger.i18n import AUTO, _, ngettext
+from photo_tagger.i18n import AUTO, _, gettext_noop, ngettext
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
@@ -46,22 +46,23 @@ FAILED = "failed"  # generation or save failed
 # because matching is case-insensitive but not variant-aware (jpg does not cover jpeg).
 DEFAULT_GUI_EXTENSIONS = "jpg,jpeg,png,dng,cr3,nef,arw,heic,heif,tif,tiff,webp"
 
-# Pre-filled choices for the metadata-language combo. English names on purpose: the value is
-# spliced into the (English) system prompt as-is, and the combo stays editable, so any language
-# the model understands can still be typed.
+# Pre-filled choices for the Metadata Language menu. The values are English names on purpose:
+# they are spliced into the (English) system prompt as-is; the GUI translates them for display
+# only. The menu's Other... entry accepts any language the model understands, so this list does
+# not limit the choice. The first entry must stay DEFAULT_OUTPUT_LANGUAGE (a test asserts it).
 OUTPUT_LANGUAGE_SUGGESTIONS = (
-    DEFAULT_OUTPUT_LANGUAGE,
-    "Brazilian Portuguese",
-    "Dutch",
-    "French",
-    "German",
-    "Italian",
-    "Japanese",
-    "Korean",
-    "Portuguese",
-    "Russian",
-    "Simplified Chinese",
-    "Spanish",
+    gettext_noop("English"),
+    gettext_noop("Brazilian Portuguese"),
+    gettext_noop("Dutch"),
+    gettext_noop("French"),
+    gettext_noop("German"),
+    gettext_noop("Italian"),
+    gettext_noop("Japanese"),
+    gettext_noop("Korean"),
+    gettext_noop("Portuguese"),
+    gettext_noop("Russian"),
+    gettext_noop("Simplified Chinese"),
+    gettext_noop("Spanish"),
 )
 
 # Substrings that hint a model is vision-capable, used to surface likely picks first.

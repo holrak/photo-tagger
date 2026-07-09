@@ -135,10 +135,11 @@ for the session, or use the arrow on either **Generate** button (or a photo's ri
 a one-time **Skip Cache** run.
 
 The model writes titles, descriptions, and keywords in English by default. **Settings > Metadata
-Language** switches that: pick a suggestion or type any language name the model understands. The
-choice applies from the next generation on (cached results in the old language are not reused) and
-is saved to the config file as `output_language` under `[inference]`, so CLI runs pick it up too. It
-is separate from **Settings > Language**, which translates the interface itself.
+Language** switches that with one click: pick a language from the menu, or choose **Other...** to
+type any language name the model understands (it then joins the menu). The choice applies from the
+next generation on (cached results in the old language are not reused) and is saved to the config
+file as `output_language` under `[inference]`, so CLI runs pick it up too. It is separate from
+**Settings > Language**, which translates the interface itself.
 
 To regenerate a single photo without touching your selection, open it and press **Generate this
 photo** in the detail pane, or right-click it in the tree and choose **Generate** (a failed photo

@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListView,
@@ -848,47 +849,82 @@ class MainWindow(QMainWindow):
         self._status.setText(_("Language saved. Restart Photo Tagger to apply it."))
 
     def _build_output_language_menu(self, settings_menu: QMenu) -> None:
-        """Add the Metadata Language submenu: the language the model writes the metadata in."""
+        """Add the Metadata Language submenu: one click sets the generated-metadata language."""
         menu = self._output_language_menu = settings_menu.addMenu(_("Metadata Language"))
+        menu.setToolTipsVisible(True)
         menu.menuAction().setToolTip(
             _(
                 "Language of the generated titles, descriptions, and keywords. The language of "
                 "the app itself is set under Language.",
             ),
         )
-        panel = QWidget()
-        form = QFormLayout(panel)
-        combo = self._output_language_combo = QComboBox()
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        combo.addItems(list(OUTPUT_LANGUAGE_SUGGESTIONS))
-        combo.setCurrentText(self._output_language)
-        combo.setMinimumWidth(220)
-        combo.setToolTip(
+        self._output_language_group = QActionGroup(self)
+        self._output_language_actions: dict[str, QAction] = {}
+        # The trailing rows go in first so the language entries can insert above the separator
+        # (a language chosen later via Other... joins the same list).
+        self._output_language_separator = menu.addSeparator()
+        other = menu.addAction(_("Other..."), self._choose_other_output_language)
+        other.setToolTip(
             _(
-                "The model writes titles, descriptions, and keywords in this language. Pick one "
-                "or type any language name; it is sent to the model as is. Applies from the next "
-                "generation on and is saved to the config file, which the CLI's "
-                "--output-language default also reads.",
+                "Any language name the model understands works; it is sent to the model as is. "
+                "Saved to the config file, which the CLI's --output-language default also reads.",
             ),
         )
-        # activated covers picking from the list; editingFinished covers a typed language
-        # (committed on Enter or when the menu closes and focus leaves the field).
-        combo.activated.connect(lambda _index: self._set_output_language(combo.currentText()))
-        combo.lineEdit().editingFinished.connect(
-            lambda: self._set_output_language(combo.currentText()),
+        # English (the default) first, then the suggestions sorted by their translated label.
+        rest = sorted(
+            (name for name in OUTPUT_LANGUAGE_SUGGESTIONS if name != DEFAULT_OUTPUT_LANGUAGE),
+            key=lambda name: _(name).casefold(),
         )
-        form.addRow(_("Language"), combo)
-        host = QWidgetAction(menu)
-        host.setDefaultWidget(panel)
-        menu.addAction(host)
+        for name in (DEFAULT_OUTPUT_LANGUAGE, *rest):
+            self._add_output_language_action(name)
+        self._check_output_language_action(self._output_language)
+
+    def _add_output_language_action(self, name: str) -> QAction:
+        """
+        Insert a checkable entry for *name* above the Other...
+
+        row and return it.
+        """
+        # The label is translated for display; *name* (the English form) is what the prompt,
+        # config file, and cache namespace carry. A custom name passes through _() unchanged.
+        action = QAction(_(name), self)
+        action.setCheckable(True)
+        action.triggered.connect(
+            lambda _checked=False, chosen=name: self._set_output_language(chosen),
+        )
+        self._output_language_group.addAction(action)
+        self._output_language_menu.insertAction(self._output_language_separator, action)
+        self._output_language_actions[name] = action
+        return action
+
+    def _check_output_language_action(self, name: str) -> None:
+        """Check *name*'s menu entry, first creating one for a language not in the list."""
+        action = self._output_language_actions.get(name)
+        if action is None:
+            action = self._add_output_language_action(name)
+        action.setChecked(True)
+
+    def _choose_other_output_language(self) -> None:
+        """Ask for a free-form language name (Other...) and apply it."""
+        language, ok = QInputDialog.getText(
+            self,
+            _("Metadata Language"),
+            _("Language for the generated titles, descriptions, and keywords:"),
+            text=self._output_language,
+        )
+        if ok:
+            self._set_output_language(language)
 
     def _set_output_language(self, language: str) -> None:
         """Persist the metadata language into the config file; used from the next generation on."""
         normalized = language.strip() or DEFAULT_OUTPUT_LANGUAGE
         if normalized == self._output_language:
+            # Still sync the menu: Other... may have re-entered the current language, and the
+            # clicked action must not end up unchecked.
+            self._check_output_language_action(normalized)
             return
         self._output_language = normalized
+        self._check_output_language_action(normalized)
         target = self._config_target()
         try:
             existing = target.read_text(encoding="utf-8") if target.exists() else ""

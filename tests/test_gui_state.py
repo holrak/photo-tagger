@@ -15,6 +15,7 @@ from photo_tagger.gui_state import (
     BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
+    OUTPUT_LANGUAGE_SUGGESTIONS,
     PENDING,
     READY,
     REMOVED,
@@ -658,6 +659,16 @@ def test_config_text_with_output_language_works_on_an_empty_file() -> None:
     assert "[inference]" in result
     assert 'output_language = "Spanish"' in result
     assert config_text_with_output_language("", "English") == ""
+
+
+def test_output_language_suggestions_start_with_the_default() -> None:
+    """The menu builder relies on the default language leading the suggestion list."""
+    from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE  # noqa: PLC0415
+
+    assert OUTPUT_LANGUAGE_SUGGESTIONS[0] == DEFAULT_OUTPUT_LANGUAGE
+    # The values reach the prompt verbatim, so the list must stay in English regardless of the
+    # UI language; the GUI translates the labels at display time only.
+    assert "Brazilian Portuguese" in OUTPUT_LANGUAGE_SUGGESTIONS
 
 
 def test_count_generated_counts_only_proposed_photos() -> None:
