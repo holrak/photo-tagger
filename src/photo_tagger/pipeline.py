@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from loguru import logger
 
 from photo_tagger.ai import analyze_image_with_ai
-from photo_tagger.cache import InferenceCache, hash_image_file
+from photo_tagger.cache import InferenceCache, content_cache_key, safe_cache_get, safe_cache_put
 from photo_tagger.config import (
     DEFAULT_DIMENSIONS,
     DEFAULT_FREQUENCY_PENALTY,
@@ -164,52 +164,6 @@ class _BatchContext:
     progress: ProgressCallback | None = None
 
 
-def _cache_get(
-    cache: InferenceCache,
-    cache_key: str,
-    file_name: str,
-) -> InferenceResult | None:
-    """Return the cached result for *cache_key*, treating any read error as a miss."""
-    try:
-        return cache.get(cache_key)
-    except Exception as exc:  # noqa: BLE001 - sqlite errors must not abort the photo.
-        logger.warning("inference_cache_get_failed", file=file_name, error=str(exc))
-        return None
-
-
-def _cache_store(
-    cache: InferenceCache,
-    cache_key: str,
-    inference: InferenceResult,
-    *,
-    file_name: str,
-) -> None:
-    """Store *inference* under *cache_key*, logging and swallowing any storage error."""
-    try:
-        cache.put(cache_key, inference)
-    except Exception as exc:  # noqa: BLE001 - sqlite errors must not abort the photo.
-        logger.warning("inference_cache_put_failed", file=file_name, error=str(exc))
-
-
-def _content_cache_key(image_path: Path, context: ImageContext) -> str | None:
-    """
-    Return the cache key for *image_path*'s pixel content, or None if it cannot be hashed.
-
-    Prefers exiftool's ImageDataHash (read into *context*), which covers the image stream only. That
-    makes the key independent of metadata, so embedding tags does not change it and a later run over
-    the same folder still hits the cache. Formats exiftool cannot hash that way fall back to hashing
-    the whole file; for those, re-embedding metadata does change the key. A hashing failure is
-    logged and the photo then runs without caching.
-    """
-    if context.content_hash is not None:
-        return context.content_hash
-    try:
-        return hash_image_file(image_path)
-    except OSError as exc:
-        logger.warning("inference_cache_hash_failed", file=image_path.name, error=str(exc))
-        return None
-
-
 def _resolve_inference(
     image_path: Path,
     ctx: _BatchContext,
@@ -230,7 +184,7 @@ def _resolve_inference(
     """
     cache = ctx.cache
     if cache is not None and content_key is not None:
-        cached = _cache_get(cache, content_key, image_path.name)
+        cached = safe_cache_get(cache, content_key, file_name=image_path.name)
         if cached is not None:
             logger.info("cache_hit", file=image_path.name)
             ctx.usage.add_cache_hit()
@@ -252,7 +206,7 @@ def _resolve_inference(
     )
     ctx.usage.add(inference)
     if cache is not None and content_key is not None:
-        _cache_store(cache, content_key, inference, file_name=image_path.name)
+        safe_cache_put(cache, content_key, inference, file_name=image_path.name)
     return inference, False
 
 
@@ -329,13 +283,16 @@ def process_photo(
         gps_info = {"position": context.gps_position} if context.gps_position else {}
         contextual_prompt = build_contextual_prompt(
             ctx.user_prompt,
-            list(dict.fromkeys(existing_keywords_full.subject)),
+            # build_contextual_prompt de-duplicates its flat keywords itself.
+            existing_keywords_full.subject,
             context.location_tags,
             gps_info,
             camera_info=context.camera_info,
         )
 
-        content_key = _content_cache_key(image_path, context) if ctx.cache is not None else None
+        content_key = (
+            content_cache_key(image_path, context.content_hash) if ctx.cache is not None else None
+        )
         inference, from_cache = _resolve_inference(
             image_path,
             ctx,

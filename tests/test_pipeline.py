@@ -958,7 +958,7 @@ def test_process_photo_survives_hash_failure(tmp_path: Path) -> None:
             self.put_calls += 1
 
     cache = _HashFailCache()
-    with patch("photo_tagger.pipeline.hash_image_file", side_effect=OSError("broken")):
+    with patch("photo_tagger.cache.hash_image_file", side_effect=OSError("broken")):
         ok = process_photo(image, _ctx(cache=cache))
 
     assert ok is True

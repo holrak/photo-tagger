@@ -18,7 +18,6 @@ import contextlib
 import importlib
 import json
 import os
-import sqlite3
 import sys
 import tempfile
 import threading
@@ -32,7 +31,7 @@ from loguru import logger
 
 from photo_tagger import __version__, telemetry
 from photo_tagger.ai import create_agent
-from photo_tagger.cache import InferenceCache, build_cache_namespace
+from photo_tagger.cache import build_cache_namespace, open_cache
 from photo_tagger.cli_options import (
     ArtifactConfig,
     DisplayConfig,
@@ -229,23 +228,6 @@ class _NDJSONEmitter:
         with self._lock:
             self._stream.write(line)
             self._stream.flush()
-
-
-def _open_cache(path: Path | None, *, namespace: str) -> InferenceCache | None:
-    """
-    Open the SQLite cache at *path*, or warn and degrade to no-cache on failure.
-
-    Returns ``None`` when *path* is ``None`` or the cache cannot be opened. Cache-open failures
-    (permission denied, corrupt DB, parent dir unwritable) log a warning and let the rest of the run
-    proceed without caching, since losing the cache should never block tagging photos.
-    """
-    if path is None:
-        return None
-    try:
-        return InferenceCache(path, model_name=namespace)
-    except (OSError, sqlite3.Error) as exc:
-        logger.warning("inference_cache_open_failed", file=str(path), error=str(exc))
-        return None
 
 
 def _open_csv_report(path: Path | None) -> CsvReportWriter | None:
@@ -707,7 +689,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         jpeg_dimensions=inference.jpeg_dimensions,
         jpeg_quality=inference.jpeg_quality,
     )
-    cache = _open_cache(artifacts.cache_file, namespace=cache_namespace)
+    cache = open_cache(artifacts.cache_file, namespace=cache_namespace)
     started_at = datetime.now(tz=UTC)
 
     def _on_complete(totals: BatchTotals) -> None:

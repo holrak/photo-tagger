@@ -7,7 +7,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from photo_tagger.cache import InferenceCache, build_cache_namespace, hash_image_file
+from photo_tagger.cache import (
+    InferenceCache,
+    build_cache_namespace,
+    content_cache_key,
+    hash_image_file,
+    open_cache,
+    safe_cache_get,
+    safe_cache_put,
+)
 from photo_tagger.models import InferenceResult
 
 
@@ -38,6 +46,49 @@ def test_hash_image_file_is_stable_for_same_contents(tmp_path: Path) -> None:
 
     b.write_bytes(b"\xff\xd8hello-world")  # single-byte tweak: " " becomes "-"
     assert hash_image_file(a) != hash_image_file(b)
+
+
+def test_content_cache_key_prefers_the_content_hash(tmp_path: Path) -> None:
+    """When exiftool supplied an ImageDataHash, it is the key and the file is never read."""
+    assert content_cache_key(tmp_path / "ghost.jpg", "abc123") == "abc123"
+
+
+def test_content_cache_key_falls_back_to_the_whole_file_hash(tmp_path: Path) -> None:
+    """Without a content hash the key degrades to hashing the file bytes."""
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"\xff\xd8data")
+    assert content_cache_key(img, None) == hash_image_file(img)
+
+
+def test_content_cache_key_returns_none_when_hashing_fails(tmp_path: Path) -> None:
+    """An unreadable file yields None (photo runs uncached), never an exception."""
+    assert content_cache_key(tmp_path / "ghost.jpg", None) is None
+
+
+def test_open_cache_returns_none_when_path_is_none() -> None:
+    """No cache file configured means no cache, never an exception."""
+    assert open_cache(None, namespace="m#x") is None
+
+
+def test_open_cache_degrades_on_open_failure(tmp_path: Path) -> None:
+    """An unusable cache target is logged and downgraded to no-cache, not raised."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the cache's parent dir should be")
+    assert open_cache(blocker / "cache.sqlite3", namespace="m#x") is None
+
+
+def test_safe_cache_get_treats_errors_as_misses() -> None:
+    """A read error inside sqlite is swallowed and reported as a miss."""
+    broken = MagicMock()
+    broken.get.side_effect = sqlite3.OperationalError("locked")
+    assert safe_cache_get(broken, "key", file_name="img.jpg") is None
+
+
+def test_safe_cache_put_swallows_errors() -> None:
+    """A write error inside sqlite is swallowed, never raised at the caller."""
+    broken = MagicMock()
+    broken.put.side_effect = sqlite3.OperationalError("disk full")
+    safe_cache_put(broken, "key", _sample_result(), file_name="img.jpg")  # must not raise
 
 
 def test_inference_cache_round_trip(tmp_path: Path) -> None:

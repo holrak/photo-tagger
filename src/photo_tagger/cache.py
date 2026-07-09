@@ -73,6 +73,70 @@ def build_cache_namespace(  # noqa: PLR0913 - each kwarg is a distinct input to 
     return f"{model_name}#{h.hexdigest()}"
 
 
+def content_cache_key(image_path: Path, content_hash: str | None) -> str | None:
+    """
+    Return the cache key for *image_path*'s pixel content, or None if it cannot be hashed.
+
+    Prefers exiftool's ImageDataHash (*content_hash*, read alongside the image context), which
+    covers the image stream only. That makes the key independent of metadata, so embedding tags does
+    not change it and a later run over the same photo still hits the cache. Formats exiftool cannot
+    hash that way fall back to hashing the whole file; for those, re-embedding metadata does change
+    the key. A hashing failure is logged and the photo then runs without caching.
+    """
+    if content_hash is not None:
+        return content_hash
+    try:
+        return hash_image_file(image_path)
+    except OSError as exc:
+        logger.warning("inference_cache_hash_failed", file=image_path.name, error=str(exc))
+        return None
+
+
+def open_cache(db_path: Path | None, *, namespace: str) -> InferenceCache | None:
+    """
+    Open the SQLite cache at *db_path*, or warn and degrade to no-cache on failure.
+
+    Returns ``None`` when *db_path* is ``None`` or the cache cannot be opened. Open failures
+    (permission denied, corrupt DB, unwritable parent dir) log a warning and let the run proceed
+    without caching, since losing the cache should never block tagging photos.
+    """
+    if db_path is None:
+        return None
+    try:
+        return InferenceCache(db_path, model_name=namespace)
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("inference_cache_open_failed", file=str(db_path), error=str(exc))
+        return None
+
+
+def safe_cache_get(
+    cache: InferenceCache,
+    cache_key: str,
+    *,
+    file_name: str,
+) -> InferenceResult | None:
+    """Return the cached result for *cache_key*, treating any read error as a miss."""
+    try:
+        return cache.get(cache_key)
+    except Exception as exc:  # noqa: BLE001 - sqlite errors must not abort the photo.
+        logger.warning("inference_cache_get_failed", file=file_name, error=str(exc))
+        return None
+
+
+def safe_cache_put(
+    cache: InferenceCache,
+    cache_key: str,
+    inference: InferenceResult,
+    *,
+    file_name: str,
+) -> None:
+    """Store *inference* under *cache_key*, logging and swallowing any storage error."""
+    try:
+        cache.put(cache_key, inference)
+    except Exception as exc:  # noqa: BLE001 - sqlite errors must not abort the photo.
+        logger.warning("inference_cache_put_failed", file=file_name, error=str(exc))
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS inference (
     image_hash    TEXT NOT NULL,
