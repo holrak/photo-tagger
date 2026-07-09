@@ -240,7 +240,8 @@ class FilterConfig:
             name=("--newer-than",),
             help=(
                 "Drop files whose mtime is on or before this ISO 8601 timestamp "
-                "(e.g. 2024-01-01 or 2024-01-01T14:30). Naive timestamps are treated as UTC"
+                "(e.g. 2024-01-01 or 2024-01-01T14:30). Naive timestamps are treated as "
+                "local time"
             ),
         ),
     ] = None
@@ -353,8 +354,9 @@ class ArtifactConfig:
                 "SQLite cache of model outputs keyed by image-content hash and model name. "
                 "The hash covers the image data only and ignores metadata, so embedding tags "
                 "does not change it: a second run over the same folder still hits the cache "
-                "instead of calling the model again. Created if missing; safe to delete to "
-                "clear the cache"
+                "instead of calling the model again. (Formats ExifTool cannot content-hash "
+                "fall back to a whole-file hash, which re-embedding does change.) Created if "
+                "missing; safe to delete to clear the cache"
             ),
         ),
     ] = None

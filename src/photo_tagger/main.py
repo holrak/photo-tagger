@@ -140,9 +140,10 @@ def gui() -> None:
     """
     Launch the desktop GUI (requires the optional ``[gui]`` extra).
 
-    The GUI is a thin frontend over the same pipeline as the ``tag`` command: pick a provider,
-    model, and folder, then watch each photo's generated title, description, and keywords stream
-    into a table as they are produced. Install it with ``pip install 'photo-tagger[gui]'``.
+    The GUI is a review-before-write frontend over the same pipeline as the ``tag`` command: add
+    photos or folders to a checkable list, generate proposals with the model, review and edit each
+    photo's title, description, and keywords side by side with the existing metadata, then save.
+    Install it with ``pip install 'photo-tagger[gui]'``.
 
     PySide6 is imported lazily here so the base CLI never depends on Qt; a missing dependency is
     reported with an install hint rather than a traceback.
