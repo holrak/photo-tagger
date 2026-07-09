@@ -1,5 +1,6 @@
 """Shared pytest fixtures for the photo-tagger test suite."""
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -9,6 +10,13 @@ from pydantic_ai import BinaryContent
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
+
+
+# Make the whole suite independent of any real ~/.config/photo-tagger/config.toml. main.py resolves
+# its CLI defaults at import time (a module-level load_defaults()), so this has to be set before any
+# test module imports it - here at conftest import, not in a fixture. The target file is empty, so
+# config resolution falls through to the built-in defaults. A test asserts this stays in effect.
+os.environ["PHOTO_TAGGER_CONFIG"] = str(Path(__file__).parent / "empty-config.toml")
 
 
 @pytest.fixture(autouse=True)

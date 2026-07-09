@@ -20,6 +20,7 @@ from photo_tagger import (
     main as main_module,
     telemetry,
 )
+from photo_tagger.cli_options import load_defaults
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
 
 
@@ -770,9 +771,6 @@ def test_cli_emits_telemetry_on_completion(tmp_path: Path) -> None:
         patch.object(main_module, "setup_logging"),
         patch.object(main_module, "create_agent", return_value=object()),
         patch.object(main_module, "run_batch", side_effect=_run_batch_firing_complete),
-        # Stub the summary write: it is irrelevant here, and the default summary path may come
-        # from the developer's own config, which would otherwise leak a file into the repo.
-        patch.object(main_module, "_write_summary_file"),
         patch.object(telemetry, "emit", side_effect=fake_emit),
     ):
         _run_app(["--input", str(image), "--provider", "ollama", "--model", "my-vlm"])
@@ -800,7 +798,6 @@ def test_cli_no_telemetry_flag_disables_and_silences_notice(
         patch.object(main_module, "setup_logging"),
         patch.object(main_module, "create_agent", return_value=object()),
         patch.object(main_module, "run_batch", side_effect=_run_batch_firing_complete),
-        patch.object(main_module, "_write_summary_file"),
         patch.object(telemetry, "emit", side_effect=fake_emit),
     ):
         _run_app(["--input", str(image), "--no-telemetry"])
@@ -826,3 +823,16 @@ def test_cli_telemetry_notice_shown_only_on_first_run(
 
     assert "anonymous usage stats" in first_run_err
     assert "anonymous usage stats" not in second_run_err
+
+
+def test_suite_is_isolated_from_developer_config() -> None:
+    """
+    Conftest points PHOTO_TAGGER_CONFIG at an empty file, so defaults are the built-ins.
+
+    Guards that isolation: a real ~/.config/photo-tagger/config.toml must not leak into the suite.
+    (A developer config setting a relative ``summary_file`` once wrote a stray file into the repo
+    when the on_complete tests fired.)
+    """
+    defaults = load_defaults()
+    assert defaults.artifacts.summary_file is None
+    assert defaults.telemetry.enabled is True

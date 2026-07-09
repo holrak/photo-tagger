@@ -1,0 +1,3 @@
+# Intentionally empty. tests/conftest.py points PHOTO_TAGGER_CONFIG at this file so the suite never
+# picks up a developer's real ~/.config/photo-tagger/config.toml. An empty config resolves to the
+# built-in defaults, keeping every test hermetic regardless of the machine it runs on.
