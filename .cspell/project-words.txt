@@ -13,6 +13,7 @@ charliermarsh
 cogvlm
 configfile
 conftest
+consoledonottrack
 cooldown
 CREAT
 cyclopts
