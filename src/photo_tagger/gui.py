@@ -2449,7 +2449,13 @@ class MainWindow(QMainWindow):
             self._telemetry_action.setChecked(False)
 
     def _emit_telemetry(self) -> None:
-        """Fire a best-effort GUI usage beacon on close; never blocks and never raises."""
+        """
+        Fire a best-effort GUI usage beacon on close; never raises.
+
+        The process exits right after closeEvent, so a fire-and-forget daemon thread would be killed
+        mid-send and the beacon silently lost. block=True waits for the flush; a healthy send is
+        tens of milliseconds and the bad case (no network) is capped by emit's timeout.
+        """
         telemetry.emit(
             telemetry.RunInfo(
                 interface="gui",
@@ -2459,7 +2465,7 @@ class MainWindow(QMainWindow):
                 duration_seconds=time.monotonic() - self._session_start,
             ),
             enabled=self._telemetry_enabled,
-            block=False,
+            block=True,
         )
 
 

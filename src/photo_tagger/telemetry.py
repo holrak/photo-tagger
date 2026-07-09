@@ -234,9 +234,9 @@ def emit(run: RunInfo, *, enabled: bool, block: bool = False) -> threading.Threa
     Fire one telemetry beacon for *run* on a background daemon thread.
 
     Returns the thread (or ``None`` when telemetry is disabled or the payload cannot be built). Pass
-    ``block=True`` to wait up to :data:`_FLUSH_TIMEOUT_SECONDS` for delivery; the CLI uses this
-    since it exits immediately afterwards and would otherwise lose the in-flight beacon. The GUI
-    leaves it ``False`` so closing the window never stalls.
+    ``block=True`` to wait up to :data:`_FLUSH_TIMEOUT_SECONDS` for delivery. Both the CLI (which
+    exits right after the batch) and the GUI (whose process exits right after ``closeEvent``) use
+    it: a daemon thread abandoned at interpreter exit is killed mid-send and the beacon is lost.
     """
     if not should_send(config_enabled=enabled):
         return None

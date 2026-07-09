@@ -1380,6 +1380,34 @@ def test_telemetry_toggle_reflects_saved_off_preference(qapp: QApplication) -> N
         win.close()
 
 
+def test_close_flushes_telemetry_beacon(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Closing the window must emit the beacon with block=True.
+
+    The process exits right after closeEvent; a non-blocking send would ride a daemon thread that
+    dies with the process, so the GUI beacon would be silently lost on every run.
+    """
+    calls: list[dict[str, object]] = []
+
+    def fake_emit(
+        run: telemetry.RunInfo,
+        *,
+        enabled: bool,
+        block: bool = False,
+    ) -> None:
+        calls.append({"run": run, "enabled": enabled, "block": block})
+
+    monkeypatch.setattr(gui.telemetry, "emit", fake_emit)
+    window.close()
+
+    assert len(calls) == 1
+    assert calls[0]["block"] is True
+    assert calls[0]["run"].interface == "gui"
+
+
 # ---------------------------------------------------------------------------
 # Redesigned chrome: progress bar, details disclosure, save options, menus
 # ---------------------------------------------------------------------------
