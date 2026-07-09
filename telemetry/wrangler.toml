@@ -1,0 +1,22 @@
+# Cloudflare Worker config for the photo-tagger telemetry collector.
+#
+# Deploy with:  wrangler deploy   (run from this directory)
+# The account is taken from the CLOUDFLARE_ACCOUNT_ID env var (or `wrangler login`), so no
+# account id is hardcoded here.
+
+name = "photo-tagger-telemetry"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# The Analytics Engine dataset the Worker writes to. `binding` is the name exposed to the Worker
+# as env.TELEMETRY; `dataset` is what queries.sql selects FROM.
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "photo_tagger_telemetry"
+
+# Serve the collector from the project's own subdomain instead of *.workers.dev. tagger.photo must
+# already exist as a zone on the same Cloudflare account; Wrangler then provisions the DNS record
+# and TLS certificate for this hostname on deploy.
+[[routes]]
+pattern = "telemetry.tagger.photo"
+custom_domain = true
