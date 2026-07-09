@@ -22,6 +22,8 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from photo_tagger.config import (
+    DEFAULT_LLAMACPP_API_KEY,
+    DEFAULT_LLAMACPP_BASE_URL,
     DEFAULT_LMSTUDIO_API_KEY,
     DEFAULT_LMSTUDIO_BASE_URL,
     DEFAULT_OLLAMA_API_KEY,
@@ -39,7 +41,7 @@ if TYPE_CHECKING:
 # Every supported backend name. Kept as a Literal so cyclopts can validate the
 # ``--provider`` flag and static analysis can check exhaustiveness; a test asserts
 # it stays in lockstep with the runtime registry below.
-ProviderName = Literal["ollama", "lmstudio", "openai"]
+ProviderName = Literal["ollama", "lmstudio", "llamacpp", "openai"]
 
 # A pydantic-ai provider this package knows how to construct.
 ChatProvider = OllamaProvider | OpenAIProvider
@@ -221,6 +223,14 @@ _BACKENDS: dict[str, ProviderBackend] = {
             make_provider=_make_openai,
         ),
         ProviderBackend(
+            name="llamacpp",
+            default_base_url=DEFAULT_LLAMACPP_BASE_URL,
+            default_api_key=DEFAULT_LLAMACPP_API_KEY,
+            build_listing_url=_openai_listing_url,
+            parse_models=_openai_model_ids,
+            make_provider=_make_openai,
+        ),
+        ProviderBackend(
             name="openai",
             default_base_url=DEFAULT_OPENAI_BASE_URL,
             default_api_key=DEFAULT_OPENAI_API_KEY,
@@ -236,7 +246,12 @@ _BACKENDS: dict[str, ProviderBackend] = {
 PROVIDER_NAMES: tuple[str, ...] = tuple(_BACKENDS)
 
 # Human spellings of the internal names, for anything user-facing (GUI combo, doctor output).
-PROVIDER_LABELS: dict[str, str] = {"ollama": "Ollama", "lmstudio": "LM Studio", "openai": "OpenAI"}
+PROVIDER_LABELS: dict[str, str] = {
+    "ollama": "Ollama",
+    "lmstudio": "LM Studio",
+    "llamacpp": "llama.cpp",
+    "openai": "OpenAI",
+}
 
 
 def get_backend(name: str) -> ProviderBackend:

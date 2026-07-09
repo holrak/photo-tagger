@@ -70,6 +70,15 @@ def test_openai_backend_requires_api_key_but_local_ones_do_not() -> None:
     assert get_backend("openai").requires_api_key is True
     assert get_backend("ollama").requires_api_key is False
     assert get_backend("lmstudio").requires_api_key is False
+    assert get_backend("llamacpp").requires_api_key is False
+
+
+def test_llamacpp_backend_is_openai_compatible() -> None:
+    """The llama.cpp backend speaks the OpenAI API on llama-server's default port."""
+    backend = get_backend("llamacpp")
+    assert backend.default_base_url.endswith(":8080/v1")
+    listing = backend.build_listing_url("http://localhost:8080/v1")
+    assert listing == "http://localhost:8080/v1/models"
 
 
 # ---------------------------------------------------------------------------

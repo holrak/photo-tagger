@@ -51,7 +51,10 @@ class ProviderConfig:
         ProviderName,
         Parameter(
             name=("--provider",),
-            help="Backend provider: 'ollama', 'lmstudio', or 'openai' (any OpenAI-compatible API)",
+            help=(
+                "Backend provider: 'ollama', 'lmstudio', 'llamacpp', or 'openai' (any "
+                "OpenAI-compatible API)"
+            ),
         ),
     ] = "lmstudio"
     api_base_url: Annotated[
@@ -64,7 +67,8 @@ class ProviderConfig:
             name=("--api-key", "-k"),
             help=(
                 "Provider API key. Prefer env vars (OLLAMA_API_KEY, LM_STUDIO_API_KEY,"
-                " OPENAI_API_KEY) over this flag. Note: CLI args are visible in process listings!"
+                " LLAMA_CPP_API_KEY, OPENAI_API_KEY) over this flag. Note: CLI args are visible"
+                " in process listings!"
             ),
         ),
     ] = None

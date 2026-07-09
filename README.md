@@ -144,7 +144,7 @@ Key options:
 - `--ext` – comma-separated extension list used when scanning directories (default `cr3,jpg`)
 - `-r/--recursive` – recurse into subdirectories while scanning inputs
 - `-m/--model` – model identifier understood by your provider
-- `--provider` – `ollama`, `lmstudio`, or `openai` (defaults to `lmstudio`)
+- `--provider` – `ollama`, `lmstudio`, `llamacpp`, or `openai` (defaults to `lmstudio`)
 - `--url` / `--api-key` – override provider endpoint and credentials
 - `--overwrite-keywords` – replace instead of merge existing keyword metadata
 - `--no-write-title` / `--no-write-description` – skip writing those fields

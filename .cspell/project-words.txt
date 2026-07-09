@@ -11,6 +11,7 @@ casefold
 casefolded
 Casefolded
 charliermarsh
+CHEVRONLIGHT
 cogvlm
 configfile
 conftest
@@ -67,6 +68,8 @@ linecap
 linejoin
 linenums
 litellm
+llamacpp
+LLAMACPP
 llava
 lmstudio
 LMSTUDIO
@@ -93,6 +96,7 @@ pipx
 pixmap
 pixtral
 prek
+primarysplit
 psutil
 pycache
 pycqa

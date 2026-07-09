@@ -48,6 +48,10 @@ DEFAULT_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v
 DEFAULT_OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
 DEFAULT_LMSTUDIO_API_KEY = os.getenv("LM_STUDIO_API_KEY", os.getenv("OPENAI_API_KEY"))
+# llama.cpp's llama-server speaks the OpenAI API on port 8080 by default; a key is optional
+# (only checked when the server was started with --api-key).
+DEFAULT_LLAMACPP_BASE_URL = os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1")
+DEFAULT_LLAMACPP_API_KEY = os.getenv("LLAMA_CPP_API_KEY")
 # Hosted, OpenAI-compatible endpoints (the real OpenAI API or any drop-in gateway).
 # Unlike the local providers this one needs a key, so there is no usable local default.
 DEFAULT_OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")

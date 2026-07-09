@@ -72,7 +72,7 @@ workers = 1              # Process N photos concurrently with a thread pool.
 
 [provider]
 model_name = "qwen/qwen3-vl-30b"          # Vision-language model identifier.
-provider_name = "lmstudio"                # Backend: "ollama", "lmstudio", or "openai".
+provider_name = "lmstudio"                # Backend: "ollama", "lmstudio", "llamacpp", or "openai".
 api_base_url = "http://localhost:1234/v1" # Provider API base URL.
 # api_key = "..."                         # Prefer the API-key env vars instead.
 retries = 5                               # Retries when output fails schema validation.

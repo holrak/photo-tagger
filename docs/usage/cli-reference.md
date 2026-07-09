@@ -57,7 +57,7 @@ over `--api-key` so the key never lands in your shell history.
 
 | Flag                  | Default                                                                     | Env var                                                      | Description                                                        |
 | --------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `--provider` NAME     | `lmstudio`                                                                  | `-`                                                          | Backend: `ollama`, `lmstudio`, or `openai`.                        |
+| `--provider` NAME     | `lmstudio`                                                                  | `-`                                                          | Backend: `ollama`, `lmstudio`, `llamacpp`, or `openai`.            |
 | `-m`, `--model` NAME  | `qwen/qwen3-vl-30b`                                                         | `MODEL_NAME`                                                 | Vision-language model identifier.                                  |
 | `-u`, `--url` URL     | `http://localhost:1234/v1` (lmstudio), `http://localhost:11434/v1` (ollama) | `LM_STUDIO_BASE_URL` / `OLLAMA_BASE_URL` / `OPENAI_BASE_URL` | Provider API base URL.                                             |
 | `-k`, `--api-key` KEY | none                                                                        | `OLLAMA_API_KEY` / `LM_STUDIO_API_KEY` / `OPENAI_API_KEY`    | API key; prefer the env vars over the flag. Required for `openai`. |
