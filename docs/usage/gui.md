@@ -71,9 +71,10 @@ folders stay grouped above their sibling files either way):
 
 - **Photos**: the file name.
 - **Type**: the extension, with `+xmp` appended when an XMP sidecar sits next to the file.
-- **Status**: blank (pending), `working...`, `ready`, `saved ✓` (green), or `failed ✗` (red).
-    Sorting uses the processing stage, not the label text, so clicking it groups all the failures or
-    all the ready photos together.
+- **Status**: blank (pending), `working...`, `ready` (or `ready (cached)` when the proposal was
+    replayed from the result cache), `saved ✓` (green), or `failed ✗` (red). Sorting uses the
+    processing stage, not the label text, so clicking it groups all the failures or all the ready
+    photos together.
 - **Tagged**: which metadata the file already carries, filled in by a background scan after you add
     photos: `T` title, `D` description, `K` keywords, `-` for none (hover for the full list).
 
@@ -102,7 +103,9 @@ any of them. The status bar reports how many photos were deselected and how many
 Selecting a **folder** (rather than a file) shows a **thumbnail grid** of its photos on the right,
 like a contact sheet. Thumbnails load in the background, so a large folder of RAW files stays
 responsive. Click any thumbnail to open that photo's detail (the same as clicking its name in the
-tree).
+tree). Each thumbnail carries small badges (hover for the explanation): the top-right one tracks the
+lifecycle (red ✗ failed, green ✓ saved, indigo dot for generated-but-not-saved), and the top-left
+ones flag a photo that already has metadata (`M`) or an XMP sidecar (`S`).
 
 ### 3. Generate proposals
 
@@ -138,14 +141,15 @@ Click a photo to open it on the right. The detail pane is **side-by-side** for e
 **Existing** column (read-only) next to a **New (editable)** column.
 
 - a **preview** (RAW files are decoded just like a real run),
-- a **Source** line saying whether the existing metadata came from the image file, an XMP sidecar,
-    or both,
 - **Existing** vs **New** Title, Description, and Keywords lined up row by row, with the New side
-    editable and seeded from the proposal. The description boxes grow with their content instead of
-    reserving space, and existing keyword hierarchies display in the same `<` notation you type,
+    editable and seeded from the proposal. The Existing header notes where that metadata was read
+    from (the image file, an XMP sidecar, or both). The description boxes grow with their content
+    instead of reserving space, and existing keyword hierarchies display in the same `<` notation
+    you type,
 - a collapsible **Keyword changes** section. Its header always summarizes what a save would do
     (`+3 / -1`, or `no change`); expand it for the colored diff (green added, red struck-through
-    removed, grey unchanged) and the resulting keyword **tree**, shown indented by level.
+    removed, grey unchanged) and the resulting keyword **tree**, drawn with `tree`-style branch
+    guides (`├─`/`└─`).
 
 Keywords support hierarchy with `<` (specific to general), for example `Eagle<Bird<Animal`; the
 summary, diff, and tree update live as you edit. Adjust anything, then press **Save this photo** to
@@ -210,10 +214,12 @@ spreadsheet or sharing the results without opening every photo.
 
 The GUI reads the same TOML config file and environment variables as the CLI and pre-fills the
 provider, model, URL, extensions, and save options from them. It can also write that file:
-**Settings > Save Settings as Defaults...** stores the current provider, model, URL, file types,
-recursion, and save options to `~/.config/photo-tagger/config.toml` (asking before replacing an
-existing file, and never writing the API key), so both the GUI and the CLI open ready to go next
-time. See [Configuration](../getting-started/configuration.md) for the file format.
+**Settings > Save Settings as Defaults...** updates the config file in effect (or creates
+`~/.config/photo-tagger/config.toml`) with the current provider, model, URL, file types, recursion,
+and save options. The save **merges**: comments, ordering, and every setting the GUI does not manage
+are preserved, and the API key is never written. For everything the GUI does not surface (prompt
+file, sampling, workers, filters), **Settings > Edit Config File...** opens the file in your editor.
+See [Configuration](../getting-started/configuration.md) for the format.
 
 Generated results are cached in the same SQLite format as the CLI's
 [`--cache-file`](cli-reference.md): the GUI uses the configured `cache_file` if the config sets one,
