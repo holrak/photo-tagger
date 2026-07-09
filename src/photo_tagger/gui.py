@@ -864,7 +864,7 @@ class MainWindow(QMainWindow):
         self._details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._details_toggle.setToolTip(
             "Show exactly what saving will change: added and removed keywords, plus the "
-            "Lightroom hierarchy paths that will be written.",
+            "resulting keyword tree.",
         )
         self._details_toggle.toggled.connect(self._on_details_toggled)
         box.addWidget(self._details_toggle)
@@ -878,9 +878,11 @@ class MainWindow(QMainWindow):
         self._diff.setMinimumHeight(90)
         self._diff.setToolTip("Keyword changes a save will make: green added, red removed.")
         self._hierarchy = _readonly_box(60)
-        self._hierarchy.setToolTip("Lightroom hierarchy paths that saving will write.")
+        self._hierarchy.setToolTip(
+            "The keyword tree that saving will write (stored as Lightroom hierarchy paths).",
+        )
         form.addRow("Changes", self._diff)
-        form.addRow("Hierarchy", self._hierarchy)
+        form.addRow("Tree", self._hierarchy)
         self._details_panel.hide()
         box.addWidget(self._details_panel)
         return box

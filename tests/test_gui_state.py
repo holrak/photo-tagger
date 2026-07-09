@@ -23,6 +23,7 @@ from photo_tagger.gui_state import (
     Proposal,
     apply_proposal,
     build_tree,
+    chain_to_display,
     count_generated,
     descendant_files,
     deselect_paths,
@@ -31,6 +32,7 @@ from photo_tagger.gui_state import (
     format_existing_keywords,
     group_by_parent,
     hierarchy_preview,
+    hierarchy_tree_text,
     keyword_diff,
     keywords_to_save,
     keywords_to_text,
@@ -286,20 +288,45 @@ def test_default_gui_extensions_includes_jpg_and_jpeg() -> None:
     assert "jpeg" in exts
 
 
-def test_format_existing_keywords_shows_flat_and_hierarchy() -> None:
-    """Existing keywords render as a flat list plus a hierarchy section when present."""
-    kw = KeywordSet(subject=["Bird", "Sky"], hierarchical=["Animal|Bird"])
+def test_format_existing_keywords_uses_leaf_first_chains() -> None:
+    """Hierarchies render once, leaf-first with '<'; only truly flat keywords are listed apart."""
+    kw = KeywordSet(
+        subject=["Animal", "Bird", "Sky"],
+        hierarchical=["Animal|Bird"],
+    )
     text = format_existing_keywords(kw)
-    assert "Bird, Sky" in text
-    assert "Hierarchy:" in text
-    assert "Animal|Bird" in text
+    assert "Bird<Animal" in text
+    assert "Sky" in text.splitlines()
+    # The flat copies of the chain segments are folded into the chain line, not repeated.
+    assert "Animal" not in text.splitlines()
     assert format_existing_keywords(KeywordSet()) == ""
 
 
-def test_hierarchy_preview_shows_resulting_paths() -> None:
-    """The preview shows the Lightroom paths that saving the edited keywords would write."""
+def test_format_existing_keywords_keeps_only_deepest_chain() -> None:
+    """Cumulative Lightroom paths (A|B plus A|B|C) collapse into the single deepest chain."""
+    kw = KeywordSet(
+        subject=["Animal", "Bird", "Duck"],
+        hierarchical=["Animal|Bird", "Animal|Bird|Duck"],
+    )
+    assert format_existing_keywords(kw) == "Duck<Bird<Animal"
+
+
+def test_hierarchy_preview_renders_an_indented_tree() -> None:
+    """The preview folds the cumulative paths a save writes into one indented tree."""
     preview = hierarchy_preview(KeywordSet(), ["Duck<Bird<Animal"], overwrite=True)
-    assert "Animal|Bird|Duck" in preview
+    assert preview == "Animal\n  Bird\n    Duck"
+
+
+def test_hierarchy_tree_text_merges_shared_roots() -> None:
+    """Two chains under one root share the root line instead of repeating it."""
+    text = hierarchy_tree_text(["Animal|Bird", "Animal|Bird|Duck", "Animal|Cat"])
+    assert text == "Animal\n  Bird\n    Duck\n  Cat"
+
+
+def test_chain_to_display_reverses_to_leaf_first() -> None:
+    """A root-first '|' path flips to the editable field's leaf-first '<' form."""
+    assert chain_to_display("Animal|Bird|Duck") == "Duck<Bird<Animal"
+    assert chain_to_display("Flat") == "Flat"
 
 
 def test_keyword_diff_merge_marks_added_and_unchanged() -> None:

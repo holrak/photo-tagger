@@ -384,14 +384,62 @@ def rank_vision_models(model_ids: Iterable[str]) -> list[str]:
     return likely + others
 
 
+# A nested name -> children mapping used to fold cumulative hierarchy paths into one tree.
+type _Tree = dict[str, "_Tree"]
+
+
+def chain_to_display(path: str) -> str:
+    """
+    Convert a Lightroom root-first ``A|B|C`` path to the GUI's leaf-first ``C<B<A`` notation.
+
+    The editable keyword field already speaks the '<' form (it is what the model emits and what the
+    CLI documents), so every read-only view uses it too instead of leaking the on-disk '|'.
+    """
+    return "<".join(reversed(path.split("|")))
+
+
 def format_existing_keywords(keywords: KeywordSet) -> str:
-    """Render existing keywords for the read-only panel: flat list plus any hierarchy."""
-    sections: list[str] = []
-    if keywords.subject:
-        sections.append(", ".join(keywords.subject))
-    if keywords.hierarchical:
-        sections.append("Hierarchy:\n" + "\n".join(keywords.hierarchical))
-    return "\n".join(sections)
+    """
+    Render existing keywords one per line, in the same ``<`` notation as the editable field.
+
+    Each hierarchy shows once, as its deepest chain (``Duck<Bird<Animal``); the intermediate flat
+    copies Lightroom also stores (Animal, Bird) are folded into it. Flat keywords that belong to no
+    hierarchy follow. This mirrors what a user would type to reproduce the same metadata.
+    """
+    chains = [entry for entry in keywords.hierarchical if "|" in entry]
+    deepest = [
+        entry
+        for entry in chains
+        if not any(other.startswith(entry + "|") for other in chains if other != entry)
+    ]
+    covered = {segment.casefold() for entry in chains for segment in entry.split("|")}
+    lines = [chain_to_display(entry) for entry in deepest]
+    lines += [kw for kw in keywords.subject if kw.casefold() not in covered]
+    return "\n".join(lines)
+
+
+def hierarchy_tree_text(paths: Iterable[str]) -> str:
+    """
+    Render Lightroom ``A|B|C`` paths as an indented tree, one level per two spaces.
+
+    Cumulative paths ("A|B", "A|B|C") collapse into one branch, so the view shows the taxonomy shape
+    rather than repeating every prefix line.
+    """
+    root: _Tree = {}
+    for path in paths:
+        node = root
+        for segment in path.split("|"):
+            node = node.setdefault(segment, {})
+
+    lines: list[str] = []
+
+    def walk(node: _Tree, depth: int) -> None:
+        for name, child in node.items():
+            lines.append("  " * depth + name)
+            walk(child, depth + 1)
+
+    walk(root, 0)
+    return "\n".join(lines)
 
 
 def hierarchy_preview(
@@ -400,8 +448,10 @@ def hierarchy_preview(
     *,
     overwrite: bool,
 ) -> str:
-    """Render the Lightroom hierarchy that saving the edited keywords would produce."""
-    return "\n".join(keywords_to_save(existing, edited_keywords, overwrite=overwrite).hierarchical)
+    """Render the keyword tree that saving the edited keywords would produce."""
+    return hierarchy_tree_text(
+        keywords_to_save(existing, edited_keywords, overwrite=overwrite).hierarchical,
+    )
 
 
 # Diff states for a keyword when comparing the existing flat subjects to what a save writes.

@@ -591,7 +591,7 @@ def test_hierarchy_preview_updates_from_keywords(
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._overwrite.setChecked(True)  # noqa: SLF001
     window._keywords.setPlainText("Duck<Bird<Animal")  # noqa: SLF001 - triggers textChanged
-    assert "Animal|Bird|Duck" in window._hierarchy.toPlainText()  # noqa: SLF001
+    assert window._hierarchy.toPlainText() == "Animal\n  Bird\n    Duck"  # noqa: SLF001
 
 
 def test_save_current_writes_and_marks_saved(
