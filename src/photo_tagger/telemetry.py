@@ -27,11 +27,16 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from loguru import logger
 
 from photo_tagger import __version__
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 # The collector endpoint (our own Cloudflare Worker). Kept as a module constant so tests can patch
@@ -66,8 +71,8 @@ _GUI_PREF_FILE = "gui-telemetry"
 # Shown once, to stderr, on the first run telemetry is active. Opt-out tools are expected to
 # disclose up front; this is that disclosure.
 FIRST_RUN_NOTICE = (
-    "photo-tagger collects anonymous usage stats (model name, batch size, OS, CPU arch, timing) to "
-    "guide development.\n"
+    "photo-tagger collects anonymous usage stats (model name, batch size, file types, output and "
+    "UI language, OS, CPU arch, timing) to guide development.\n"
     "No photos, file paths, filenames, tags, or personal data are ever sent. See the Telemetry "
     "section of the README.\n"
     "Disable it any time with --no-telemetry, PHOTO_TAGGER_NO_TELEMETRY=1, or [telemetry] "
@@ -89,6 +94,20 @@ class RunInfo:
     model: str
     batch_size: int
     duration_seconds: float
+    output_language: str  # the language the model writes metadata in, e.g. "English"
+    ui_language: str  # the resolved app UI language code, e.g. "en" or "pt_BR"
+    file_types: str  # distinct extensions in the batch, sorted and comma-joined, e.g. "cr3,jpg"
+
+
+def file_types_summary(paths: Iterable[Path]) -> str:
+    """
+    Summarize a batch as its distinct file extensions: lowercased, dot-stripped, comma-joined.
+
+    ``{"a.CR3", "b.jpg", "c.cr3"}`` becomes ``"cr3,jpg"``. This answers "which formats do people
+    run?" without revealing a single filename: only the set of extensions leaves the machine.
+    """
+    extensions = {path.suffix.lower().lstrip(".") for path in paths if path.suffix}
+    return ",".join(sorted(extensions))
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -214,6 +233,9 @@ def build_payload(run: RunInfo) -> dict[str, object]:
         "model": run.model,
         "batch_size": run.batch_size,
         "duration_seconds": round(run.duration_seconds, 3),
+        "output_language": run.output_language,
+        "ui_language": run.ui_language,
+        "file_types": run.file_types,
         "arch": platform.machine(),  # e.g. "arm64", "x86_64", "aarch64"
         "os": platform.system(),  # "Darwin", "Linux", "Windows"
         "os_release": platform.release(),

@@ -21,7 +21,8 @@ What the client sends, when, and how to turn it off is documented in the
 
 One data point per run, holding only the fields in
 [`build_payload`](../src/photo_tagger/telemetry.py): app version, interface (cli/gui), provider,
-model, CPU arch, OS, OS release, Python version, batch size, run duration, and a random install id.
+model, output language, UI language, file types (extensions only, e.g. `cr3,jpg`), CPU arch, OS, OS
+release, Python version, batch size, run duration, and a random install id.
 
 It does **not** store IP addresses, set cookies, or read anything back; the endpoint is write-only
 and replies `204 No Content`. Strings are length-clamped so a malformed client cannot bloat a point.

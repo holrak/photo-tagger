@@ -51,16 +51,19 @@ export default {
     env.TELEMETRY.writeDataPoint({
       // index1: the random install id, so COUNT(DISTINCT index1) approximates active installs.
       indexes: [str(body.install_id)],
-      // blob1..blob8, in the order queries.sql reads them.
+      // blob1..blob11, in the order queries.sql reads them.
       blobs: [
-        str(body.app_version), //    blob1
-        str(body.interface), //      blob2  "cli" | "gui"
-        str(body.provider), //       blob3
-        str(body.model), //          blob4
-        str(body.arch), //           blob5
-        str(body.os), //             blob6
-        str(body.os_release), //     blob7
-        str(body.python_version), // blob8
+        str(body.app_version), //     blob1
+        str(body.interface), //       blob2  "cli" | "gui"
+        str(body.provider), //        blob3
+        str(body.model), //           blob4
+        str(body.arch), //            blob5
+        str(body.os), //              blob6
+        str(body.os_release), //      blob7
+        str(body.python_version), //  blob8
+        str(body.output_language), // blob9  metadata language, e.g. "English"
+        str(body.ui_language), //     blob10 resolved UI language code, e.g. "en"
+        str(body.file_types), //      blob11 distinct extensions, e.g. "cr3,jpg"
       ],
       // double1..double3.
       doubles: [

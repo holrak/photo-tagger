@@ -36,10 +36,19 @@ _FALLBACK = "en"
 # (and in the test suite) every string is its English source.
 _active: _gettext_module.NullTranslations = _gettext_module.NullTranslations()
 
+# The resolved code of the active catalog, so callers (telemetry) can report which UI language is
+# actually in effect. Defaults to the fallback until activate() runs.
+_active_language: str = _FALLBACK
+
 
 def _(message: str) -> str:
     """Translate *message* under the active catalog (identity for English or a missing entry)."""
     return _active.gettext(message)
+
+
+def current_language() -> str:
+    """Return the resolved code of the active UI catalog, e.g. "en" or "pt_BR"."""
+    return _active_language
 
 
 def ngettext(singular: str, plural: str, count: int) -> str:
@@ -117,7 +126,7 @@ def activate(configured: str | None = None, *, system_hint: str | None = None) -
     ``fallback=True`` means a missing catalog degrades to English rather than raising, so a partial
     install (or the source tree before compilation) still runs.
     """
-    global _active  # noqa: PLW0603 - one process-wide catalog is the point of gettext.
+    global _active, _active_language  # noqa: PLW0603 - one process-wide catalog is the point.
     language = detect_language(configured, system_hint=system_hint)
     _active = _gettext_module.translation(
         DOMAIN,
@@ -125,4 +134,5 @@ def activate(configured: str | None = None, *, system_hint: str | None = None) -
         languages=[language],
         fallback=True,
     )
+    _active_language = language
     return language

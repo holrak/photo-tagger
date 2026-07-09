@@ -38,6 +38,9 @@ def _sample_run() -> RunInfo:
         model="qwen/qwen3-vl-30b",
         batch_size=12,
         duration_seconds=4.5,
+        output_language="English",
+        ui_language="en",
+        file_types="cr3,jpg",
     )
 
 
@@ -173,6 +176,9 @@ _EXPECTED_PAYLOAD_KEYS = {
     "model",
     "batch_size",
     "duration_seconds",
+    "output_language",
+    "ui_language",
+    "file_types",
     "arch",
     "os",
     "os_release",
@@ -209,6 +215,32 @@ def test_build_payload_leaks_no_paths_or_content() -> None:
         assert "/" not in str(value)
         assert "\\" not in str(value)
     uuid.UUID(str(payload["install_id"]))
+
+
+def test_build_payload_carries_language_and_file_types() -> None:
+    """The language and file-type run facts reach the beacon body verbatim."""
+    payload = telemetry.build_payload(_sample_run())
+    assert payload["output_language"] == "English"
+    assert payload["ui_language"] == "en"
+    assert payload["file_types"] == "cr3,jpg"
+
+
+def test_file_types_summary_is_sorted_lowercased_and_deduplicated() -> None:
+    """Extensions collapse to a sorted, lowercased, dot-stripped, comma-joined set."""
+    paths = [Path("/photos/a.CR3"), Path("/photos/b.jpg"), Path("/photos/c.cr3")]
+    assert telemetry.file_types_summary(paths) == "cr3,jpg"
+
+
+def test_file_types_summary_reveals_no_filenames() -> None:
+    """Only extensions leave the machine: the summary carries no path or filename."""
+    summary = telemetry.file_types_summary([Path("/private/vacation-2026/IMG_0001.DNG")])
+    assert summary == "dng"
+
+
+def test_file_types_summary_handles_empty_and_no_suffix() -> None:
+    """No paths, or paths without a suffix, yield an empty string rather than a stray comma."""
+    assert telemetry.file_types_summary([]) == ""
+    assert telemetry.file_types_summary([Path("/photos/README")]) == ""
 
 
 # --- emit (sending) ----------------------------------------------------------------------------

@@ -555,11 +555,6 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
     )
 
 
-def count_generated(items: Iterable[PhotoItem]) -> int:
-    """Count photos with an AI proposal: the batch size the GUI session reports to telemetry."""
-    return sum(1 for item in items if item.has_proposal)
-
-
 def reveal_label(platform_name: str) -> str:
     """Name the OS file browser for the context-menu action ("Reveal in Finder" on macOS)."""
     if platform_name == "darwin":

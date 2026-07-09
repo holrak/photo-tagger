@@ -92,6 +92,14 @@ def test_activate_loads_the_brazilian_portuguese_catalog() -> None:
     assert _("Generate Selected") == "Gerar Selecionadas"
 
 
+def test_current_language_tracks_the_active_catalog() -> None:
+    """current_language() reports whatever activate() last resolved, for telemetry to read."""
+    assert activate("pt_BR") == "pt_BR"
+    assert i18n.current_language() == "pt_BR"
+    assert activate("en") == "en"
+    assert i18n.current_language() == "en"
+
+
 def test_pt_br_plural_rules() -> None:
     """Portuguese pluralization: one singular, everything else plural."""
     activate("pt_BR")

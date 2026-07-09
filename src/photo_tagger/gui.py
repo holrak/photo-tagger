@@ -134,7 +134,6 @@ from photo_tagger.gui_state import (
     config_text_with_language,
     config_text_with_output_language,
     config_toml_text,
-    count_generated,
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
@@ -700,6 +699,9 @@ class MainWindow(QMainWindow):
         self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
+        # Keys of photos generated this session, for the telemetry batch size. Tracked cumulatively
+        # (not counted off the list at close) so clearing or loading another folder never loses it.
+        self._session_tagged: set[str] = set()
         # Telemetry on/off: a persisted Settings-menu choice wins over the config-file default.
         _pref = telemetry.read_gui_pref()
         self._telemetry_enabled = self._defaults.telemetry.enabled if _pref is None else _pref
@@ -2545,6 +2547,7 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         apply_proposal(item, proposal)
+        self._session_tagged.add(str(item.path))
         self._refresh_status_cell(item)
         self._advance_progress()
         if self._current is item:
@@ -2813,8 +2816,11 @@ class MainWindow(QMainWindow):
                 interface="gui",
                 provider=self._provider_name(),
                 model=self._model.currentText().strip(),
-                batch_size=count_generated(self._items.values()),
+                batch_size=len(self._session_tagged),
                 duration_seconds=time.monotonic() - self._session_start,
+                output_language=self._output_language,
+                ui_language=i18n.current_language(),
+                file_types=telemetry.file_types_summary(Path(key) for key in self._session_tagged),
             ),
             enabled=self._telemetry_enabled,
             block=True,

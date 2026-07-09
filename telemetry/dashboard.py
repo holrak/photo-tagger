@@ -570,12 +570,103 @@ def _(app_version_view, mo, python_version_view):
 
 
 @app.cell
+def _(chart_card, days, hbar, mo, query):
+    _formats_raw = query(
+        f"""
+        SELECT blob11 AS file_types, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob11 != ''
+        GROUP BY file_types
+        ORDER BY runs DESC
+        """,
+    )
+    mo.stop(_formats_raw.empty, mo.md("_No file-type data in this window yet._"))
+    # blob11 is a per-run set like "cr3,jpg"; AE SQL cannot split it, so explode client-side into
+    # one row per format. runs then counts runs that used each format (a CR3+JPEG run hits both).
+    formats_frame = (
+        _formats_raw.assign(fmt=_formats_raw["file_types"].str.split(","))
+        .explode("fmt")
+        .groupby("fmt", as_index=False)["runs"]
+        .sum()
+        .sort_values("runs", ascending=False)
+    )
+    chart_card(
+        hbar(
+            formats_frame,
+            "fmt",
+            "runs",
+            title="File formats",
+            subtitle="runs that included each extension (a CR3+JPEG run counts toward both)",
+        ),
+        formats_frame,
+    )
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query):
+    output_language_frame = query(
+        f"""
+        SELECT blob9 AS output_language, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob9 != ''
+        GROUP BY output_language
+        ORDER BY runs DESC
+        LIMIT 12
+        """,
+    )
+    mo.stop(output_language_frame.empty, mo.md("_No metadata-language data in this window yet._"))
+    output_language_view = chart_card(
+        hbar(
+            output_language_frame,
+            "output_language",
+            "runs",
+            title="Metadata languages",
+            subtitle="language the model writes titles and keywords in",
+        ),
+        output_language_frame,
+    )
+    return (output_language_view,)
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query):
+    ui_language_frame = query(
+        f"""
+        SELECT blob10 AS ui_language, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob10 != ''
+        GROUP BY ui_language
+        ORDER BY runs DESC
+        LIMIT 12
+        """,
+    )
+    mo.stop(ui_language_frame.empty, mo.md("_No UI-language data in this window yet._"))
+    ui_language_view = chart_card(
+        hbar(
+            ui_language_frame,
+            "ui_language",
+            "runs",
+            title="UI languages",
+            subtitle="the app interface language actually in effect",
+        ),
+        ui_language_frame,
+    )
+    return (ui_language_view,)
+
+
+@app.cell
+def _(mo, output_language_view, ui_language_view):
+    mo.hstack([output_language_view, ui_language_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
 def _(mo):
     _default_sql = """\
     -- Column map (see worker.js):
-    --   index1  = install_id          blob1 = app_version     blob2 = interface (cli|gui)
-    --   blob3   = provider            blob4 = model           blob5 = arch
-    --   blob6   = os                  blob7 = os_release      blob8 = python_version
+    --   index1  = install_id          blob1  = app_version    blob2  = interface (cli|gui)
+    --   blob3   = provider            blob4  = model          blob5  = arch
+    --   blob6   = os                  blob7  = os_release     blob8  = python_version
+    --   blob9   = output_language     blob10 = ui_language    blob11 = file_types
     --   double1 = schema_version      double2 = batch_size    double3 = duration_seconds
     SELECT blob3 AS provider, SUM(_sample_interval) AS runs
     FROM photo_tagger_telemetry

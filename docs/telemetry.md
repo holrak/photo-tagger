@@ -5,28 +5,32 @@ icon: lucide/radio
 # Telemetry
 
 photo-tagger sends a single anonymous beacon at the end of each run so development can be guided by
-how the tool is actually used (which models and platforms are common, typical batch sizes). It is
-**opt-out**: on by default, with a one-time notice on the first run, and easy to disable. This page
-is the full disclosure: exactly what is sent, where it goes, and every way to turn it off.
+how the tool is actually used (which models, platforms, languages, and file formats are common, and
+typical batch sizes). It is **opt-out**: on by default, with a one-time notice on the first run, and
+easy to disable. This page is the full disclosure: exactly what is sent, where it goes, and every
+way to turn it off.
 
 ## What is collected
 
 The beacon contains these fields, and nothing else:
 
-| Field              | Example             | What it is                                           |
-| ------------------ | ------------------- | ---------------------------------------------------- |
-| `schema_version`   | `1`                 | Payload format version, so the collector can branch. |
-| `install_id`       | a UUID              | Random id generated once per install (see below).    |
-| `app_version`      | `0.4.0`             | The photo-tagger version.                            |
-| `interface`        | `cli` or `gui`      | Which frontend ran the batch.                        |
-| `provider`         | `lmstudio`          | The selected backend.                                |
-| `model`            | `qwen/qwen3-vl-30b` | The model identifier.                                |
-| `batch_size`       | `42`                | How many photos were in the run.                     |
-| `duration_seconds` | `183.5`             | Wall-clock run duration.                             |
-| `arch`             | `arm64`             | CPU architecture.                                    |
-| `os`               | `Darwin`            | Operating system.                                    |
-| `os_release`       | `25.5.0`            | OS release string.                                   |
-| `python_version`   | `3.14.0`            | The Python runtime version.                          |
+| Field              | Example             | What it is                                                   |
+| ------------------ | ------------------- | ------------------------------------------------------------ |
+| `schema_version`   | `1`                 | Payload format version, so the collector can branch.         |
+| `install_id`       | a UUID              | Random id generated once per install (see below).            |
+| `app_version`      | `0.4.0`             | The photo-tagger version.                                    |
+| `interface`        | `cli` or `gui`      | Which frontend ran the batch.                                |
+| `provider`         | `lmstudio`          | The selected backend.                                        |
+| `model`            | `qwen/qwen3-vl-30b` | The model identifier.                                        |
+| `batch_size`       | `42`                | How many photos were in the run.                             |
+| `duration_seconds` | `183.5`             | Wall-clock run duration.                                     |
+| `output_language`  | `English`           | Language the model writes titles, descriptions, keywords in. |
+| `ui_language`      | `pt_BR`             | The resolved app interface language.                         |
+| `file_types`       | `cr3,jpg`           | Distinct file extensions in the batch (never filenames).     |
+| `arch`             | `arm64`             | CPU architecture.                                            |
+| `os`               | `Darwin`            | Operating system.                                            |
+| `os_release`       | `25.5.0`            | OS release string.                                           |
+| `python_version`   | `3.14.0`            | The Python runtime version.                                  |
 
 The `install_id` is a random UUID generated once and stored in the user state directory. It is
 **not** derived from any hardware identifier, so it cannot fingerprint a machine; it only lets

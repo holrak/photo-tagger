@@ -1611,6 +1611,42 @@ def test_close_flushes_telemetry_beacon(
     assert calls[0]["run"].interface == "gui"
 
 
+def test_close_beacon_reports_session_tagged_count_and_fields(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The beacon reports the session's generated-photo count, language, and file types."""
+    runs: list[telemetry.RunInfo] = []
+    monkeypatch.setattr(gui.telemetry, "emit", lambda run, **_: runs.append(run))
+    monkeypatch.setattr(gui.i18n, "current_language", lambda: "pt_BR")
+
+    img_a = _jpeg(tmp_path / "a.jpg")
+    img_b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": img_a, "b": img_b})
+    for img in (img_a, img_b):
+        window._on_file_done(  # noqa: SLF001
+            Proposal(
+                path=img,
+                existing_title=None,
+                existing_description=None,
+                existing_keywords=KeywordSet(),
+                title="T",
+                description="D",
+                keywords=["K"],
+            ),
+        )
+    window._output_language = "German"  # noqa: SLF001
+
+    window.close()
+
+    assert len(runs) == 1
+    assert runs[0].batch_size == 2  # noqa: PLR2004 - two distinct photos generated this session
+    assert runs[0].file_types == "jpg"
+    assert runs[0].output_language == "German"
+    assert runs[0].ui_language == "pt_BR"
+
+
 # ---------------------------------------------------------------------------
 # Redesigned chrome: progress bar, details disclosure, save options, menus
 # ---------------------------------------------------------------------------

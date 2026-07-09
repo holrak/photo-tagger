@@ -10,9 +10,10 @@
 -- weighting keeps the totals honest. The same reason is why the medians use quantileWeighted.
 --
 -- Column map (see worker.js):
---   index1  = install_id          blob1 = app_version     blob2 = interface (cli|gui)
---   blob3   = provider            blob4 = model           blob5 = arch
---   blob6   = os                  blob7 = os_release      blob8 = python_version
+--   index1  = install_id          blob1  = app_version    blob2  = interface (cli|gui)
+--   blob3   = provider            blob4  = model          blob5  = arch
+--   blob6   = os                  blob7  = os_release     blob8  = python_version
+--   blob9   = output_language     blob10 = ui_language    blob11 = file_types (e.g. "cr3,jpg")
 --   double1 = schema_version      double2 = batch_size    double3 = duration_seconds
 
 
@@ -72,3 +73,21 @@ FROM photo_tagger_telemetry
 WHERE timestamp > NOW() - INTERVAL '90' DAY
 GROUP BY day
 ORDER BY day;
+
+
+-- 7. File-type combinations per run. blob11 is the sorted set of extensions in one batch (e.g.
+-- "cr3,jpg"), so this groups by the whole combination. AE SQL has no splitByChar to explode it into
+-- one row per format; the dashboard does that split client-side. This still shows RAW vs JPEG usage.
+SELECT blob11 AS file_types, SUM(_sample_interval) AS runs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob11 != ''
+GROUP BY file_types
+ORDER BY runs DESC;
+
+
+-- 8. Metadata (output) language vs UI language.
+SELECT blob9 AS output_language, blob10 AS ui_language, SUM(_sample_interval) AS runs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY
+GROUP BY output_language, ui_language
+ORDER BY runs DESC;

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol
 from cyclopts import App, Parameter, validators
 from loguru import logger
 
-from photo_tagger import __version__, telemetry
+from photo_tagger import __version__, i18n, telemetry
 from photo_tagger.ai import create_agent
 from photo_tagger.cache import build_cache_namespace, open_cache
 from photo_tagger.cli_options import (
@@ -720,6 +720,9 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
                 model=provider.model_name,
                 batch_size=totals.total_files,
                 duration_seconds=(datetime.now(tz=UTC) - started_at).total_seconds(),
+                output_language=inference.output_language,
+                ui_language=i18n.current_language(),
+                file_types=telemetry.file_types_summary(image_files),
             ),
             enabled=telemetry_config.enabled,
             block=True,
