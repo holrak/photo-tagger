@@ -38,6 +38,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
 
+# Public API. Listing these here also marks the module-level constants as
+# deliberately public, so CodeQL does not flag them as unused globals.
+__all__ = [
+    "PROVIDER_LABELS",
+    "PROVIDER_NAMES",
+    "ChatProvider",
+    "ProviderBackend",
+    "ProviderName",
+    "get_backend",
+]
+
 # Every supported backend name. Kept as a Literal so cyclopts can validate the
 # ``--provider`` flag and static analysis can check exhaustiveness; a test asserts
 # it stays in lockstep with the runtime registry below.
