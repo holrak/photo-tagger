@@ -447,7 +447,9 @@ class GenerateWorker(QObject):
 
     def _generate_one(self, agent: object, path: Path, cache: InferenceCache | None) -> Proposal:
         """Read existing metadata, run the model (or hit the cache), and assemble a proposal."""
-        context = read_image_context(path)
+        # The content hash rides along in the context read (one exiftool call), so the cache
+        # key covers the image stream only: embedding metadata does not invalidate the entry.
+        context = read_image_context(path, include_content_hash=cache is not None)
         existing_title, existing_description = read_caption(path)
         gps_info = {"position": context.gps_position} if context.gps_position else {}
         prompt = build_contextual_prompt(
@@ -457,7 +459,7 @@ class GenerateWorker(QObject):
             gps_info,
             camera_info=context.camera_info,
         )
-        image_hash = hash_image_file(path) if cache is not None else ""
+        image_hash = (context.content_hash or hash_image_file(path)) if cache is not None else ""
         cached = cache.get(image_hash) if cache is not None else None
         inference = cached
         if inference is None:

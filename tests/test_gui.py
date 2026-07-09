@@ -78,7 +78,7 @@ def _stub_reads(monkeypatch: pytest.MonkeyPatch, *, keywords: list[str]) -> None
     monkeypatch.setattr(
         gui,
         "read_image_context",
-        lambda _p: ImageContext(existing_keywords=KeywordSet(subject=keywords)),
+        lambda _p, **_kwargs: ImageContext(existing_keywords=KeywordSet(subject=keywords)),
     )
 
 
@@ -1133,7 +1133,7 @@ def _stub_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         gui,
         "read_image_context",
-        lambda _p: ImageContext(existing_keywords=KeywordSet(subject=["Beach"])),
+        lambda _p, **_kwargs: ImageContext(existing_keywords=KeywordSet(subject=["Beach"])),
     )
     monkeypatch.setattr(gui, "read_caption", lambda _p: ("Old", "Old caption."))
     monkeypatch.setattr(
@@ -1902,6 +1902,45 @@ def test_worker_reuses_cached_results(
 
     assert len(done_second) == 1
     assert done_second[0].title == "T"
+
+
+def test_worker_cache_survives_metadata_rewrites(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Embedding metadata rewrites the file, but the content-hash key still hits the cache."""
+    _stub_generation(monkeypatch)
+    monkeypatch.setattr(
+        gui,
+        "read_image_context",
+        lambda _p, **_kwargs: ImageContext(
+            existing_keywords=KeywordSet(),
+            content_hash="pixels-unchanged",
+        ),
+    )
+    img = _jpeg(tmp_path / "a.jpg")
+    cache_file = tmp_path / "cache.sqlite"
+
+    first = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    first.file_done.connect(lambda _p: None)
+    first.run()
+
+    # Simulate "Embed in Photo": the file bytes change, the image data does not.
+    img.write_bytes(img.read_bytes() + b"embedded-metadata")
+
+    def boom(**_k: object) -> object:
+        msg = "the model was called although the pixels did not change"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(gui, "analyze_image_with_ai", boom)
+    second = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    done: list[Proposal] = []
+    second.file_done.connect(done.append)
+    second.run()
+
+    assert len(done) == 1
+    assert done[0].from_cache is True
 
 
 def test_cache_toggle_controls_the_active_cache_file(window: gui.MainWindow) -> None:
