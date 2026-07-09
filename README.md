@@ -295,7 +295,7 @@ photo-tagger gui
 The GUI is a review-before-write frontend over the same building blocks as the CLI. Drag in photos
 or folders, pick what to process from a checkable tree (with per-file type, status, and
 already-tagged columns), choose a provider and model (**Connection...** holds the URL, API key, and
-the same checks as `doctor`), then **Generate selected** to run the model on a background thread
+the same checks as `doctor`), then **Generate Selected** to run the model on a background thread
 with a progress bar; results are cached so re-runs are free. Each photo's proposed title,
 description, and keywords appear next to the existing values in a side-by-side detail pane, where
 you can edit any field before you **Save**. A photo that fails turns red, shows why, and can be
@@ -319,7 +319,7 @@ source and spec live in [`packaging/`](packaging/)). Two things to know:
   opens normally after that.
 - ExifTool is **not** bundled - install it however you like (`brew install exiftool`, Nix, MacPorts,
   ...). A Finder launch gives apps a minimal `PATH`, so on startup the app inherits the `PATH` your
-  login shell would set, finding exiftool wherever your package manager put it. **Test connection**
+  login shell would set, finding exiftool wherever your package manager put it. **Test Connection**
   reports a clear error if it is still missing.
 
 ## Telemetry

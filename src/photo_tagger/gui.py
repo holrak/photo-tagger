@@ -197,7 +197,7 @@ _NONE = "(none)"  # placeholder shown when a photo has no existing title/descrip
 # when there is nothing to inspect, instead of an empty (and confusing) detail form.
 _EMPTY_START = (
     "Add photos to get started.\n\n"
-    "Drag photos or folders onto the window, or use Add files and Add folder."
+    "Drag photos or folders onto the window, or use the Add Photos button."
 )
 _EMPTY_PICK = (
     "Select a photo to review it.\n\n"
@@ -880,7 +880,7 @@ class MainWindow(QMainWindow):
         )
         form.addRow("API key", self._api_key)
 
-        self._test_button = QPushButton("Test connection")
+        self._test_button = QPushButton("Test Connection")
         self._test_button.setToolTip("Check ExifTool and that the provider serves the model.")
         self._test_button.clicked.connect(self._test_connection)
         close = QPushButton("Close")
@@ -944,7 +944,7 @@ class MainWindow(QMainWindow):
         # the closest single-control equivalent (drag-and-drop takes both anyway).
         add = QToolButton()
         add.setObjectName("add")
-        add.setText("Add photos...")
+        add.setText("Add Photos...")
         add.setToolTip(
             "Add photos (click), or open the arrow for adding a whole folder and for the "
             "folder-scan options. Dragging files or folders onto the window also works.",
@@ -1512,7 +1512,7 @@ class MainWindow(QMainWindow):
         row.addStretch(1)
         self._generate_one_button = QToolButton()
         self._generate_one_button.setObjectName("split")
-        self._generate_one_button.setText("Generate this photo")
+        self._generate_one_button.setText("Generate This Photo")
         self._generate_one_button.setToolTip(
             "Run the model on just this photo, regardless of which photos are checked.",
         )
@@ -1532,7 +1532,7 @@ class MainWindow(QMainWindow):
         # discoverable right where the save happens (both Save buttons share one menu).
         self._save_button = QToolButton()
         self._save_button.setObjectName("split")
-        self._save_button.setText("Save this photo")
+        self._save_button.setText("Save This Photo")
         self._save_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._save_button.clicked.connect(
             lambda: self._save_current(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -1551,7 +1551,7 @@ class MainWindow(QMainWindow):
         self._progress.setFormat("%v / %m")
         self._progress.setVisible(False)
 
-        self._retry_button = QPushButton("Retry failed")
+        self._retry_button = QPushButton("Retry Failed")
         self._retry_button.setToolTip(
             "Re-run the model on every photo that failed to generate. Enabled once a photo "
             "has actually failed.",
@@ -1570,7 +1570,7 @@ class MainWindow(QMainWindow):
         # one-time skip-cache run without changing the Settings toggle.
         self._generate_button = QToolButton()
         self._generate_button.setObjectName("primarysplit")
-        self._generate_button.setText("Generate selected")
+        self._generate_button.setText("Generate Selected")
         self._generate_button.setToolTip("Run the model on the checked photos.")
         self._generate_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._generate_button.clicked.connect(
@@ -1588,7 +1588,7 @@ class MainWindow(QMainWindow):
 
         self._save_selected_button = QToolButton()
         self._save_selected_button.setObjectName("primarysplit")
-        self._save_selected_button.setText("Save selected")
+        self._save_selected_button.setText("Save Selected")
         self._save_selected_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._save_selected_button.clicked.connect(
             lambda: self._save_selected(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -1620,7 +1620,7 @@ class MainWindow(QMainWindow):
     # --- adding, removing, listing photos --------------------------------------------------
 
     def _choose_files(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Add photos")
+        files, _ = QFileDialog.getOpenFileNames(self, "Add Photos")
         if files:
             self._add_inputs([Path(f) for f in files])
 
@@ -1978,7 +1978,7 @@ class MainWindow(QMainWindow):
         if item.status == FAILED and item.error:
             self._error_banner.setText(
                 f"Generation failed: {item.error}\n"
-                "Use 'Retry failed' to try again, or 'Open logs' for the full traceback.",
+                "Use 'Retry Failed' to try again, or Help > Open Logs for the full traceback.",
             )
             self._error_banner.show()
         else:

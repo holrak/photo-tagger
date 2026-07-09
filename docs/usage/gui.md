@@ -42,13 +42,13 @@ Install the optional extra with:
 !!! note
 
     The GUI needs the same prerequisites as the CLI: ExifTool on your `PATH` and a reachable model
-    server. Use **Test connection** in the window to verify both before a run.
+    server. Use **Test Connection** in the window to verify both before a run.
 
 ## The workflow
 
 ### 1. Add photos
 
-Drag photos or folders anywhere onto the window, or use the **Add photos...** button: a click opens
+Drag photos or folders anywhere onto the window, or use the **Add Photos...** button: a click opens
 the file picker, and its arrow menu holds **Add Folder...** plus the folder-scan options (the **File
 types** list, comma-separated and case-insensitive, and **Include subfolders**), exactly like the
 CLI's `--ext` and `--recursive`. Photos appear in a nested tree on the left: subfolders are grouped
@@ -120,10 +120,10 @@ Pick a **Provider** (Ollama, LM Studio, llama.cpp, or OpenAI) and a **Model** in
 **Refresh** to query the provider for the models it currently serves and pick from the dropdown
 instead of typing; likely vision-capable models are listed first. **Connection...** opens the
 settings that rarely change: a custom **Base URL**, a masked **API key** (leave it blank to fall
-back to the provider's environment variable), and the **Test connection** check for ExifTool and the
+back to the provider's environment variable), and the **Test Connection** check for ExifTool and the
 model.
 
-**Generate selected** (in the bottom bar) then runs the model on the checked photos on a background
+**Generate Selected** (in the bottom bar) then runs the model on the checked photos on a background
 thread, building the same contextual prompt as the CLI (existing keywords, location, GPS, camera).
 Results stream in, the tree status updates per photo, and a progress bar in the bottom bar counts
 the batch down.
@@ -136,13 +136,13 @@ a one-time **Skip Cache** run.
 
 To regenerate a single photo without touching your selection, open it and press **Generate this
 photo** in the detail pane, or right-click it in the tree and choose **Generate** (a failed photo
-shows **Retry Generation** there instead). If several photos ended up `failed ✗`, **Retry failed**
+shows **Retry Generation** there instead). If several photos ended up `failed ✗`, **Retry Failed**
 in the bottom bar re-runs the model on all of them at once (the button stays disabled while nothing
 has failed).
 
-To stop a run early, press **Cancel** (next to *Generate selected*). The photo already in flight
+To stop a run early, press **Cancel** (next to *Generate Selected*). The photo already in flight
 finishes (a model request cannot be interrupted mid-call), then the run stops and the un-started
-photos return to `pending` so you can resume them later with another **Generate selected**. Anything
+photos return to `pending` so you can resume them later with another **Generate Selected**. Anything
 already generated keeps its proposal.
 
 ### 4. Review, edit, and save
@@ -162,9 +162,9 @@ Click a photo to open it on the right. The detail pane is **side-by-side** for e
     guides (`├─`/`└─`).
 
 Keywords support hierarchy with `<` (specific to general), for example `Eagle<Bird<Animal`; the
-summary, diff, and tree update live as you edit. Adjust anything, then press **Save this photo** to
-write just the open one, or **Save selected** (bottom bar) to write the **checked** photos that have
-a proposal. The save scope matches *Generate selected* (the same checkboxes), so check everything to
+summary, diff, and tree update live as you edit. Adjust anything, then press **Save This Photo** to
+write just the open one, or **Save Selected** (bottom bar) to write the **checked** photos that have
+a proposal. The save scope matches *Generate Selected* (the same checkboxes), so check everything to
 save everything.
 
 The arrow on either **Save** button opens the save options, which choose what every save writes
@@ -199,7 +199,7 @@ A photo that the model could not process is marked `failed ✗` in the status co
     `model unreachable` or a decode error).
 
 Once you have addressed the cause (start the model server, fix the URL, free up memory), click
-**Retry failed** to re-run every failed photo, or right-click one and choose **Retry Generation** to
+**Retry Failed** to re-run every failed photo, or right-click one and choose **Retry Generation** to
 retry just that one. A successful retry clears the banner and flips the status back to `ready`.
 
 For the full traceback behind a failure, use **Help > Open Logs**. The GUI writes a timestamped,
