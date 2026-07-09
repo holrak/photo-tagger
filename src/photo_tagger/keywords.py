@@ -208,7 +208,7 @@ def merge_keywords(
     Merge new AI-generated keywords with existing keywords, preserving hierarchy.
 
     Args:
-        existing_kw: Existing keywords read off the photo (from read_existing_keywords).
+        existing_kw: Existing keywords read off the photo (via read_image_context).
         new_keywords: List of new keywords from AI (may include hierarchical format).
 
     Returns:

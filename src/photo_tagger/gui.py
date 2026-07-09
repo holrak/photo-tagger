@@ -75,7 +75,14 @@ from PySide6.QtWidgets import (
 
 from photo_tagger import __version__, telemetry
 from photo_tagger.ai import analyze_image_with_ai, create_agent
-from photo_tagger.cache import InferenceCache, build_cache_namespace, hash_image_file
+from photo_tagger.cache import (
+    InferenceCache,
+    build_cache_namespace,
+    content_cache_key,
+    open_cache,
+    safe_cache_get,
+    safe_cache_put,
+)
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
@@ -99,7 +106,6 @@ from photo_tagger.gui_state import (
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
     PENDING,
-    PROVIDER_LABELS,
     READY,
     REMOVED,
     SAVED,
@@ -151,7 +157,7 @@ from photo_tagger.metadata import (
     write_metadata,
 )
 from photo_tagger.models import KeywordSet
-from photo_tagger.providers import PROVIDER_NAMES, ProviderName, get_backend
+from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES, ProviderName, get_backend
 
 
 if TYPE_CHECKING:
@@ -436,14 +442,7 @@ class GenerateWorker(QObject):
 
     def _open_cache(self) -> InferenceCache | None:
         """Open the result cache for this run, degrading to no cache on any failure."""
-        if self._cache_file is None:
-            return None
-        try:
-            return InferenceCache(self._cache_file, model_name=_gui_cache_namespace(self._model))
-        except Exception as exc:  # noqa: BLE001
-            # A broken cache (unwritable dir, corrupt file) must not block generation.
-            logger.warning("gui_cache_open_failed", file=str(self._cache_file), error=str(exc))
-            return None
+        return open_cache(self._cache_file, namespace=_gui_cache_namespace(self._model))
 
     def _generate_one(self, agent: object, path: Path, cache: InferenceCache | None) -> Proposal:
         """Read existing metadata, run the model (or hit the cache), and assemble a proposal."""
@@ -459,14 +458,20 @@ class GenerateWorker(QObject):
             gps_info,
             camera_info=context.camera_info,
         )
-        image_hash = (context.content_hash or hash_image_file(path)) if cache is not None else ""
-        cached = cache.get(image_hash) if cache is not None else None
+        # Keying and I/O go through the same swallow-and-degrade helpers as the CLI pipeline,
+        # so a broken cache entry (or unhashable format) costs a model call, never the photo.
+        content_key = content_cache_key(path, context.content_hash) if cache is not None else None
+        cached = (
+            safe_cache_get(cache, content_key, file_name=path.name)
+            if cache is not None and content_key is not None
+            else None
+        )
         inference = cached
         if inference is None:
             jpeg = prepare_image_for_agent(path, max_size=_PREVIEW_MAX)
             inference = analyze_image_with_ai(image_bytes=jpeg, agent=agent, user_prompt=prompt)
-            if cache is not None:
-                cache.put(image_hash, inference)
+            if cache is not None and content_key is not None:
+                safe_cache_put(cache, content_key, inference, file_name=path.name)
         else:
             logger.info("gui_cache_hit", file=path.name)
         return Proposal(
@@ -620,7 +625,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         """Build the widgets, enable drag-and-drop, and wire the actions."""
         super().__init__()
-        self._defaults = load_defaults()
+        # One disk read serves both views of the config: the Defaults dataclasses and the raw
+        # dict (for keys whose CLI-oriented defaults the GUI overrides, like extensions).
+        self._raw_config = load_config()
+        self._defaults = load_defaults(self._raw_config)
         self._items: dict[str, PhotoItem] = {}
         self._preview_cache: dict[str, QPixmap] = {}
         self._thumb_cache: dict[str, QPixmap] = {}
@@ -635,9 +643,6 @@ class MainWindow(QMainWindow):
         self._scan_worker: MetadataScanWorker | None = None
         self._syncing = False
         self._grid_check_toggled = False
-        # Raw config, for keys the Defaults dataclass fills with CLI-oriented values: the GUI
-        # wants its own broad extension default unless the user actually saved one.
-        self._raw_config = load_config()
         self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()

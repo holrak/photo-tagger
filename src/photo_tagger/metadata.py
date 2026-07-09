@@ -191,56 +191,6 @@ def _dedup_keyword_set(keywords: KeywordSet) -> None:
     keywords.weighted = _dedup_preserving_first_case(keywords.weighted)
 
 
-def read_existing_keywords(
-    image_path: Path,
-    *,
-    et: ExifToolHelper | None = None,
-) -> KeywordSet:
-    """
-    Read existing keywords from either the image or its XMP sidecar.
-
-    Args:
-        image_path: Path to the image file. Reads embedded metadata and any adjacent XMP file.
-        et: Optional already-open ExifToolHelper to reuse so a batch can avoid spinning up one
-            subprocess per call. A one-shot helper is opened when omitted.
-
-    Returns:
-        A :class:`KeywordSet` whose views are:
-        - ``subject``: flat keywords aggregated from XMP-dc:Subject and IPTC:Keywords
-        - ``hierarchical``: hierarchical keywords from XMP-lr:HierarchicalSubject
-        - ``weighted``: flat keywords from XMP-lr:WeightedFlatSubject
-
-    Note:
-        Returns an empty :class:`KeywordSet` if neither the primary file nor its
-        sidecar contain keywords.
-    """
-    targets = metadata_targets(image_path)
-    result = KeywordSet()
-    if not targets:
-        logger.info("no_metadata_targets_found")
-        return result
-
-    tags_to_extract = [tag for tag, _ in _KEYWORD_TAG_TO_FIELD]
-    try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=targets, tags=tags_to_extract)
-    except _EXIFTOOL_ERRORS as e:
-        logger.exception("failed_to_read_existing_keywords", error=str(e))
-        return result
-
-    iptc_count = _accumulate_keyword_blocks(blocks, result)
-    _dedup_keyword_set(result)
-
-    logger.debug(
-        "existing_keywords_read",
-        subject_count=len(result.subject),
-        hierarchical_count=len(result.hierarchical),
-        weighted_count=len(result.weighted),
-        iptc_keywords_count=iptc_count,
-    )
-    return result
-
-
 def _value_is_present(value: Any) -> bool:  # noqa: ANN401
     """Return True if an exiftool tag value carries any non-blank content."""
     if value is None:
@@ -354,61 +304,6 @@ def find_field_presence(
     return presence
 
 
-def read_location_tags(
-    image_path: Path,
-    *,
-    et: ExifToolHelper | None = None,
-) -> dict[str, str]:
-    """Read selected IPTC/XMP location tags from the image or its sidecar."""
-    targets = metadata_targets(image_path)
-    if not targets:
-        return {}
-
-    collected: dict[str, str] = {}
-    try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=targets, tags=list(LOCATION_TAGS))
-    except _EXIFTOOL_ERRORS as e:
-        logger.exception("failed_to_read_location_tags", error=str(e))
-        return {}
-
-    for block in blocks:
-        for tag in LOCATION_TAGS:
-            value = block.get(tag)
-            if value not in (None, ""):
-                collected[tag] = format_metadata_value(value)
-
-    if collected:
-        logger.debug("location_tags_read", tags=collected)
-    return collected
-
-
-def read_gps_coordinates(
-    image_path: Path,
-    *,
-    et: ExifToolHelper | None = None,
-) -> dict[str, str]:
-    """Read GPS coordinates from either the primary file or its XMP sidecar."""
-    targets = metadata_targets(image_path)
-    if not targets:
-        return {}
-
-    try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=targets, tags=[_GPS_TAG])
-    except _EXIFTOOL_ERRORS as e:
-        logger.exception("failed_to_read_gps", error=str(e))
-        return {}
-
-    for block in blocks:
-        value = block.get(_GPS_TAG)
-        if value not in (None, ""):
-            position = format_metadata_value(value)
-            logger.debug("gps_position_read", position=position)
-            return {"position": position}
-    return {}
-
-
 def _first_tag_value(blocks: list[dict[str, Any]], tags: tuple[str, ...]) -> str | None:
     """Return the first non-blank value across *blocks* for the first matching *tags* entry."""
     for tag in tags:
@@ -491,9 +386,9 @@ class ImageContext:
     """
     Bundle of metadata read off a photo before the AI call.
 
-    Replaces the older sequence of separate ``read_existing_keywords`` / ``read_location_tags`` /
-    ``read_gps_coordinates`` calls that the pipeline used to issue, which cost three exiftool IPC
-    round-trips per image. The batched read fetches everything we need in one call.
+    Replaces the older sequence of separate single-purpose reads the pipeline used to issue, which
+    cost three exiftool IPC round-trips per image. The batched read fetches everything we need in
+    one call.
     """
 
     existing_keywords: KeywordSet = field(default_factory=KeywordSet)
@@ -551,9 +446,7 @@ def read_image_context(
     """
     Fetch every read-only tag the pipeline needs in a single exiftool call.
 
-    This is the production path used by ``process_photo``. The older single-purpose helpers
-    (``read_existing_keywords``, ``read_location_tags``, ``read_gps_coordinates``) remain available
-    for callers that need only one slice (Tests, for example).
+    This is the production read path, used by both the CLI's ``process_photo`` and the GUI worker.
 
     When *include_content_hash* is set, the same call also reads ImageDataHash so callers can key a
     cache on the image content rather than the whole file. It is off by default because hashing the

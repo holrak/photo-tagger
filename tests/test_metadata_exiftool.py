@@ -15,9 +15,7 @@ from PIL import Image
 from photo_tagger.metadata import (
     metadata_targets,
     read_caption,
-    read_existing_keywords,
-    read_gps_coordinates,
-    read_location_tags,
+    read_image_context,
     write_metadata,
 )
 from photo_tagger.models import KeywordSet
@@ -70,7 +68,7 @@ def test_write_and_read_round_trip_subject_and_hierarchy(tmp_path: Path) -> None
     )
     assert ok is True
 
-    keywords = read_existing_keywords(img)
+    keywords = read_image_context(img).existing_keywords
     assert "Beach" in keywords.subject
     assert "Sunset" in keywords.subject
     assert "Animal|Bird" in keywords.hierarchical
@@ -82,22 +80,18 @@ def test_write_metadata_returns_false_for_empty_payload(tmp_path: Path) -> None:
     assert write_metadata(img, KeywordSet(), use_sidecar=False) is False
 
 
-def test_read_location_tags_returns_empty_for_unset_image(tmp_path: Path) -> None:
-    """A freshly-written JPEG has no location tags."""
+def test_read_image_context_is_empty_for_unset_image(tmp_path: Path) -> None:
+    """A freshly-written JPEG has no location tags and no GPS position."""
     img = _write_jpeg(tmp_path / "img.jpg")
-    assert read_location_tags(img) == {}
+    context = read_image_context(img)
+    assert context.location_tags == {}
+    assert context.gps_position is None
 
 
-def test_read_gps_coordinates_returns_empty_for_unset_image(tmp_path: Path) -> None:
-    """A freshly-written JPEG has no GPS coordinates."""
-    img = _write_jpeg(tmp_path / "img.jpg")
-    assert read_gps_coordinates(img) == {}
-
-
-def test_read_existing_keywords_handles_missing_file(tmp_path: Path) -> None:
-    """A missing file returns an empty KeywordSet, not an exception."""
-    out = read_existing_keywords(tmp_path / "ghost.jpg")
-    assert out == KeywordSet()
+def test_read_image_context_handles_missing_file(tmp_path: Path) -> None:
+    """A missing file returns an empty context, not an exception."""
+    out = read_image_context(tmp_path / "ghost.jpg")
+    assert out.existing_keywords == KeywordSet()
 
 
 def test_read_caption_round_trip(tmp_path: Path) -> None:

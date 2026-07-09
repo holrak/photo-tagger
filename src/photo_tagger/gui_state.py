@@ -26,7 +26,6 @@ from photo_tagger.metadata import (
     select_location,
 )
 from photo_tagger.models import KeywordSet
-from photo_tagger.providers import PROVIDER_LABELS as _PROVIDER_LABELS
 
 
 if TYPE_CHECKING:
@@ -44,9 +43,6 @@ FAILED = "failed"  # generation or save failed
 # A broad, common default for the GUI's folder-scan extensions. Each distinct extension is listed
 # because matching is case-insensitive but not variant-aware (jpg does not cover jpeg).
 DEFAULT_GUI_EXTENSIONS = "jpg,jpeg,png,dng,cr3,nef,arw,heic,heif,tif,tiff,webp"
-
-# Re-exported so the GUI keeps one import site for its combo labels.
-PROVIDER_LABELS = _PROVIDER_LABELS
 
 # Substrings that hint a model is vision-capable, used to surface likely picks first.
 _VISION_HINTS = (
@@ -369,14 +365,6 @@ def build_tree(paths: Iterable[Path]) -> list[FolderNode]:
         else:
             tops.append(node)
     return [_display_node(top, None) for top in tops]
-
-
-def descendant_files(node: FolderNode) -> list[Path]:
-    """Return every file under *node*, recursing into subfolders."""
-    files = list(node.files)
-    for folder in node.folders:
-        files.extend(descendant_files(folder))
-    return files
 
 
 def paths_under(paths: Iterable[Path], folder: Path) -> list[Path]:

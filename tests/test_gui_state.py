@@ -16,7 +16,6 @@ from photo_tagger.gui_state import (
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
     PENDING,
-    PROVIDER_LABELS,
     READY,
     REMOVED,
     SAVED,
@@ -32,7 +31,6 @@ from photo_tagger.gui_state import (
     chain_to_display,
     config_toml_text,
     count_generated,
-    descendant_files,
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
@@ -62,7 +60,7 @@ from photo_tagger.gui_state import (
 )
 from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
-from photo_tagger.providers import PROVIDER_NAMES
+from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
 
 
 def test_expand_inputs_walks_folders_and_keeps_files(tmp_path: Path) -> None:
@@ -267,12 +265,6 @@ def test_build_tree_splits_disjoint_roots() -> None:
 def test_build_tree_empty() -> None:
     """No paths yields no nodes."""
     assert build_tree([]) == []
-
-
-def test_descendant_files_recurses() -> None:
-    """descendant_files gathers files from a node and all its subfolders."""
-    forest = build_tree([Path("/p/a.jpg"), Path("/p/sub/b.jpg")])
-    assert descendant_files(forest[0]) == [Path("/p/a.jpg"), Path("/p/sub/b.jpg")]
 
 
 def test_paths_under_filters_by_folder() -> None:

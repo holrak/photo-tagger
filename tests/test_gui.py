@@ -33,7 +33,6 @@ from photo_tagger.errors import ProviderError
 from photo_tagger.gui_state import (
     FAILED,
     PENDING,
-    PROVIDER_LABELS,
     READY,
     SAVED,
     WORKING,
@@ -41,7 +40,7 @@ from photo_tagger.gui_state import (
 )
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE, ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
-from photo_tagger.providers import PROVIDER_NAMES
+from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
 
 
 @pytest.fixture(scope="module")

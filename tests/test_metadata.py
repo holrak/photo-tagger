@@ -22,10 +22,7 @@ from photo_tagger.metadata import (
     format_metadata_value,
     managed_helper,
     read_caption,
-    read_existing_keywords,
-    read_gps_coordinates,
     read_image_context,
-    read_location_tags,
     read_metadata_sources,
     write_metadata,
 )
@@ -572,22 +569,6 @@ def test_managed_helper_yields_supplied_helper_without_creating_one() -> None:
     factory.assert_not_called()
 
 
-def test_read_existing_keywords_returns_empty_on_exiftool_error(tmp_path: Path) -> None:
-    """A failure inside exiftool is logged and yields an empty KeywordSet."""
-    img = tmp_path / "img.cr3"
-    img.write_text("x")
-    helper = _fake_helper()
-    helper.get_tags.side_effect = ValueError("boom")
-
-    with (
-        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
-        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
-    ):
-        result = read_existing_keywords(img)
-
-    assert result == KeywordSet()
-
-
 def test_find_tagged_images_returns_empty_when_no_block_is_tagged(tmp_path: Path) -> None:
     """Blocks without any indicator tag leave the tagged set empty."""
     img = tmp_path / "img.cr3"
@@ -599,74 +580,6 @@ def test_find_tagged_images_returns_empty_when_no_block_is_tagged(tmp_path: Path
         patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
     ):
         assert find_tagged_images([img]) == set()
-
-
-def test_read_location_tags_returns_empty_without_targets(tmp_path: Path) -> None:
-    """A path with no readable file or sidecar skips exiftool entirely."""
-    ghost = tmp_path / "ghost.cr3"
-    with patch("photo_tagger.metadata.metadata_targets", return_value=[]):
-        assert read_location_tags(ghost) == {}
-
-
-def test_read_location_tags_collects_present_values(tmp_path: Path) -> None:
-    """Non-empty location tags are formatted and returned."""
-    img = tmp_path / "img.cr3"
-    img.write_text("x")
-    helper = _fake_helper([{"XMP-photoshop:City": "Lisbon", "XMP-photoshop:Country": ""}])
-
-    with (
-        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
-        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
-    ):
-        assert read_location_tags(img) == {"XMP-photoshop:City": "Lisbon"}
-
-
-def test_read_location_tags_returns_empty_on_exiftool_error(tmp_path: Path) -> None:
-    """An exiftool failure while reading location tags is swallowed."""
-    img = tmp_path / "img.cr3"
-    img.write_text("x")
-    helper = _fake_helper()
-    helper.get_tags.side_effect = TypeError("boom")
-
-    with (
-        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
-        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
-    ):
-        assert read_location_tags(img) == {}
-
-
-def test_read_gps_coordinates_returns_empty_without_targets(tmp_path: Path) -> None:
-    """A path with no targets skips exiftool and returns no coordinates."""
-    ghost = tmp_path / "ghost.cr3"
-    with patch("photo_tagger.metadata.metadata_targets", return_value=[]):
-        assert read_gps_coordinates(ghost) == {}
-
-
-def test_read_gps_coordinates_returns_position_when_present(tmp_path: Path) -> None:
-    """A non-empty GPS position is formatted and returned under 'position'."""
-    img = tmp_path / "img.cr3"
-    img.write_text("x")
-    helper = _fake_helper([{"Composite:GPSPosition": "38.7 N, 9.1 W"}])
-
-    with (
-        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
-        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
-    ):
-        assert read_gps_coordinates(img) == {"position": "38.7 N, 9.1 W"}
-
-
-def test_read_gps_coordinates_returns_empty_on_exiftool_error(tmp_path: Path) -> None:
-    """An exiftool failure while reading GPS is swallowed."""
-    img = tmp_path / "img.cr3"
-    img.write_text("x")
-    helper = _fake_helper()
-    helper.get_tags.side_effect = ValueError("boom")
-
-    with (
-        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
-        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
-    ):
-        assert read_gps_coordinates(img) == {}
 
 
 def test_read_image_context_returns_empty_on_exiftool_error(tmp_path: Path) -> None:
