@@ -132,6 +132,7 @@ rawpy
 RDWR
 recompiles
 relocks
+rescan
 roundtrips
 scannerwork
 scriptable

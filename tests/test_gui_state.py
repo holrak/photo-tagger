@@ -36,6 +36,7 @@ from photo_tagger.gui_state import (
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
+    fields_written,
     file_type_label,
     format_existing_keywords,
     group_by_parent,
@@ -365,6 +366,13 @@ def test_tagged_summary_letters_and_empty_marker() -> None:
     """Present fields compress to their letters in T/D/K order; none becomes a dash."""
     assert tagged_summary({FIELD_KEYWORDS, FIELD_TITLE}) == "TK"
     assert tagged_summary(set()) == "-"
+
+
+def test_fields_written_reports_only_nonempty_values() -> None:
+    """Empty values write nothing, so only the populated fields count as newly present."""
+    written = fields_written("Duck", "", KeywordSet(subject=["Bird"]))
+    assert written == {FIELD_TITLE, FIELD_KEYWORDS}
+    assert fields_written(None, None, KeywordSet()) == set()
 
 
 def _config_values(**overrides: object) -> GuiConfigValues:

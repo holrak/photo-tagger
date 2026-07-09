@@ -137,6 +137,7 @@ from photo_tagger.gui_state import (
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
+    fields_written,
     file_type_label,
     format_existing_keywords,
     hierarchy_preview,
@@ -1420,7 +1421,8 @@ class MainWindow(QMainWindow):
         for key, fields in presence.items():
             item = self._items.get(key)
             if item is not None:
-                item.known_fields = set(fields)
+                # Merge rather than replace: a save may have added fields while the scan ran.
+                item.known_fields = set(fields) | (item.known_fields or set())
                 self._refresh_status_cell(item)
 
     def _on_scan_finished(self) -> None:
@@ -2378,14 +2380,24 @@ class MainWindow(QMainWindow):
             if self._write_keywords.isChecked()
             else KeywordSet()
         )
+        title = (item.title or None) if self._write_title.isChecked() else None
+        description = (item.description or None) if self._write_description.isChecked() else None
         ok = write_metadata(
             item.path,
             keywords,
-            description=(item.description or None) if self._write_description.isChecked() else None,
-            title=(item.title or None) if self._write_title.isChecked() else None,
+            description=description,
+            title=title,
             use_sidecar=not self._embed.isChecked(),
         )
         item.status = SAVED if ok else FAILED
+        if ok:
+            # The saved fields are now on the file, so the Tagged column can update without a
+            # rescan.
+            item.known_fields = (item.known_fields or set()) | fields_written(
+                title,
+                description,
+                keywords,
+            )
         self._refresh_status_cell(item)
         return ok
 

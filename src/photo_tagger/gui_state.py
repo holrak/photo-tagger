@@ -609,6 +609,23 @@ def tagged_summary(fields: set[str]) -> str:
     return letters or "-"
 
 
+def fields_written(title: str | None, description: str | None, keywords: KeywordSet) -> set[str]:
+    """
+    Name the indicator fields a metadata write put on the file.
+
+    Mirrors write_metadata's payload rules (empty values write nothing), so a successful save can
+    update the Tagged column without re-running the exiftool presence scan.
+    """
+    written: set[str] = set()
+    if title:
+        written.add(FIELD_TITLE)
+    if description:
+        written.add(FIELD_DESCRIPTION)
+    if not keywords.is_empty():
+        written.add(FIELD_KEYWORDS)
+    return written
+
+
 # Badge names for the folder grid's thumbnail overlays, in the order they are drawn.
 BADGE_FAILED = "failed"
 BADGE_SAVED = "saved"

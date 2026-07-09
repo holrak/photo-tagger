@@ -703,8 +703,15 @@ def test_save_current_writes_and_marks_saved(
     window._keywords.setPlainText("Eagle\nSky")  # noqa: SLF001
     window._save_current()  # noqa: SLF001
 
-    assert window._items[str(img)].status == SAVED  # noqa: SLF001
+    item = window._items[str(img)]  # noqa: SLF001
+    assert item.status == SAVED
     assert captured["title"] == "New Title"
+    # The save wrote title, description (seeded from the file), and keywords, so the Tagged
+    # column reflects all three without waiting for a rescan.
+    assert item.known_fields == {gui.FIELD_TITLE, gui.FIELD_DESCRIPTION, gui.FIELD_KEYWORDS}
+    leaf = window._leaf_for(img)  # noqa: SLF001
+    assert leaf is not None
+    assert leaf.text(gui._COL_TAGGED) == "TDK"  # noqa: SLF001
 
 
 def test_selecting_shows_metadata_source(
