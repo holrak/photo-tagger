@@ -146,6 +146,14 @@ shows **Retry Generation** there instead). If several photos ended up `failed âœ
 in the bottom bar re-runs the model on all of them at once (the button stays disabled while nothing
 has failed).
 
+When the model gets a photo wrong (a deer tagged as a boar, say), correct it with the **Hint for the
+AI** field next to *Generate This Photo*: type a note such as `The animal is a deer` and press Enter
+(or the button) to regenerate. The hint is sent with the photo as a note the model must trust over
+its own reading of the image, and a hinted photo always calls the model instead of replaying its
+cached result; the corrected answer then replaces the cached one. Each photo keeps its own hint (it
+survives browsing to other photos and rides along in batch runs too) and it is never written to the
+file. The CLI equivalent for a whole run is [`--hint`](cli-reference.md#inference).
+
 To stop a run early, press **Cancel** (next to *Generate Selected*). The photo already in flight
 finishes (a model request cannot be interrupted mid-call), then the run stops and the un-started
 photos return to `pending` so you can resume them later with another **Generate Selected**. Anything

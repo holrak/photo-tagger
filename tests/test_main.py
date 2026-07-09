@@ -167,6 +167,22 @@ def test_cli_workers_and_prompt_file_reach_run_batch(tmp_path: Path) -> None:
     assert captured["user_prompt"] == "Describe like a wildlife photographer."
 
 
+def test_cli_hint_lands_in_the_user_prompt(tmp_path: Path) -> None:
+    """--hint rides inside the user prompt, so the cache namespace changes with it too."""
+    from photo_tagger.config import DEFAULT_USER_PROMPT  # noqa: PLC0415
+
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--hint", "The animal is a deer"])
+
+    prompt = captured["user_prompt"]
+    assert "Photographer's note about this photo: The animal is a deer" in prompt
+    assert prompt.startswith(DEFAULT_USER_PROMPT)
+
+
 def _outcome(file: Path, *, success: bool = True, from_cache: bool = False) -> ImageOutcome:
     """Build a representative ImageOutcome for NDJSON-emitter tests."""
     return ImageOutcome(

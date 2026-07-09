@@ -259,6 +259,27 @@ def test_run_generation_hands_the_metadata_language_to_the_worker(
     window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
 
 
+def test_run_generation_commits_and_passes_the_open_photos_hint(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hint still sitting in the field is committed and handed to the worker."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_generation(monkeypatch)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001 - open the photo so the field is live
+    window._hint.setText("The animal is a deer")  # noqa: SLF001
+
+    window._run_generation([window._items[str(img)]])  # noqa: SLF001
+
+    assert window._items[str(img)].hint == "The animal is a deer"  # noqa: SLF001
+    worker = window._worker  # noqa: SLF001
+    assert worker is not None
+    assert worker._hints == {str(img): "The animal is a deer"}  # noqa: SLF001
+    window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
+
+
 # ---------------------------------------------------------------------------
 # Tree: nesting, selection, removal
 # ---------------------------------------------------------------------------
@@ -623,6 +644,27 @@ def test_selecting_a_photo_loads_and_populates(
     assert "Beach" in window._existing_keywords.toPlainText()  # noqa: SLF001
     assert window._title.text() == "Old Title"  # noqa: SLF001
     assert window._keywords.toPlainText() == "Beach"  # noqa: SLF001
+
+
+def test_edits_and_hint_survive_navigating_between_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In-progress edits (here the hint) stick to their photo when the user browses away."""
+    _stub_reads(monkeypatch, keywords=[])
+    files = {"a": _jpeg(tmp_path / "a.jpg"), "b": _jpeg(tmp_path / "b.jpg")}
+    _add_dir(window, files)
+
+    _select(window, window._leaf_for(files["a"]))  # noqa: SLF001
+    window._hint.setText("The animal is a deer")  # noqa: SLF001
+    _select(window, window._leaf_for(files["b"]))  # noqa: SLF001
+
+    assert window._items[str(files["a"])].hint == "The animal is a deer"  # noqa: SLF001
+    assert window._hint.text() == ""  # noqa: SLF001 - photo b has no hint of its own
+
+    _select(window, window._leaf_for(files["a"]))  # noqa: SLF001
+    assert window._hint.text() == "The animal is a deer"  # noqa: SLF001
 
 
 def test_hierarchy_preview_updates_from_keywords(
@@ -2040,6 +2082,81 @@ def test_worker_reuses_cached_results(
 
     assert len(done_second) == 1
     assert done_second[0].title == "T"
+
+
+def test_worker_puts_the_hint_in_that_photos_prompt(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hinted photo's prompt carries the photographer's note; other photos' prompts do not."""
+    _stub_generation(monkeypatch)
+    prompts: list[str] = []
+
+    def record(**kwargs: object) -> InferenceResult:
+        prompts.append(str(kwargs["user_prompt"]))
+        return InferenceResult(title="T", description="D", keywords=[])
+
+    monkeypatch.setattr(gui, "analyze_image_with_ai", record)
+    worker = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [Path("/a.jpg"), Path("/b.jpg")],
+        hints={str(Path("/a.jpg")): "The animal is a deer"},
+    )
+    worker.file_done.connect(lambda _p: None)
+    worker.run()
+
+    assert "Photographer's note about this photo: The animal is a deer" in prompts[0]
+    assert "Photographer's note" not in prompts[1]
+
+
+def test_hinted_photo_skips_the_cache_lookup_but_stores_the_correction(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hint forces a fresh model call; the corrected answer then serves hint-less runs."""
+    _stub_generation(monkeypatch)
+    img = _jpeg(tmp_path / "a.jpg")
+    cache_file = tmp_path / "cache.sqlite"
+
+    first = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    first.file_done.connect(lambda _p: None)
+    first.run()  # caches the (wrong) title "T"
+
+    monkeypatch.setattr(
+        gui,
+        "analyze_image_with_ai",
+        lambda **_k: InferenceResult(title="Deer", description="D", keywords=["Deer"]),
+    )
+    second = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [img],
+        cache_file=cache_file,
+        hints={str(img): "The animal is a deer"},
+    )
+    corrected: list[Proposal] = []
+    second.file_done.connect(corrected.append)
+    second.run()
+
+    assert corrected[0].title == "Deer"  # the stale "T" was not replayed
+    assert corrected[0].from_cache is False
+
+    def boom(**_k: object) -> object:
+        msg = "the model was called although the corrected result is cached"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(gui, "analyze_image_with_ai", boom)
+    third = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    replayed: list[Proposal] = []
+    third.file_done.connect(replayed.append)
+    third.run()
+
+    assert replayed[0].title == "Deer"  # hint-less runs now replay the correction
+    assert replayed[0].from_cache is True
 
 
 def test_worker_cache_survives_metadata_rewrites(

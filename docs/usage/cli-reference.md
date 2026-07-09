@@ -68,15 +68,16 @@ over `--api-key` so the key never lands in your shell history.
 These flags tune sampling and the image sent to the model. Lower temperature and a frequency penalty
 keep the output focused; the JPEG settings control how much detail the model sees.
 
-| Flag                               | Default   | Env var             | Description                                                                                                                                    |
-| ---------------------------------- | --------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--output-language`, `--lang` NAME | `English` | `-`                 | Language of the generated title, description, and keywords (any language name the model understands, e.g. `German`, `"Brazilian Portuguese"`). |
-| `--temperature` FLOAT              | `0.2`     | `TEMPERATURE`       | Sampling temperature.                                                                                                                          |
-| `--max-tokens` N                   | `1200`    | `MAX_TOKENS`        | Maximum tokens to generate.                                                                                                                    |
-| `--timeout-seconds` FLOAT          | `60.0`    | `TIMEOUT_SECONDS`   | Per-image inference timeout; on timeout the retry loop steps in.                                                                               |
-| `--frequency-penalty` FLOAT        | `0.5`     | `FREQUENCY_PENALTY` | Penalty on repeated tokens; discourages repetitive output loops.                                                                               |
-| `--jpeg-dimensions` N              | `1280`    | `JPEG_DIMENSIONS`   | Max dimension (px) of the JPEG sent to the model.                                                                                              |
-| `--jpeg-quality` N                 | `80`      | `JPEG_QUALITY`      | JPEG quality (1-100) of the image sent to the model.                                                                                           |
+| Flag                               | Default   | Env var             | Description                                                                                                                                                                                                             |
+| ---------------------------------- | --------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output-language`, `--lang` NAME | `English` | `-`                 | Language of the generated title, description, and keywords (any language name the model understands, e.g. `German`, `"Brazilian Portuguese"`).                                                                          |
+| `--hint` TEXT                      | none      | `-`                 | A note about every photo in the run that the model trusts over its own reading of the image, e.g. `"The animal in these photos is a deer"`. Changes the cache namespace, so hinted runs never replay hint-less results. |
+| `--temperature` FLOAT              | `0.2`     | `TEMPERATURE`       | Sampling temperature.                                                                                                                                                                                                   |
+| `--max-tokens` N                   | `1200`    | `MAX_TOKENS`        | Maximum tokens to generate.                                                                                                                                                                                             |
+| `--timeout-seconds` FLOAT          | `60.0`    | `TIMEOUT_SECONDS`   | Per-image inference timeout; on timeout the retry loop steps in.                                                                                                                                                        |
+| `--frequency-penalty` FLOAT        | `0.5`     | `FREQUENCY_PENALTY` | Penalty on repeated tokens; discourages repetitive output loops.                                                                                                                                                        |
+| `--jpeg-dimensions` N              | `1280`    | `JPEG_DIMENSIONS`   | Max dimension (px) of the JPEG sent to the model.                                                                                                                                                                       |
+| `--jpeg-quality` N                 | `80`      | `JPEG_QUALITY`      | JPEG quality (1-100) of the image sent to the model.                                                                                                                                                                    |
 
 ## Output
 

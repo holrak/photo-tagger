@@ -557,6 +557,25 @@ def _camera_lines(camera_info: dict[str, str]) -> list[str]:
     return lines
 
 
+def prompt_with_hint(base_prompt: str, hint: str | None) -> str:
+    """
+    Append a photographer's note to *base_prompt*; return it unchanged when *hint* is blank.
+
+    The note is framed as authoritative, unlike the Existing Metadata block (which the system prompt
+    tells the model to distrust on conflict): a hint exists precisely because the model misread the
+    image ("that animal is a deer, not a boar"), so on conflict the note must win.
+    """
+    hint = (hint or "").strip()
+    if not hint:
+        return base_prompt
+    return (
+        f"{base_prompt.strip()}\n\n"
+        f"Photographer's note about this photo: {hint}\n"
+        "The photographer knows what is in the photo. If this note conflicts with your own "
+        "identification, trust the note."
+    )
+
+
 def build_contextual_prompt(  # noqa: PLR0913 - each kwarg renders an independent section.
     base_prompt: str,
     flat_keywords: list[str],

@@ -81,7 +81,7 @@ class ProviderConfig:
 
 @dataclass
 class InferenceConfig:
-    """Sampling, prompt-language, and image-encoding knobs sent to the model."""
+    """Sampling, prompt (language, hint), and image-encoding knobs sent to the model."""
 
     output_language: Annotated[
         str,
@@ -93,6 +93,17 @@ class InferenceConfig:
             ),
         ),
     ] = DEFAULT_OUTPUT_LANGUAGE
+    hint: Annotated[
+        str | None,
+        Parameter(
+            name=("--hint",),
+            help=(
+                "A note about every photo in this run that the model must trust over its own "
+                "reading of the image, e.g. 'The animal in these photos is a deer'. Useful when "
+                "the model keeps misidentifying a subject"
+            ),
+        ),
+    ] = None
     temperature: Annotated[
         float,
         Parameter(name=("--temperature",), help="Sampling temperature (0.0-1.0)"),

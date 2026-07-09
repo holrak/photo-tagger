@@ -94,12 +94,17 @@ class PhotoItem:
     The trailing read-context fields (``camera_info``/``location_tags``/``gps_position``) and the
     token/timing counters are captured when a proposal is generated and feed the CSV export; they
     stay empty for photos that were never generated.
+
+    ``hint`` is the photographer's note for the model, typed in the detail pane. It is a
+    generation input, not metadata: it rides along in the prompt whenever this photo is generated
+    and is never written to the file.
     """
 
     path: Path
     selected: bool = True
     status: str = PENDING
     error: str = ""
+    hint: str = ""
     loaded: bool = False
     # Which indicator fields (title/description/keywords) the file already carries. None means
     # the background metadata scan has not reported yet; a set (possibly empty) means it has.

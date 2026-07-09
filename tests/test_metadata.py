@@ -21,6 +21,7 @@ from photo_tagger.metadata import (
     find_tagged_images,
     format_metadata_value,
     managed_helper,
+    prompt_with_hint,
     read_caption,
     read_image_context,
     read_metadata_sources,
@@ -136,6 +137,33 @@ def test_build_contextual_prompt_includes_only_present_sections() -> None:
     assert "Existing Keywords" in out
     assert "GPS: 0,0" in out
     assert "Location" not in out
+
+
+def test_prompt_with_hint_appends_an_authoritative_note() -> None:
+    """A hint becomes a photographer's note the model is told to trust over its own reading."""
+    out = prompt_with_hint("Analyze.", "The animal is a deer")
+    assert out.startswith("Analyze.")
+    assert "Photographer's note about this photo: The animal is a deer" in out
+    assert "trust the note" in out
+
+
+def test_prompt_with_hint_blank_returns_base_unchanged() -> None:
+    """No hint (None, empty, or whitespace) leaves the base prompt untouched."""
+    assert prompt_with_hint("Analyze.", None) == "Analyze."
+    assert prompt_with_hint("Analyze.", "") == "Analyze."
+    assert prompt_with_hint("Analyze.", "   ") == "Analyze."
+
+
+def test_prompt_with_hint_composes_with_the_contextual_prompt() -> None:
+    """The note sits between the base instruction and the Existing Metadata block."""
+    out = build_contextual_prompt(
+        prompt_with_hint("Analyze.", "A deer"),
+        ["Garden"],
+        {},
+        {},
+    )
+    assert out.index("Analyze.") < out.index("Photographer's note")
+    assert out.index("Photographer's note") < out.index("Existing Metadata:")
 
 
 def test_build_write_payload_produces_lightroom_compatible_keys() -> None:

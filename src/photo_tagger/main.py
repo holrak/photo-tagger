@@ -57,7 +57,7 @@ from photo_tagger.discovery import (
 from photo_tagger.errors import PhotoTaggerError
 from photo_tagger.locking import FileLock, LockHeldError
 from photo_tagger.logging_setup import setup_logging
-from photo_tagger.metadata import select_camera_fields, select_location
+from photo_tagger.metadata import prompt_with_hint, select_camera_fields, select_location
 from photo_tagger.pipeline import BatchTotals, ImageOutcome, ProcessingOptions, run_batch
 from photo_tagger.progress import batch_progress
 
@@ -428,6 +428,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     provider: ProviderConfig,
     options: ProcessingOptions,
     output_language: str,
+    hint: str | None,
     log: LogConfig,
     telemetry_enabled: bool,
 ) -> None:
@@ -470,6 +471,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         jpeg_dimensions=options.jpeg_dimensions,
         jpeg_quality=options.jpeg_quality,
         output_language=output_language,
+        hint=hint,
         retries=provider.retries,
         log_folder=str(log.log_folder),
     )
@@ -654,6 +656,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         provider=provider,
         options=options,
         output_language=inference.output_language,
+        hint=inference.hint,
         log=log,
         telemetry_enabled=telemetry_config.enabled,
     )
@@ -672,7 +675,9 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         logger.info("no_files_to_process_after_skipping")
         return
 
-    user_prompt = _read_prompt_file(artifacts.prompt_file)
+    # A --hint rides inside the user prompt, so the cache namespace below picks it up too:
+    # a hinted run never replays results generated without the hint (and vice versa).
+    user_prompt = prompt_with_hint(_read_prompt_file(artifacts.prompt_file), inference.hint)
     agent = create_agent(
         provider.provider_name,
         provider.model_name,

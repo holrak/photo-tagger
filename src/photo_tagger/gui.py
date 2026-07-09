@@ -167,6 +167,7 @@ from photo_tagger.metadata import (
     FIELD_TITLE,
     build_contextual_prompt,
     find_field_presence,
+    prompt_with_hint,
     read_caption,
     read_image_context,
     read_metadata_sources,
@@ -409,8 +410,14 @@ class GenerateWorker(QObject):
         api_key: str | None = None,
         cache_file: Path | None = None,
         output_language: str = DEFAULT_OUTPUT_LANGUAGE,
+        hints: dict[str, str] | None = None,
     ) -> None:
-        """Store the run parameters; nothing happens until :meth:`run`."""
+        """
+        Store the run parameters; nothing happens until :meth:`run`.
+
+        *hints* maps a path (as ``str``) to the photographer's note for that photo; paths without
+        one need no entry.
+        """
         super().__init__()
         self._provider = provider
         self._model = model
@@ -419,6 +426,7 @@ class GenerateWorker(QObject):
         self._api_key = api_key
         self._cache_file = cache_file
         self._output_language = output_language
+        self._hints = hints or {}
         self._stop = False
 
     def stop(self) -> None:
@@ -480,8 +488,9 @@ class GenerateWorker(QObject):
         context = read_image_context(path, include_content_hash=cache is not None)
         existing_title, existing_description = read_caption(path)
         gps_info = {"position": context.gps_position} if context.gps_position else {}
+        hint = self._hints.get(str(path), "").strip()
         prompt = build_contextual_prompt(
-            DEFAULT_USER_PROMPT,
+            prompt_with_hint(DEFAULT_USER_PROMPT, hint),
             context.existing_keywords.subject,
             context.location_tags,
             gps_info,
@@ -490,9 +499,12 @@ class GenerateWorker(QObject):
         # Keying and I/O go through the same swallow-and-degrade helpers as the CLI pipeline,
         # so a broken cache entry (or unhashable format) costs a model call, never the photo.
         content_key = content_cache_key(path, context.content_hash) if cache is not None else None
+        # A hint means the cached answer was wrong for this photo, so skip the lookup and call
+        # the model; the corrected result is stored under the same key below, and hint-less runs
+        # replay it from then on.
         cached = (
             safe_cache_get(cache, content_key, file_name=path.name)
-            if cache is not None and content_key is not None
+            if cache is not None and content_key is not None and not hint
             else None
         )
         inference = cached
@@ -1706,7 +1718,23 @@ class MainWindow(QMainWindow):
     def _build_save_row(self) -> QHBoxLayout:
         """Per-photo actions at the bottom of the detail pane; batch actions live below."""
         row = QHBoxLayout()
-        row.addStretch(1)
+        hint_label = QLabel(_("Hint for the AI"))
+        self._hint = QLineEdit()
+        self._hint.setPlaceholderText(_("e.g. 'The animal is a deer, not a boar'"))
+        self._hint.setClearButtonEnabled(True)
+        self._hint.setToolTip(
+            _(
+                "A note about this photo that the model trusts over its own reading of the "
+                "image; useful when it misidentifies the subject. It is sent along on every "
+                "generation of this photo (a hinted photo skips the cached result) and is "
+                "never written to the file. Press Enter to regenerate right away.",
+            ),
+        )
+        hint_label.setToolTip(self._hint.toolTip())
+        # returnPressed passes no argument, so the keyword-only default (use_cache=True) applies.
+        self._hint.returnPressed.connect(self._generate_current)
+        row.addWidget(hint_label)
+        row.addWidget(self._hint, stretch=1)
         self._generate_one_button = QToolButton()
         self._generate_one_button.setObjectName("split")
         self._generate_one_button.setText(_("Generate This Photo"))
@@ -2067,6 +2095,11 @@ class MainWindow(QMainWindow):
             folder_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _on_current_changed(self, current: QTreeWidgetItem | None, _previous: object) -> None:
+        # Keep the open photo's in-progress edits (title, description, keywords, hint) when the
+        # user browses away; they are restored when it is opened again. Without this, hinting
+        # several photos before one Generate Selected would be impossible: every navigation
+        # would drop the hint just typed.
+        self._commit_current()
         path = current.data(0, _PATH_ROLE) if current is not None else None
         if current is not None and bool(current.data(0, _IS_DIR_ROLE)) and path is not None:
             # A folder: show its thumbnail grid instead of a single photo's detail.
@@ -2196,6 +2229,7 @@ class MainWindow(QMainWindow):
         self._title.setText(item.title)
         self._description.setPlainText(item.description)
         self._keywords.setPlainText(keywords_to_text(item.keywords))
+        self._hint.setText(item.hint)
         self._show_detail(enabled=True)
         self._update_error_banner(item)
         self._refresh_derived()
@@ -2296,6 +2330,7 @@ class MainWindow(QMainWindow):
             self._title,
             self._description,
             self._keywords,
+            self._hint,
             self._save_button,
             self._generate_one_button,
         ):
@@ -2318,6 +2353,7 @@ class MainWindow(QMainWindow):
         item.title = self._title.text().strip()
         item.description = self._description.toPlainText().strip()
         item.keywords = parse_keyword_lines(self._keywords.toPlainText())
+        item.hint = self._hint.text().strip()
 
     def _write_fields_chosen(self) -> bool:
         """Report whether at least one write toggle (Title/Description/Keywords) is on."""
@@ -2419,6 +2455,9 @@ class MainWindow(QMainWindow):
     def _run_generation(self, items: list[PhotoItem], *, use_cache: bool = True) -> None:
         if self._thread is not None or not items:
             return
+        # Fold the open photo's visible edits (most importantly a just-typed hint) into its
+        # state before the run reads it.
+        self._commit_current()
         for item in items:
             item.status = WORKING
             self._refresh_status_cell(item)
@@ -2443,6 +2482,7 @@ class MainWindow(QMainWindow):
             api_key=self._api_key_value(),
             cache_file=self._active_cache_file() if use_cache else None,
             output_language=self._output_language,
+            hints={str(item.path): item.hint for item in items if item.hint},
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
