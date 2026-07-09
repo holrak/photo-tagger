@@ -128,6 +128,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "separator, max 5 levels, e.g. 'Golden Eagle<Bird of Prey<Animal' or 'Oak<Tree<Plant'. "
     "Populate this field whenever a subject, place, or object has an obvious parent category; "
     "leave it empty only when nothing in the image has one.\n"
+    "- Language: English only, Latin script, in every field. Never mix scripts within a keyword "
+    "or append a translation to one (write 'Bird Perching', never 'Bird栖息').\n"
     "\n"
     "**Ground truth is the image.** The 'Existing Metadata' block, when present in the user "
     "message, is corroborative evidence only. Use it to disambiguate or specify what you already "
