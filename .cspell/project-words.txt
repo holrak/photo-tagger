@@ -23,6 +23,7 @@ dataclass
 datas
 debugpy
 dedup
+dedupe
 dedups
 delenv
 distpath

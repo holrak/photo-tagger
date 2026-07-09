@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
-from photo_tagger.keywords import merge_keywords
+from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import select_camera_fields, select_location
 from photo_tagger.models import KeywordSet
 
@@ -153,8 +153,13 @@ def group_by_parent(paths: Iterable[Path]) -> list[tuple[Path, list[Path]]]:
 
 
 def parse_keyword_lines(text: str) -> list[str]:
-    """Parse the editable keyword field (one keyword per line) into a clean list."""
-    return [stripped for line in text.splitlines() if (stripped := line.strip())]
+    """
+    Parse the editable keyword field (one keyword per line) into a clean list.
+
+    Repeats are collapsed case-insensitively so the change counts stay honest; the model (and a
+    pasting user) sometimes repeats a keyword.
+    """
+    return dedupe_keywords(text.splitlines())
 
 
 def keywords_to_text(keywords: list[str]) -> str:

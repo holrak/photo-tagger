@@ -8,6 +8,7 @@ from photo_tagger.keywords import (
     _normalize_chain_parts,
     _process_new_keywords,
     _register_chain,
+    dedupe_keywords,
     merge_keywords,
     parse_hierarchical_keyword,
 )
@@ -46,6 +47,22 @@ def test_parse_hierarchical_keyword_strips_trailing_gt() -> None:
     hierarchical, parts = parse_hierarchical_keyword("Man<Human<Living Being>")
     assert hierarchical == "Living Being|Human|Man"
     assert parts == ["Living Being", "Human", "Man"]
+
+
+def test_parse_hierarchical_keyword_reads_gt_only_chains_as_hierarchy() -> None:
+    """A chain the model wrote with '>' instead of '<' still parses leaf-first."""
+    hierarchical, parts = parse_hierarchical_keyword("Green Foliage>Plant>Living Being")
+    assert hierarchical == "Living Being|Plant|Green Foliage"
+    assert parts == ["Living Being", "Plant", "Green Foliage"]
+
+
+def test_dedupe_keywords_collapses_case_insensitive_repeats() -> None:
+    """Repeats (any case) and blanks are dropped; first spelling and order win."""
+    assert dedupe_keywords(["Perch", "Bird", " perch ", "", "PERCH", "Sky"]) == [
+        "Perch",
+        "Bird",
+        "Sky",
+    ]
 
 
 def test_parse_hierarchical_keyword_returns_empty_for_separators_only() -> None:

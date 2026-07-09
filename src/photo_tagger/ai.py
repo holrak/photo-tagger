@@ -16,6 +16,7 @@ from photo_tagger.config import (
     DEFAULT_USER_PROMPT,
 )
 from photo_tagger.errors import ProviderError
+from photo_tagger.keywords import dedupe_keywords
 from photo_tagger.models import GeneratedMetadata, InferenceResult
 from photo_tagger.providers import ProviderName, get_backend
 
@@ -135,9 +136,9 @@ def analyze_image_with_ai(  # noqa: PLR0913 - each kwarg is a distinct sampling 
     )
     # Fold the dedicated hierarchy chains into the keyword list. Downstream (merge_keywords,
     # the writer, the GUI) already parses the '<' form, so everything else stays unchanged; the
-    # chains just need to reach it. A chain is kept only when not already present verbatim.
-    keywords = list(result.output.keywords)
-    keywords += [chain for chain in result.output.hierarchies if chain not in keywords]
+    # chains just need to reach it. Models repeat keywords now and then, so duplicates are
+    # collapsed here, before anything shows or counts them.
+    keywords = dedupe_keywords([*result.output.keywords, *result.output.hierarchies])
     return InferenceResult(
         title=result.output.title,
         description=result.output.description,

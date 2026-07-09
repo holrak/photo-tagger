@@ -41,8 +41,11 @@ def parse_hierarchical_keyword(keyword: str) -> tuple[str, list[str]]:
     if not keyword:
         return ("", [])
 
-    # The model occasionally emits stray '>' characters; drop them before parsing.
-    sanitized = keyword.replace(">", "")
+    # The model occasionally flips the bracket and emits "Leaf>Parent" chains. When there is no
+    # '<' at all, read '>' as the same leaf-first separator instead of mangling the chain into
+    # one flat keyword ("Green Foliage>Plant" is a hierarchy, not a keyword). With both present,
+    # '<' wins and stray '>' characters are dropped.
+    sanitized = keyword.replace(">", "<") if "<" not in keyword else keyword.replace(">", "")
     if "<" not in sanitized:
         return (sanitized, [sanitized])
 
@@ -53,6 +56,28 @@ def parse_hierarchical_keyword(keyword: str) -> tuple[str, list[str]]:
     # Reverse so we emit Lightroom's root-to-leaf order.
     parts_reversed = list(reversed(parts))
     return ("|".join(parts_reversed), parts_reversed)
+
+
+def dedupe_keywords(keywords: Iterable[str]) -> list[str]:
+    """
+    Drop blank entries and case-insensitive duplicates, keeping first-occurrence order.
+
+    Models sometimes repeat a keyword (or emit it both flat and as a hierarchy leaf); showing or
+    counting the repeats is noise, so callers collapse them as early as possible.
+
+    Examples:
+        >>> dedupe_keywords(["Perch", "Bird", " perch "])
+        ['Perch', 'Bird']
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for keyword in keywords:
+        stripped = keyword.strip()
+        key = stripped.casefold()
+        if stripped and key not in seen:
+            seen.add(key)
+            out.append(stripped)
+    return out
 
 
 def _normalize_chain_parts(parts: Iterable[str]) -> list[str]:
