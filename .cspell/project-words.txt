@@ -85,6 +85,7 @@ logfire
 loguru
 lucide
 magiclink
+marimo
 Menlo
 minicpm
 mkdocs
@@ -109,6 +110,7 @@ pipx
 pixmap
 pixtral
 pofile
+pointerover
 Português
 prek
 primarysplit

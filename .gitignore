@@ -36,3 +36,6 @@ reports/
 # Zensical documentation build output and cache (see zensical.toml)
 site/
 .cache/
+
+# marimo notebook session cache (written next to telemetry/dashboard.py on run)
+__marimo__/

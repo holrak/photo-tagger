@@ -127,6 +127,19 @@ ignore = [
     "PLC0415", # Intentional in-function imports (selftest probes; lazy Qt launch)
     "F401",    # selftest imports modules only to confirm they were bundled
 ]
+# The telemetry dashboard is a marimo notebook: every cell is a `def _(dep, ...)` whose parameters
+# are dependencies marimo injects from other cells, and imports live inside a cell by design. That
+# shape trips a fixed set of rules that do not apply to notebook code.
+"telemetry/dashboard.py" = [
+    "ANN001",  # Cell params are marimo-injected dependencies, not annotated call arguments
+    "ANN202",  # Every cell is an unannotated `def _(...)`
+    "PLR0913", # A cell takes one param per dependency; marimo controls the signature
+    "PLC0415", # marimo requires imports inside a cell so it can track them reactively
+    "N803",    # COLORS flows between cells as a param; the name must match its definition
+    "N806",    # COLORS is a palette constant, but a marimo cell is a function
+    "S608",    # SQL is built from int-coerced window sizes against a read-only token; the free-form
+    #            console runs user SQL by design. No untrusted interpolation reaches a write path.
+]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -206,9 +219,10 @@ undefined_attribute = false
 unsupported_operation = false
 
 [tool.bandit]
-# packaging/ is build tooling (like tests/), not shipped app code; its only flagged use is a
-# fixed-args iconutil call. ruff's flake8-bandit rules still cover it via per-file-ignores.
-exclude_dirs = [".git", ".venv", "__pycache__", "tests", "packaging"]
+# packaging/ and telemetry/ are dev tooling (like tests/), not shipped app code. packaging/'s only
+# flagged use is a fixed-args iconutil call; telemetry/dashboard.py builds read-only Analytics SQL
+# from int-coerced window sizes (B608 false positives). ruff still covers both via per-file-ignores.
+exclude_dirs = [".git", ".venv", "__pycache__", "tests", "packaging", "telemetry"]
 
 [tool.bandit.assert_used]
 skips = ['tests/test_*.py']

@@ -21,12 +21,14 @@ repos:
   #   - errors.py: blank-line conflict with Ruff
   #   - test_locking.py: docformatter mistakes the indented triple-quoted docstring
   #     Drop this exclusion once https://github.com/PyCQA/docformatter/issues/344 is fixed.
+  #   - telemetry/dashboard.py: a marimo notebook full of mo.md("""...""") calls; docformatter
+  #     treats those markdown strings as docstrings and reflows them destructively. Ruff formats it.
   - repo: https://github.com/PyCQA/docformatter
     rev: v1.7.8
     hooks:
       - id: docformatter
         args: [--in-place, --config, ./pyproject.toml]
-        exclude: ^(src/photo_tagger/errors\.py|tests/test_locking\.py)$
+        exclude: ^(src/photo_tagger/errors\.py|tests/test_locking\.py|telemetry/dashboard\.py)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20

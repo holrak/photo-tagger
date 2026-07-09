@@ -15,6 +15,7 @@ What the client sends, when, and how to turn it off is documented in the
 | [`worker.js`](worker.js)         | The Worker: validates a POST beacon, writes one AE data point.   |
 | [`wrangler.toml`](wrangler.toml) | Deploy config (Worker name, AE binding, custom domain route).    |
 | [`queries.sql`](queries.sql)     | Starter SQL answering each question the telemetry exists to ask. |
+| [`dashboard.py`](dashboard.py)   | A marimo dashboard that runs those queries and charts them.      |
 
 ## What it stores
 
@@ -43,6 +44,29 @@ the DNS record and TLS certificate for `telemetry.tagger.photo`.
 
 Use the
 [Analytics Engine SQL API](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/)
-(or the dashboard SQL console) with the statements in [`queries.sql`](queries.sql). They cover
-most-used models, median batch size, CLI vs GUI split, duration by CPU arch, OS distribution, and
-active installs over time.
+(or the Cloudflare dashboard SQL console) with the statements in [`queries.sql`](queries.sql). They
+cover most-used models, median batch size, CLI vs GUI split, duration by CPU arch, OS distribution,
+and active installs over time.
+
+## Dashboard
+
+[`dashboard.py`](dashboard.py) is a [marimo](https://marimo.io) notebook that runs those queries and
+turns them into KPI tiles, a daily active-installs trend, and ranked bar charts (models, interface,
+OS, arch, and app/Python versions), plus a free-form SQL console. It reads the SQL API directly and
+never writes.
+
+It is a self-contained [PEP 723](https://peps.python.org/pep-0723/) script, so
+[uv](https://docs.astral.sh/uv/) resolves its dependencies into a throwaway venv. It needs two
+environment variables: the same `CLOUDFLARE_ACCOUNT_ID` as the deploy step, and a
+[Cloudflare API token](https://dash.cloudflare.com/profile/api-tokens) scoped to **Account
+Analytics: Read** (read-only, nothing else):
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID=...
+export CLOUDFLARE_API_TOKEN=...
+uvx marimo run --sandbox telemetry/dashboard.py   # read-only app; use `marimo edit` to tinker
+```
+
+If the variables are missing the dashboard opens to setup instructions instead of failing. A window
+control (last 7/30/90 days) scopes every chart, and each chart has a table view so no value is gated
+behind color or a hover.
