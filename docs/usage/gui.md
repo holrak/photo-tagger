@@ -48,11 +48,11 @@ Install the optional extra with:
 
 ### 1. Add photos
 
-Drag photos or folders anywhere onto the window, or use **Add files...** / **Add folder...**.
-Dropped folders are expanded using the **File types** field (comma-separated, case-insensitive) and
-the **Recurse** toggle, exactly like the CLI's `--ext` and `--recursive`. Photos appear in a nested
-tree on the left: subfolders are grouped under their parent folder, so a deep shoot stays organized
-rather than flattened.
+Drag photos or folders anywhere onto the window, or use the **Add photos...** button: a click opens
+the file picker, and its arrow menu holds **Add Folder...** plus the folder-scan options (the **File
+types** list, comma-separated and case-insensitive, and **Include subfolders**), exactly like the
+CLI's `--ext` and `--recursive`. Photos appear in a nested tree on the left: subfolders are grouped
+under their parent folder, so a deep shoot stays organized rather than flattened.
 
 !!! note "File types are case-insensitive but variant-aware"
 
@@ -62,20 +62,26 @@ rather than flattened.
 ### 2. Choose what to process
 
 Every folder and file has a checkbox; uncheck a folder to exclude everything under it, or uncheck
-individual files. Only checked photos are generated. The two columns are resizable. To take an item
-off the list entirely (rather than just deselect it), select it and click **Remove** or press
-++delete++ / ++backspace++; **Clear** empties the whole list. The status column shows each photo's
-state: blank (pending), `working...`, `ready`, `saved ✓`, or `failed ✗`.
+individual files. Only checked photos are generated. To take an item off the list entirely (rather
+than just deselect it), select it and click **Remove**, press ++delete++ / ++backspace++, or use
+**Remove From List** in its right-click menu; **File > Clear List** empties the whole list.
 
-Click the **Photos** or **Status** column header to sort by it; click again to reverse. The Status
-column sorts by processing stage (pending, working, ready, saved, failed), not the label text, so
-clicking it groups all the failures or all the ready photos together. Folders stay grouped above
-their sibling files either way.
+The tree has four resizable, sortable columns (click a header to sort; click again to reverse;
+folders stay grouped above their sibling files either way):
 
-The **Deselect** row unchecks photos in bulk, mirroring the CLI's skip flags so you do not have to
-hunt through a large list by hand:
+- **Photos**: the file name.
+- **Type**: the extension, with `+xmp` appended when an XMP sidecar sits next to the file.
+- **Status**: blank (pending), `working...`, `ready`, `saved ✓` (green), or `failed ✗` (red).
+    Sorting uses the processing stage, not the label text, so clicking it groups all the failures or
+    all the ready photos together.
+- **Tagged**: which metadata the file already carries, filled in by a background scan after you add
+    photos: `T` title, `D` description, `K` keywords, `-` for none (hover for the full list).
 
-- **Already tagged** opens a menu of criteria for what counts as "already done", the GUI's
+The **Select** menu checks and unchecks photos in bulk, so you do not have to hunt through a large
+list by hand:
+
+- **Check All** / **Uncheck All** flip every checkbox at once.
+- **Uncheck Already Tagged** opens a menu of criteria for what counts as "already done", the GUI's
     field-aware [`--skip-tagged`](cli-reference.md). It reads the metadata in one pass (so a large
     folder pauses briefly) and unchecks the matching photos:
     - **Has any metadata** unchecks any photo that has a title, description, *or* keywords (the broad,
@@ -84,10 +90,11 @@ hunt through a large list by hand:
         target specific fields. The combined criteria require *all* of their fields, so a photo that
         only has keywords survives **Has a title and a description** and stays selected, which is what
         you want when filling in the title and description on photos that are missing them.
-- **From file...** lets you pick a plain-text file listing photos to skip, one per line (by bare
-    filename or full path, `#` comments allowed), and unchecks the ones it names. This is the GUI's
-    [`--skip-from`](cli-reference.md), and it pairs with the CLI's `--append-to-skip-file`: point it
-    at the list a CLI run wrote to resume the same work in the window.
+- **Uncheck From Skip List...** lets you pick a plain-text file listing photos to skip, one per line
+    (by bare filename or full path, `#` comments allowed), and unchecks the ones it names. This is
+    the GUI's [`--skip-from`](cli-reference.md), and it pairs with the CLI's
+    `--append-to-skip-file`: point it at the list a CLI run wrote to resume the same work in the
+    window.
 
 Deselecting only unchecks: the photos stay in the list, so you can see what was skipped and re-check
 any of them. The status bar reports how many photos were deselected and how many are still selected.
@@ -99,18 +106,26 @@ tree).
 
 ### 3. Generate proposals
 
-Pick a **Provider** (Ollama, LM Studio, or OpenAI) and a **Model**. Press **Refresh** to query the
-provider for the models it currently serves and pick from the dropdown instead of typing; likely
-vision-capable models are listed first. Set a custom **URL** or **API key** in the same toolbar if
-your provider needs them: the key field is masked, and leaving it blank falls back to the provider's
-environment variable. **Generate selected** then runs the model on the checked photos on a
-background thread, building the same contextual prompt as the CLI (existing keywords, location, GPS,
-camera). Results stream in and the tree status updates per photo.
+Pick a **Provider** (Ollama, LM Studio, or OpenAI) and a **Model** in the header. Press **Refresh**
+to query the provider for the models it currently serves and pick from the dropdown instead of
+typing; likely vision-capable models are listed first. **Connection...** opens the settings that
+rarely change: a custom **Base URL**, a masked **API key** (leave it blank to fall back to the
+provider's environment variable), and the **Test connection** check for ExifTool and the model.
+
+**Generate selected** (in the bottom bar) then runs the model on the checked photos on a background
+thread, building the same contextual prompt as the CLI (existing keywords, location, GPS, camera).
+Results stream in, the tree status updates per photo, and a progress bar in the bottom bar counts
+the batch down.
+
+Results are **cached by default** (see [Configuration](#configuration)): re-running a batch after a
+crash, or generating a folder you partly processed before, reuses the earlier answers for unchanged
+photos instead of calling the model again. Toggle **Settings > Cache AI Results** to turn that off,
+or right-click a single photo and pick **Generate (Skip Cache)** to force a fresh result for it.
 
 To regenerate a single photo without touching your selection, open it and press **Generate this
-photo** in the detail pane: it runs the model on just that photo, regardless of which photos are
-checked (the counterpart to **Save this photo**). If some photos ended up `failed ✗`, **Retry
-failed** in the toolbar re-runs the model on every failed photo at once.
+photo** in the detail pane, or right-click it in the tree and choose **Generate** (a failed photo
+shows **Retry Generation** there instead). If several photos ended up `failed ✗`, **Retry failed**
+in the bottom bar re-runs the model on all of them at once.
 
 To stop a run early, press **Cancel** (next to *Generate selected*). The photo already in flight
 finishes (a model request cannot be interrupted mid-call), then the run stops and the un-started
@@ -126,34 +141,39 @@ Click a photo to open it on the right. The detail pane is **side-by-side** for e
 - a **Source** line saying whether the existing metadata came from the image file, an XMP sidecar,
     or both,
 - **Existing** vs **New** Title, Description, and Keywords lined up row by row, with the New side
-    editable and seeded from the proposal,
-- a **Keyword changes** diff coloring what a save will do: green for added, red and struck-through
-    for removed (only with overwrite), grey for unchanged,
-- a **Hierarchy** preview of the Lightroom paths the save will write.
+    editable and seeded from the proposal. The description boxes grow with their content instead of
+    reserving space, and existing keyword hierarchies display in the same `<` notation you type,
+- a collapsible **Keyword changes** section. Its header always summarizes what a save would do
+    (`+3 / -1`, or `no change`); expand it for the colored diff (green added, red struck-through
+    removed, grey unchanged) and the resulting keyword **tree**, shown indented by level.
 
-Keywords support hierarchy with `<` (specific to general), for example `Eagle<Bird<Animal`; the diff
-and hierarchy update live as you edit. Adjust anything, then press **Save this photo** to write just
-the open one, or **Save selected** to write the **checked** photos that have a proposal. The save
-scope matches *Generate selected* (the same checkboxes), so check everything to save everything.
+Keywords support hierarchy with `<` (specific to general), for example `Eagle<Bird<Animal`; the
+summary, diff, and tree update live as you edit. Adjust anything, then press **Save this photo** to
+write just the open one, or **Save selected** (bottom bar) to write the **checked** photos that have
+a proposal. The save scope matches *Generate selected* (the same checkboxes), so check everything to
+save everything.
 
-The **Write** row chooses which fields a save touches: **Title**, **Description**, and **Keywords**
-(all on by default), the GUI's equivalent of the CLI's `--no-write-title` / `--no-write-description`
-/ `--no-write-keywords`. Uncheck one to leave that field on the photo untouched, for example uncheck
-**Keywords** to refresh only the title and description while keeping a curated Lightroom keyword
-list as is (turning **Keywords** off also disables **Overwrite existing keywords**, since there is
-nothing to write). By default photo-tagger writes an XMP sidecar and merges the keywords with the
-existing ones, just like the CLI. Toggle **Embed in photo** to write into the image instead, or
-**Overwrite existing keywords** to replace rather than merge. You can edit and save a photo even
-without generating a proposal first: the editable fields then start from the existing values.
+The **Save options** menu (next to *Save selected*) chooses what every save writes:
+
+- **Write Title**, **Write Description**, **Write Keywords** (all on by default), the GUI's
+    equivalent of the CLI's `--no-write-title` / `--no-write-description` / `--no-write-keywords`.
+    Uncheck one to leave that field on the photo untouched, for example uncheck **Write Keywords**
+    to refresh only the title and description while keeping a curated Lightroom keyword list as is
+    (turning it off also disables **Overwrite Existing Keywords**, since there is nothing to write).
+- **Overwrite Existing Keywords** replaces the existing keywords instead of merging the new ones in.
+- **Embed in Photo** writes into the image file instead of the default XMP sidecar.
+
+You can edit and save a photo even without generating a proposal first: the editable fields then
+start from the existing values.
 
 !!! tip "API keys: field or environment"
 
-    The toolbar has a masked **API key** field. Leave it blank to use the provider's environment
-    variable (`OPENAI_API_KEY`, `LM_STUDIO_API_KEY`, or `OLLAMA_API_KEY`), which keeps the secret out of
-    the app entirely; or type a key to use it for this session only. A typed key is held in memory for
-    the run and is never written to disk. OpenAI requires a key; local Ollama and LM Studio servers
-    usually do not. To set it from the environment instead, launch with, for example,
-    `OPENAI_API_KEY=sk-... photo-tagger gui`.
+    The **Connection...** dialog has a masked **API key** field. Leave it blank to use the provider's
+    environment variable (`OPENAI_API_KEY`, `LM_STUDIO_API_KEY`, or `OLLAMA_API_KEY`), which keeps the
+    secret out of the app entirely; or type a key to use it for this session only. A typed key is held
+    in memory for the run and is never written to disk (not even by **Save Settings as Defaults**).
+    OpenAI requires a key; local Ollama and LM Studio servers usually do not. To set it from the
+    environment instead, launch with, for example, `OPENAI_API_KEY=sk-... photo-tagger gui`.
 
 ### 5. When a photo fails
 
@@ -164,22 +184,22 @@ A photo that the model could not process is marked `failed ✗` in the status co
     `model unreachable` or a decode error).
 
 Once you have addressed the cause (start the model server, fix the URL, free up memory), click
-**Retry failed** to re-run every failed photo, or open one and press **Generate this photo** to
+**Retry failed** to re-run every failed photo, or right-click one and choose **Retry Generation** to
 retry just that one. A successful retry clears the banner and flips the status back to `ready`.
 
-For the full traceback behind a failure, click **Open logs** (next to the status bar). The GUI
-writes a timestamped, rotating log file to `~/.photo-tagger/logs/` on every run and the button opens
-that folder in your file browser.
+For the full traceback behind a failure, use **Help > Open Logs**. The GUI writes a timestamped,
+rotating log file to `~/.photo-tagger/logs/` on every run and the action opens that folder in your
+file browser.
 
 ### Export a CSV report
 
-**Export CSV...** (in the tree controls, next to **Clear**) writes a spreadsheet with **one row per
-photo in the list**, the same report the CLI's [`--csv-file`](cli-reference.md#csv-report) produces.
-Each row gathers everything the GUI knows about a photo: its status, the working
-title/description/keywords (the keywords as a save would write them, honoring the **Overwrite**
-toggle), the title/description/keywords already on the file, the camera/location EXIF read when it
-was generated, and the per-photo token usage and timing. Photos you have not generated yet still get
-a row, with the generated and usage columns left blank.
+**File > Export CSV Report...** writes a spreadsheet with **one row per photo in the list**, the
+same report the CLI's [`--csv-file`](cli-reference.md#csv-report) produces. Each row gathers
+everything the GUI knows about a photo: its status, the working title/description/keywords (the
+keywords as a save would write them, honoring the **Overwrite** toggle), the
+title/description/keywords already on the file, the camera/location EXIF read when it was generated,
+and the per-photo token usage and timing. Photos you have not generated yet still get a row, with
+the generated and usage columns left blank.
 
 Any unsaved edits in the open photo are folded into its row first, so the export reflects exactly
 what you see. Pick a destination in the save dialog (a `.csv` suffix is added if you omit one); the
@@ -189,14 +209,21 @@ spreadsheet or sharing the results without opening every photo.
 ## Configuration
 
 The GUI reads the same TOML config file and environment variables as the CLI and pre-fills the
-provider, model, URL, and extensions from them. Persisting those in `.photo-tagger.toml` (see
-[Configuration](../getting-started/configuration.md)) means the window opens ready to go.
+provider, model, URL, extensions, and save options from them. It can also write that file:
+**Settings > Save Settings as Defaults...** stores the current provider, model, URL, file types,
+recursion, and save options to `~/.config/photo-tagger/config.toml` (asking before replacing an
+existing file, and never writing the API key), so both the GUI and the CLI open ready to go next
+time. See [Configuration](../getting-started/configuration.md) for the file format.
 
-The form surfaces the most common options. Which fields are written is chosen with the **Write**
-checkboxes (see [Review, edit, and save](#4-review-edit-and-save)), skip lists through the
-**Deselect** buttons (see [Choose what to process](#2-choose-what-to-process)). An ExifTool backup
-is always kept and inference settings use their defaults. For the full set of flags (custom prompts,
-caching, date-range filters, sampling, logging), use the [CLI](cli-reference.md).
+Generated results are cached in the same SQLite format as the CLI's
+[`--cache-file`](cli-reference.md): the GUI uses the configured `cache_file` if the config sets one,
+and `~/.photo-tagger/cache.sqlite` otherwise. **Settings > Cache AI Results** turns the cache off
+for a session; a photo's right-click menu offers **Generate (Skip Cache)** for one-off fresh
+results.
+
+The window surfaces the most common options; an ExifTool backup is always kept and inference
+settings use their defaults. For the full set of flags (custom prompts, date-range filters,
+sampling, logging), use the [CLI](cli-reference.md).
 
 ## Limitations
 
@@ -208,8 +235,8 @@ caching, date-range filters, sampling, logging), use the [CLI](cli-reference.md)
 
 - Loading a photo's preview and existing metadata is synchronous, so selecting a large RAW file may
     pause briefly the first time (results are cached afterwards).
-- A standalone, double-click app bundle (with the Dock icon and name) is planned via
-    [Briefcase](https://briefcase.readthedocs.io/); for now launch the GUI with `photo-tagger gui`.
+- On macOS, `./packaging/build_macos_app.sh` builds a double-clickable (unsigned) `Photo Tagger.app`
+    with PyInstaller; elsewhere launch the GUI with `photo-tagger gui`.
 
 For headless machines, scripting, scheduling, or piping results into other tools, use the CLI with
 [`--json`](cli-reference.md#display); the GUI is meant for interactive, local use.

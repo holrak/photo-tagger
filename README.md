@@ -293,13 +293,16 @@ photo-tagger gui
 ```
 
 The GUI is a review-before-write frontend over the same building blocks as the CLI. Drag in photos
-or folders, pick what to process from a checkable tree, choose a provider and model (hit **Test
-connection** to run the same checks as `doctor`), then **Generate selected** to run the model on a
-background thread. Each photo's proposed title, description, and keywords appear next to the
-existing values in a side-by-side detail pane, where you can edit any field before you **Save**. A
-photo that fails shows why and can be retried, and **Open logs** opens the run log folder. It reads
-the same config file and environment variables as the CLI. PySide6 is only pulled in by the `gui`
-extra, so the plain CLI install stays lightweight.
+or folders, pick what to process from a checkable tree (with per-file type, status, and
+already-tagged columns), choose a provider and model (**Connection...** holds the URL, API key, and
+the same checks as `doctor`), then **Generate selected** to run the model on a background thread
+with a progress bar; results are cached so re-runs are free. Each photo's proposed title,
+description, and keywords appear next to the existing values in a side-by-side detail pane, where
+you can edit any field before you **Save**. A photo that fails turns red, shows why, and can be
+retried from its right-click menu, and **Help > Open Logs** opens the run log folder. It reads the
+same config file and environment variables as the CLI, and **Settings > Save Settings as Defaults**
+writes them back. PySide6 is only pulled in by the `gui` extra, so the plain CLI install stays
+lightweight.
 
 ### Build a standalone macOS app
 
