@@ -30,17 +30,14 @@ if TYPE_CHECKING:
 
 
 _HASH_DIGEST_BYTES = 16  # 128-bit BLAKE2b; collisions are not a realistic concern here.
-_HASH_READ_CHUNK = 64 * 1024
 _CONFIG_DIGEST_BYTES = 8  # short fingerprint, plenty for distinguishing configs.
 
 
 def hash_image_file(path: Path) -> str:
     """Return a hex BLAKE2b digest of *path*'s bytes for cache lookup."""
-    h = hashlib.blake2b(digest_size=_HASH_DIGEST_BYTES)
     with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(_HASH_READ_CHUNK), b""):
-            h.update(chunk)
-    return h.hexdigest()
+        digest = hashlib.file_digest(fh, lambda: hashlib.blake2b(digest_size=_HASH_DIGEST_BYTES))
+    return digest.hexdigest()
 
 
 def build_cache_namespace(  # noqa: PLR0913 - each kwarg is a distinct input to the digest.
@@ -170,8 +167,8 @@ class InferenceCache:
         # in the per-cache lock below; we deliberately serialize all DB access.
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        # WAL mode allows concurrent readers and avoids blocking on writes, which
-        # matters when multiple worker threads hit the cache in parallel.
+        # WAL keeps other processes (a concurrent CLI run, the GUI) from blocking behind this
+        # one's writes. Within this process the lock below serializes everything anyway.
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_SCHEMA)
         self._conn.commit()

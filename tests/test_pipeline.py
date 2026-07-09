@@ -1,6 +1,7 @@
 """Tests for the photo processing pipeline using lightweight stubs."""
 
 import contextlib
+from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ from photo_tagger.pipeline import (
     ImageOutcome,
     ProcessingOptions,
     _BatchContext,
+    _drain_after_interrupt,
     _emit_outcome,
     _InferenceScratch,
     _notify_success,
@@ -992,6 +994,34 @@ def test_notify_success_is_a_noop_without_callback(tmp_path: Path) -> None:
     """_notify_success returns immediately when no on_success callback is registered."""
     # Must not raise and must not require a callable.
     _notify_success(None, tmp_path / "img.cr3")
+
+
+def test_drain_after_interrupt_counts_completed_work(tmp_path: Path) -> None:
+    """Photos finished during the interrupt drain are successes; cancelled ones stay pending."""
+    done_ok: Future[bool] = Future()
+    done_ok.set_result(True)
+    done_bad: Future[bool] = Future()
+    done_bad.set_result(False)
+    exploded: Future[bool] = Future()
+    exploded.set_exception(RuntimeError("worker blew up"))
+    never_started: Future[bool] = Future()
+    never_started.cancel()
+
+    notified: list[Path] = []
+    successes, failures, cancelled = _drain_after_interrupt(
+        {
+            done_ok: tmp_path / "ok.cr3",
+            done_bad: tmp_path / "bad.cr3",
+            exploded: tmp_path / "boom.cr3",
+            never_started: tmp_path / "pending.cr3",
+        },
+        on_success=notified.append,
+    )
+
+    assert successes == 1
+    assert notified == [tmp_path / "ok.cr3"]
+    assert failures == [tmp_path / "bad.cr3", tmp_path / "boom.cr3"]
+    assert cancelled == [tmp_path / "pending.cr3"]
 
 
 def test_run_batch_concurrent_catches_future_result_exception(tmp_path: Path) -> None:

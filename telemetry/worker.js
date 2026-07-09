@@ -15,6 +15,10 @@
 
 const SCHEMA_VERSION = 1;
 const MAX_STR = 200;
+// A real beacon is ~400 bytes; anything bigger is not ours. Rejecting on Content-Length keeps a
+// hostile client from making the Worker parse megabytes of JSON (the field clamps below already
+// bound what gets stored).
+const MAX_BODY_BYTES = 4096;
 
 // Coerce to a bounded string; anything non-string (or oversized) becomes a safe value.
 const str = (v) => (typeof v === "string" ? v.slice(0, MAX_STR) : "");
@@ -25,6 +29,11 @@ export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    const length = Number(request.headers.get("content-length") ?? 0);
+    if (!Number.isFinite(length) || length > MAX_BODY_BYTES) {
+      return new Response("Payload Too Large", { status: 413 });
     }
 
     let body;

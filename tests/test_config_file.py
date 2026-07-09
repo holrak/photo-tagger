@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 import pytest
+from loguru import logger
 
 from photo_tagger.config_file import apply_overrides, find_config_file, load_config
 
@@ -172,3 +173,37 @@ def test_load_config_returns_empty_on_parse_error(tmp_path: Path) -> None:
 def test_load_config_returns_empty_on_io_error(tmp_path: Path) -> None:
     """An unreadable path degrades gracefully."""
     assert load_config(tmp_path / "nonexistent.toml") == {}
+
+
+def test_load_config_flags_exiftool_path_from_the_cwd_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A CWD-local config that redirects the ExifTool binary is honored but loudly flagged."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".photo-tagger.toml").write_text('exiftool_path = "./evil"\n')
+
+    events: list[str] = []
+    handler = logger.add(lambda m: events.append(m.record["message"]), level="WARNING")
+    try:
+        data = load_config()
+    finally:
+        logger.remove(handler)
+
+    assert data["exiftool_path"] == "./evil"
+    assert "exiftool_path_from_local_config" in events
+
+
+def test_load_config_does_not_flag_exiftool_path_from_an_explicit_file(tmp_path: Path) -> None:
+    """The same key in a user-chosen config (home or $PHOTO_TAGGER_CONFIG) raises no warning."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('exiftool_path = "/usr/local/bin/exiftool"\n')
+
+    events: list[str] = []
+    handler = logger.add(lambda m: events.append(m.record["message"]), level="WARNING")
+    try:
+        load_config(cfg)
+    finally:
+        logger.remove(handler)
+
+    assert "exiftool_path_from_local_config" not in events

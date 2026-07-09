@@ -91,6 +91,7 @@ ollama
 Ollama
 OLLAMA
 pacman
+parentless
 pinentry
 pipx
 pixmap

@@ -643,6 +643,7 @@ class MainWindow(QMainWindow):
         self._scan_worker: MetadataScanWorker | None = None
         self._syncing = False
         self._grid_check_toggled = False
+        self._closing = False
         self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
@@ -1247,9 +1248,12 @@ class MainWindow(QMainWindow):
         self._start_metadata_scan()
 
     def _stop_scan(self) -> None:
+        if self._scan_worker is not None:
+            self._scan_worker.deleteLater()
         if self._scan_thread is not None:
             self._scan_thread.quit()
             self._scan_thread.wait()
+            self._scan_thread.deleteLater()
             self._scan_thread = None
         self._scan_worker = None
 
@@ -1945,14 +1949,19 @@ class MainWindow(QMainWindow):
         self._thumb_worker.moveToThread(self._thumb_thread)
         self._thumb_thread.started.connect(self._thumb_worker.run)
         self._thumb_worker.ready.connect(self._on_thumb_ready)
+        # Stop the thread's event loop once every thumbnail is decoded; without this the idle
+        # thread would keep running until the next navigation or the window closed.
+        self._thumb_worker.finished.connect(self._thumb_thread.quit)
         self._thumb_thread.start()
 
     def _stop_thumbs(self) -> None:
         if self._thumb_worker is not None:
             self._thumb_worker.stop()
+            self._thumb_worker.deleteLater()
         if self._thumb_thread is not None:
             self._thumb_thread.quit()
             self._thumb_thread.wait()
+            self._thumb_thread.deleteLater()
             self._thumb_thread = None
         self._thumb_worker = None
 
@@ -2247,6 +2256,10 @@ class MainWindow(QMainWindow):
         self._status.setText("Cancelling after the current photo finishes...")
 
     def _on_generate_finished(self) -> None:
+        if self._closing:
+            # closeEvent already tore the thread down; this queued signal arriving afterwards
+            # must not touch widgets on a window that is going away, or tear down twice.
+            return
         # A cancelled run leaves the un-started photos marked WORKING; reset them to PENDING so
         # they look queued-again rather than stuck, and report what actually got done.
         reset = self._reset_working()
@@ -2289,10 +2302,15 @@ class MainWindow(QMainWindow):
             self._progress.setValue(self._progress.value() + 1)
 
     def _teardown_thread(self) -> None:
+        # deleteLater releases the C++ side of the thread and the (parentless, moved) worker;
+        # dropping only the Python refs would leak both once per generation run.
         if self._thread is not None:
             self._thread.quit()
             self._thread.wait()
+            self._thread.deleteLater()
             self._thread = None
+        if self._worker is not None:
+            self._worker.deleteLater()
         self._worker = None
         self._set_running(running=False)
 
@@ -2415,6 +2433,7 @@ class MainWindow(QMainWindow):
         flight, not the whole batch. Waiting on the thread keeps a running QThread from being
         destroyed under it.
         """
+        self._closing = True
         if self._worker is not None:
             self._worker.stop()
         self._stop_thumbs()

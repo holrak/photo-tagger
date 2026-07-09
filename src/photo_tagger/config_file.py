@@ -63,6 +63,15 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     except (OSError, tomllib.TOMLDecodeError) as exc:
         logger.warning("config_file_load_failed", path=str(path), error=str(exc))
         return {}
+    if path == _LOCAL_CONFIG and data.get("exiftool_path"):
+        # A CWD-local config names the "ExifTool" binary this run will execute. Running inside a
+        # directory someone else prepared (an unpacked archive, a cloned repo) would silently run
+        # whatever that file points at, so make the redirect visible.
+        logger.warning(
+            "exiftool_path_from_local_config",
+            exiftool_path=str(data["exiftool_path"]),
+            config=str(path.resolve()),
+        )
     logger.debug("config_file_loaded", path=str(path))
     return data
 

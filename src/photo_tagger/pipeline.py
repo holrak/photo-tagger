@@ -2,7 +2,7 @@
 
 import contextlib
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -541,8 +541,10 @@ def _run_pass_concurrent(
             ): image_file
             for idx, image_file in indexed
         }
+        consumed: set[Future[bool]] = set()
         try:
             for future in as_completed(future_to_image):
+                consumed.add(future)
                 image_file = future_to_image[future]
                 try:
                     ok = future.result()
@@ -568,13 +570,57 @@ def _run_pass_concurrent(
                     ctx.progress(image_file, ok)
         except KeyboardInterrupt:
             interrupted = True
-            pending = [img for fut, img in future_to_image.items() if not fut.done()]
-            logger.warning("batch_interrupted_by_user", pending=len(pending))
-            failed.extend(pending)
             pool.shutdown(wait=False, cancel_futures=True)
+            remaining = {f: img for f, img in future_to_image.items() if f not in consumed}
+            drained_ok, drained_failed, cancelled = _drain_after_interrupt(
+                remaining,
+                on_success=ctx.on_success,
+            )
+            successes += drained_ok
+            failed.extend(drained_failed)
+            failed.extend(cancelled)
+            logger.warning(
+                "batch_interrupted_by_user",
+                pending=len(cancelled),
+                drained=drained_ok + len(drained_failed),
+            )
     finally:
         pool.shutdown(wait=True)
     return successes, failed, interrupted
+
+
+def _drain_after_interrupt(
+    remaining: dict[Future[bool], Path],
+    *,
+    on_success: OnSuccess | None,
+) -> tuple[int, list[Path], list[Path]]:
+    """
+    Settle the futures a KeyboardInterrupt left behind; return (successes, failures, cancelled).
+
+    Queued futures were cancelled and stay pending, but a task already in flight cannot be
+    interrupted and runs to completion anyway. A photo whose metadata was written during that drain
+    is a real success (it is on disk); reporting it as pending would miscount the summary and make a
+    resume redo finished work.
+    """
+    drained_successes = 0
+    failures: list[Path] = []
+    cancelled: list[Path] = []
+    for future, image_file in remaining.items():
+        if future.cancelled():
+            cancelled.append(image_file)
+            continue
+        # exception() blocks until the in-flight task settles and hands the error back without
+        # re-raising, so a worker that also hit the KeyboardInterrupt cannot abort the drain.
+        error = future.exception()
+        if error is not None:
+            logger.error("concurrent_worker_exception", file=image_file.name, error=str(error))
+        ok = future.result() if error is None else False
+        if ok:
+            drained_successes += 1
+            _notify_success(on_success, image_file)
+        else:
+            failures.append(image_file)
+    return drained_successes, failures, cancelled
 
 
 def _run_pass(
