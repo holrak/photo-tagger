@@ -24,11 +24,13 @@ from photo_tagger.gui_state import (
     apply_proposal,
     build_tree,
     chain_to_display,
+    config_toml_text,
     count_generated,
     descendant_files,
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
+    file_type_label,
     format_existing_keywords,
     group_by_parent,
     hierarchy_preview,
@@ -43,9 +45,13 @@ from photo_tagger.gui_state import (
     paths_under,
     photo_item_to_report_row,
     rank_vision_models,
+    reveal_command,
+    reveal_label,
     status_sort_rank,
     status_summary,
+    tagged_summary,
 )
+from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_NAMES
 
@@ -327,6 +333,84 @@ def test_chain_to_display_reverses_to_leaf_first() -> None:
     """A root-first '|' path flips to the editable field's leaf-first '<' form."""
     assert chain_to_display("Animal|Bird|Duck") == "Duck<Bird<Animal"
     assert chain_to_display("Flat") == "Flat"
+
+
+def test_reveal_command_per_platform(tmp_path: Path) -> None:
+    """MacOS and Windows get a reveal argv; Linux falls back to opening the folder (None)."""
+    photo = tmp_path / "a.jpg"
+    assert reveal_command(photo, "darwin") == ["open", "-R", str(photo)]
+    assert reveal_command(photo, "win32") == ["explorer", f"/select,{photo}"]
+    assert reveal_command(photo, "linux") is None
+
+
+def test_reveal_label_names_the_platform_browser() -> None:
+    """The context-menu label matches each platform's file browser name."""
+    assert reveal_label("darwin") == "Reveal in Finder"
+    assert reveal_label("win32") == "Show in Explorer"
+    assert reveal_label("linux") == "Show in File Manager"
+
+
+def test_file_type_label_flags_sidecars(tmp_path: Path) -> None:
+    """The Type label is the lowercased extension, with +xmp when a sidecar exists."""
+    photo = tmp_path / "IMG_0001.CR3"
+    photo.write_text("x", encoding="utf-8")
+    assert file_type_label(photo) == "cr3"
+    (tmp_path / "IMG_0001.xmp").write_text("<x/>", encoding="utf-8")
+    assert file_type_label(photo) == "cr3+xmp"
+
+
+def test_tagged_summary_letters_and_empty_marker() -> None:
+    """Present fields compress to their letters in T/D/K order; none becomes a dash."""
+    assert tagged_summary({FIELD_KEYWORDS, FIELD_TITLE}) == "TK"
+    assert tagged_summary(set()) == "-"
+
+
+def test_config_toml_text_round_trips_through_load_defaults() -> None:
+    """The GUI-written TOML parses and lands on the right Defaults fields."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    from photo_tagger.cli_options import load_defaults  # noqa: PLC0415
+
+    text = config_toml_text(
+        provider_name="lmstudio",
+        model_name='qwen "vl" model',
+        api_base_url="http://localhost:1234/v1",
+        extensions="jpg,cr3",
+        recursive=True,
+        write_title=True,
+        write_description=False,
+        write_keywords=True,
+        preserve_keywords=True,
+        use_sidecar=False,
+        telemetry_enabled=False,
+    )
+    defaults = load_defaults(tomllib.loads(text))
+
+    assert defaults.provider.model_name == 'qwen "vl" model'  # quotes survive escaping
+    assert defaults.provider.api_base_url == "http://localhost:1234/v1"
+    assert defaults.extensions == "jpg,cr3"
+    assert defaults.recursive is True
+    assert defaults.output.write_description is False
+    assert defaults.output.use_sidecar is False
+    assert defaults.telemetry.enabled is False
+
+
+def test_config_toml_text_omits_blank_url() -> None:
+    """A blank base URL is left out so the provider default applies."""
+    text = config_toml_text(
+        provider_name="ollama",
+        model_name="llava",
+        api_base_url=None,
+        extensions="jpg",
+        recursive=False,
+        write_title=True,
+        write_description=True,
+        write_keywords=True,
+        preserve_keywords=True,
+        use_sidecar=True,
+        telemetry_enabled=True,
+    )
+    assert "api_base_url" not in text
 
 
 def test_keyword_diff_merge_marks_added_and_unchanged() -> None:

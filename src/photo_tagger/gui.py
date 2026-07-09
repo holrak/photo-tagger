@@ -19,6 +19,7 @@ from coverage and the static analyzers.
 
 import html
 import os
+import subprocess  # nosec B404 - only used to reveal a photo in the OS file browser
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ from loguru import logger
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
+    QBrush,
     QColor,
     QDesktopServices,
     QIcon,
@@ -72,8 +74,16 @@ from PySide6.QtWidgets import (
 
 from photo_tagger import __version__, telemetry
 from photo_tagger.ai import analyze_image_with_ai, create_agent
+from photo_tagger.cache import InferenceCache, build_cache_namespace, hash_image_file
 from photo_tagger.cli_options import load_defaults
-from photo_tagger.config import DEFAULT_USER_PROMPT
+from photo_tagger.config import (
+    DEFAULT_FREQUENCY_PENALTY,
+    DEFAULT_JPEG_QUALITY,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_USER_PROMPT,
+)
+from photo_tagger.config_file import load_config, user_config_path
 from photo_tagger.csv_report import write_report
 from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
@@ -93,10 +103,12 @@ from photo_tagger.gui_state import (
     Proposal,
     apply_proposal,
     build_tree,
+    config_toml_text,
     count_generated,
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
+    file_type_label,
     format_existing_keywords,
     hierarchy_preview,
     keyword_diff,
@@ -109,8 +121,11 @@ from photo_tagger.gui_state import (
     paths_under,
     photo_item_to_report_row,
     rank_vision_models,
+    reveal_command,
+    reveal_label,
     status_sort_rank,
     status_summary,
+    tagged_summary,
 )
 from photo_tagger.image_io import prepare_image_for_agent
 from photo_tagger.logging_setup import setup_logging
@@ -146,6 +161,19 @@ _GENERATE_RETRIES = 2
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 _IS_DIR_ROLE = Qt.ItemDataRole.UserRole + 1
 _STATUS_RANK_ROLE = Qt.ItemDataRole.UserRole + 2  # lifecycle rank for sorting the Status column
+
+# Tree columns, in display order.
+_COL_NAME = 0
+_COL_TYPE = 1
+_COL_STATUS = 2
+_COL_TAGGED = 3
+
+# Status colors: failures pop red, saved photos settle green; other states use the palette.
+_STATUS_COLOR = {FAILED: QColor("#f85149"), SAVED: QColor("#3fb950")}
+
+# The GUI cache lives next to the GUI logs unless the config names a cache_file. Sharing the
+# CLI's default would be wrong: the CLI has no default cache, it only caches when asked.
+_DEFAULT_CACHE_FILE = Path.home() / ".photo-tagger" / "cache.sqlite"
 _PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" placeholder
 _PAGE_DETAIL = 1  # right-pane stack index for one photo's detail
 _PAGE_GRID = 2  # right-pane stack index for a folder's thumbnail grid
@@ -221,6 +249,12 @@ QLineEdit, QPlainTextEdit, QComboBox { padding: 4px 6px; border-radius: 5px; }
 QTreeWidget::item { padding: 2px; }
 QToolButton { border: none; background: transparent; padding: 4px; font-weight: 600; }
 QToolButton:hover { color: #6366f1; }
+QToolButton#add {
+    padding: 6px 12px; border-radius: 6px; font-weight: 400;
+    border: 1px solid rgba(130, 130, 140, 60%);
+    background: rgba(130, 130, 140, 14%);
+}
+QToolButton#add:hover { background: rgba(130, 130, 140, 26%); }
 QProgressBar {
     border: 1px solid rgba(130, 130, 140, 60%); border-radius: 5px; text-align: center;
 }
@@ -250,6 +284,19 @@ def _readonly_box(min_height: int) -> QPlainTextEdit:
     return box
 
 
+def _fit_text_height(box: QPlainTextEdit, *, min_h: int = 44, max_h: int = 140) -> None:
+    """
+    Size *box* to its content, within bounds.
+
+    Short text keeps the box short so the pane's space goes to fields that need it; long text grows
+    the box up to *max_h* and scrolls past that. QPlainTextEdit reports its document height in line
+    counts, hence the line-spacing multiplication.
+    """
+    lines = max(1, int(box.document().size().height()))
+    height = lines * box.fontMetrics().lineSpacing() + 14
+    box.setFixedHeight(max(min_h, min(max_h, height)))
+
+
 class GenerateWorker(QObject):
     """
     Generates AI proposals for a list of photos off the UI thread.
@@ -264,13 +311,14 @@ class GenerateWorker(QObject):
     file_failed = Signal(str, str)  # path, error message
     finished = Signal()
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # one parameter per independent run input
         self,
         provider: ProviderName,
         model: str,
         api_base_url: str | None,
         paths: list[Path],
         api_key: str | None = None,
+        cache_file: Path | None = None,
     ) -> None:
         """Store the run parameters; nothing happens until :meth:`run`."""
         super().__init__()
@@ -279,6 +327,7 @@ class GenerateWorker(QObject):
         self._api_base_url = api_base_url
         self._paths = paths
         self._api_key = api_key
+        self._cache_file = cache_file
         self._stop = False
 
     def stop(self) -> None:
@@ -306,22 +355,38 @@ class GenerateWorker(QObject):
             self.finished.emit()
             return
 
+        cache = self._open_cache()
         self.started.emit(len(self._paths))
-        for path in self._paths:
-            if self._stop:
-                break
-            try:
-                proposal = self._generate_one(agent, path)
-            except Exception as exc:  # noqa: BLE001
-                # One photo's failure must not stop the rest of the batch.
-                logger.exception("gui_generate_failed", file=path.name, error=str(exc))
-                self.file_failed.emit(str(path), str(exc))
-            else:
-                self.file_done.emit(proposal)
+        try:
+            for path in self._paths:
+                if self._stop:
+                    break
+                try:
+                    proposal = self._generate_one(agent, path, cache)
+                except Exception as exc:  # noqa: BLE001
+                    # One photo's failure must not stop the rest of the batch.
+                    logger.exception("gui_generate_failed", file=path.name, error=str(exc))
+                    self.file_failed.emit(str(path), str(exc))
+                else:
+                    self.file_done.emit(proposal)
+        finally:
+            if cache is not None:
+                cache.close()
         self.finished.emit()
 
-    def _generate_one(self, agent: object, path: Path) -> Proposal:
-        """Read existing metadata, run the model, and assemble a proposal for *path*."""
+    def _open_cache(self) -> InferenceCache | None:
+        """Open the result cache for this run, degrading to no cache on any failure."""
+        if self._cache_file is None:
+            return None
+        try:
+            return InferenceCache(self._cache_file, model_name=_gui_cache_namespace(self._model))
+        except Exception as exc:  # noqa: BLE001
+            # A broken cache (unwritable dir, corrupt file) must not block generation.
+            logger.warning("gui_cache_open_failed", file=str(self._cache_file), error=str(exc))
+            return None
+
+    def _generate_one(self, agent: object, path: Path, cache: InferenceCache | None) -> Proposal:
+        """Read existing metadata, run the model (or hit the cache), and assemble a proposal."""
         context = read_image_context(path)
         existing_title, existing_description = read_caption(path)
         gps_info = {"position": context.gps_position} if context.gps_position else {}
@@ -332,8 +397,15 @@ class GenerateWorker(QObject):
             gps_info,
             camera_info=context.camera_info,
         )
-        jpeg = prepare_image_for_agent(path, max_size=_PREVIEW_MAX)
-        inference = analyze_image_with_ai(image_bytes=jpeg, agent=agent, user_prompt=prompt)
+        image_hash = hash_image_file(path) if cache is not None else ""
+        inference = cache.get(image_hash) if cache is not None else None
+        if inference is None:
+            jpeg = prepare_image_for_agent(path, max_size=_PREVIEW_MAX)
+            inference = analyze_image_with_ai(image_bytes=jpeg, agent=agent, user_prompt=prompt)
+            if cache is not None:
+                cache.put(image_hash, inference)
+        else:
+            logger.info("gui_cache_hit", file=path.name)
         return Proposal(
             path=path,
             existing_title=existing_title,
@@ -389,10 +461,57 @@ class ThumbnailWorker(QObject):
         self.finished.emit()
 
 
+class MetadataScanWorker(QObject):
+    """
+    Reads which metadata fields each photo already carries, off the UI thread.
+
+    One batched exiftool call covers the whole list, the same read the "Uncheck Already Tagged"
+    action does synchronously. The result feeds the tree's Tagged column so the user can see at a
+    glance which photos are already done. Failures degrade to an empty report.
+    """
+
+    done = Signal(object)  # dict[str, set[str]]: path -> present indicator fields
+    finished = Signal()
+
+    def __init__(self, paths: list[Path]) -> None:
+        """Store the paths to scan; nothing runs until :meth:`run`."""
+        super().__init__()
+        self._paths = paths
+
+    def run(self) -> None:
+        """Scan all paths in one batched read and emit the per-path field sets."""
+        try:
+            presence = find_field_presence(self._paths)
+        except Exception as exc:  # noqa: BLE001
+            # The scan is a convenience; a broken exiftool must not take the window down.
+            logger.warning("gui_metadata_scan_failed", error=str(exc))
+            presence = {}
+        self.done.emit({str(path): set(fields) for path, fields in presence.items()})
+        self.finished.emit()
+
+
+def _gui_cache_namespace(model: str) -> str:
+    """
+    Build the cache namespace for GUI runs: the model plus the GUI's fixed inference settings.
+
+    The GUI runs the agent with the library defaults and sends images at ``_PREVIEW_MAX``, so those
+    values (not the CLI flags) are what key its cache entries.
+    """
+    return build_cache_namespace(
+        model,
+        user_prompt=DEFAULT_USER_PROMPT,
+        temperature=DEFAULT_TEMPERATURE,
+        max_tokens=DEFAULT_MAX_TOKENS,
+        frequency_penalty=DEFAULT_FREQUENCY_PENALTY,
+        jpeg_dimensions=_PREVIEW_MAX,
+        jpeg_quality=DEFAULT_JPEG_QUALITY,
+    )
+
+
 def _status_sort_key(item: QTreeWidgetItem) -> tuple[int, str]:
     """Sort key for the Status column: lifecycle rank first, then name as a stable tiebreak."""
-    rank = item.data(1, _STATUS_RANK_ROLE)
-    return (int(rank) if rank is not None else 0, item.text(0).casefold())
+    rank = item.data(_COL_STATUS, _STATUS_RANK_ROLE)
+    return (int(rank) if rank is not None else 0, item.text(_COL_NAME).casefold())
 
 
 class _SortableTreeItem(QTreeWidgetItem):  # NOSONAR S8500 - Qt sorts items via __lt__ only
@@ -418,9 +537,11 @@ class _SortableTreeItem(QTreeWidgetItem):  # NOSONAR S8500 - Qt sorts items via 
                 tree is None or tree.header().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
             )
             return self_dir if ascending else not self_dir
-        if column == 1:
+        if column == _COL_STATUS:
             return _status_sort_key(self) < _status_sort_key(other)
-        return self.text(0).casefold() < other.text(0).casefold()
+        if column in (_COL_TYPE, _COL_TAGGED):
+            return self.text(column).casefold() < other.text(column).casefold()
+        return self.text(_COL_NAME).casefold() < other.text(_COL_NAME).casefold()
 
 
 class MainWindow(QMainWindow):
@@ -446,7 +567,13 @@ class MainWindow(QMainWindow):
         self._cancelling = False
         self._thumb_thread: QThread | None = None
         self._thumb_worker: ThumbnailWorker | None = None
+        self._scan_thread: QThread | None = None
+        self._scan_worker: MetadataScanWorker | None = None
         self._syncing = False
+        # Raw config, for keys the Defaults dataclass fills with CLI-oriented values: the GUI
+        # wants its own broad extension default unless the user actually saved one.
+        self._raw_config = load_config()
+        self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
         # Telemetry on/off: a persisted Settings-menu choice wins over the config-file default.
@@ -468,6 +595,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_right_pane())
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        # Start with the left pane wide enough for all four tree columns.
+        splitter.setSizes([500, 680])
         layout.addWidget(splitter, stretch=1)
         layout.addLayout(self._build_bottom_bar())
         self._build_menus()
@@ -498,6 +627,16 @@ class MainWindow(QMainWindow):
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
 
         settings_menu = menubar.addMenu("Settings")
+        settings_menu.setToolTipsVisible(True)
+        self._cache_action = QAction("Cache AI Results", self)
+        self._cache_action.setCheckable(True)
+        self._cache_action.setChecked(True)
+        self._cache_action.setToolTip(
+            f"Reuse earlier results for unchanged photos ({self._cache_file}). Uncheck to call "
+            "the model again for everything; a single photo can skip the cache from its "
+            "right-click menu.",
+        )
+        settings_menu.addAction(self._cache_action)
         self._telemetry_action = QAction("Send Anonymous Telemetry", self)
         self._telemetry_action.setCheckable(True)
         self._telemetry_action.setChecked(self._telemetry_enabled)
@@ -507,6 +646,16 @@ class MainWindow(QMainWindow):
         )
         self._telemetry_action.toggled.connect(self._on_telemetry_toggled)
         settings_menu.addAction(self._telemetry_action)
+        settings_menu.addSeparator()
+        save_defaults = settings_menu.addAction(
+            "Save Settings as Defaults...",
+            self._save_config,
+        )
+        save_defaults.setToolTip(
+            "Write the current provider, model, URL, file types, and save options to "
+            f"{user_config_path()}, where the CLI and the GUI read their defaults. The API key "
+            "is never written.",
+        )
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("Test Connection", self._test_connection)
@@ -520,6 +669,42 @@ class MainWindow(QMainWindow):
         self._telemetry_enabled = enabled
         telemetry.write_gui_pref(enabled=enabled)
         self._status.setText("Anonymous telemetry on." if enabled else "Anonymous telemetry off.")
+
+    def _active_cache_file(self) -> Path | None:
+        """Return the cache file generation should use, or None when caching is toggled off."""
+        return self._cache_file if self._cache_action.isChecked() else None
+
+    def _save_config(self) -> None:
+        """Write the GUI's current choices to the user config file (never the API key)."""
+        target = user_config_path()
+        if target.exists():
+            answer = QMessageBox.question(
+                self,
+                "Overwrite config file?",
+                f"{target} already exists. Replace it with the current GUI settings?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        text = config_toml_text(
+            provider_name=self._provider_name(),
+            model_name=self._model.currentText().strip(),
+            api_base_url=self._url.text().strip() or None,
+            extensions=self._extensions.text().strip(),
+            recursive=self._recursive.isChecked(),
+            write_title=self._write_title.isChecked(),
+            write_description=self._write_description.isChecked(),
+            write_keywords=self._write_keywords.isChecked(),
+            preserve_keywords=not self._overwrite.isChecked(),
+            use_sidecar=not self._embed.isChecked(),
+            telemetry_enabled=self._telemetry_enabled,
+        )
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save the config file", str(exc))
+            return
+        self._status.setText(f"Saved defaults to {target}.")
 
     def _show_about(self) -> None:
         """Show a small About dialog with the version and project link."""
@@ -619,18 +804,27 @@ class MainWindow(QMainWindow):
         box.addLayout(self._build_tree_controls())
 
         self._tree = QTreeWidget()
-        self._tree.setHeaderLabels(["Photos", "Status"])
+        self._tree.setHeaderLabels(["Photos", "Type", "Status", "Tagged"])
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         header = self._tree.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self._tree.setColumnWidth(0, 320)
-        self._tree.setColumnWidth(1, 90)
-        # Click a header to sort by name (Photos) or status; folders stay grouped above files.
+        for column, width in (
+            (_COL_NAME, 250),
+            (_COL_TYPE, 64),
+            (_COL_STATUS, 80),
+            (_COL_TAGGED, 56),
+        ):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self._tree.setColumnWidth(column, width)
+        # Click a header to sort by any column; folders stay grouped above files.
         self._tree.setSortingEnabled(True)
-        self._tree.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        header.setToolTip("Click a column header to sort by name or status.")
+        self._tree.sortByColumn(_COL_NAME, Qt.SortOrder.AscendingOrder)
+        header.setToolTip(
+            "Click a column header to sort. Type: file extension, +xmp when a sidecar exists.\n"
+            "Tagged: metadata already on the file (T title, D description, K keywords).",
+        )
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self._tree.itemChanged.connect(self._on_item_changed)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         for key in (QKeySequence.StandardKey.Delete, QKeySequence(Qt.Key.Key_Backspace)):
@@ -647,19 +841,21 @@ class MainWindow(QMainWindow):
 
     def _build_tree_controls(self) -> QHBoxLayout:
         controls = QHBoxLayout()
-        for label, tip, slot in (
-            ("Add files...", "Add individual photos.", self._choose_files),
-            ("Add folder...", "Add a folder of photos (see Scan options).", self._choose_folder),
-        ):
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            controls.addWidget(button)
 
-        scan = QPushButton("Scan options")
-        scan.setToolTip("File types and subfolder recursion used when adding a folder.")
-        scan.setMenu(self._build_scan_menu())
-        controls.addWidget(scan)
+        # One split button: a click adds files; the arrow offers the folder dialog and the scan
+        # options. Native file dialogs cannot select files and folders at once, so the split is
+        # the closest single-control equivalent (drag-and-drop takes both anyway).
+        add = QToolButton()
+        add.setObjectName("add")
+        add.setText("Add photos...")
+        add.setToolTip(
+            "Add photos (click), or open the arrow for adding a whole folder and for the "
+            "folder-scan options. Dragging files or folders onto the window also works.",
+        )
+        add.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        add.clicked.connect(self._choose_files)
+        add.setMenu(self._build_add_menu())
+        controls.addWidget(add)
         controls.addStretch(1)
 
         select = QPushButton("Select")
@@ -673,12 +869,14 @@ class MainWindow(QMainWindow):
         controls.addWidget(remove)
         return controls
 
-    def _build_scan_menu(self) -> QMenu:
-        """Build the small popover form holding the folder-scan settings (types, recursion)."""
+    def _build_add_menu(self) -> QMenu:
+        """Build the Add button's arrow menu: the folder dialog plus the folder-scan settings."""
         menu = QMenu(self)
+        menu.addAction("Add Folder...", self._choose_folder)
+        menu.addSeparator()
         panel = QWidget()
         form = QFormLayout(panel)
-        self._extensions = QLineEdit(DEFAULT_GUI_EXTENSIONS)
+        self._extensions = QLineEdit(self._raw_config.get("extensions", DEFAULT_GUI_EXTENSIONS))
         self._extensions.setMinimumWidth(280)
         self._extensions.setToolTip(
             "Extensions to scan for in folders (comma-separated).\n"
@@ -686,7 +884,7 @@ class MainWindow(QMainWindow):
         )
         form.addRow("File types", self._extensions)
         self._recursive = QCheckBox("Include subfolders")
-        self._recursive.setChecked(True)
+        self._recursive.setChecked(bool(self._raw_config.get("recursive", True)))
         self._recursive.setToolTip("Descend into subfolders when adding a folder.")
         form.addRow("", self._recursive)
         host = QWidgetAction(menu)
@@ -735,6 +933,89 @@ class MainWindow(QMainWindow):
             item.selected = checked
         self._rebuild_tree()
         self._update_status()
+
+    # --- tree context menu -------------------------------------------------------------------
+
+    def _on_tree_context_menu(self, pos: object) -> None:
+        """Show the per-row context menu for the tree item under the cursor."""
+        tree_item = self._tree.itemAt(pos)
+        menu = self._build_tree_context_menu(tree_item)
+        if menu is not None:
+            menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _build_tree_context_menu(self, tree_item: QTreeWidgetItem | None) -> QMenu | None:
+        """Build the context menu for *tree_item* (a file leaf or a folder), or None."""
+        if tree_item is None:
+            return None
+        path = tree_item.data(0, _PATH_ROLE)
+        if path is None:
+            return None
+        menu = QMenu(self._tree)
+        item = self._items.get(path)
+        if not bool(tree_item.data(0, _IS_DIR_ROLE)) and item is not None:
+            label = "Retry Generation" if item.status == FAILED else "Generate"
+            generate = menu.addAction(label, lambda: self._run_generation([item]))
+            generate.setEnabled(self._thread is None)
+            fresh = menu.addAction(
+                "Generate (Skip Cache)",
+                lambda: self._run_generation([item], use_cache=False),
+            )
+            fresh.setToolTip("Call the model even when a cached result exists for this photo.")
+            fresh.setEnabled(self._thread is None)
+            menu.addSeparator()
+        menu.addAction(reveal_label(sys.platform), lambda: self._reveal(Path(path)))
+        menu.addSeparator()
+        remove = menu.addAction("Remove From List")
+        remove.triggered.connect(
+            lambda: (self._tree.setCurrentItem(tree_item), self._remove_selected()),
+        )
+        return menu
+
+    def _reveal(self, path: Path) -> None:
+        """Show *path* selected in the OS file browser, or open its folder where unsupported."""
+        argv = reveal_command(path, sys.platform)
+        if argv is None:
+            folder = path if path.is_dir() else path.parent
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            return
+        subprocess.Popen(argv)  # noqa: S603  # nosec B603 - fixed reveal argv, path from our list
+
+    # --- background metadata scan (the Tagged column) ----------------------------------------
+
+    def _start_metadata_scan(self) -> None:
+        """Scan photos with an unknown Tagged state in the background, one batch at a time."""
+        if self._scan_thread is not None:
+            return  # a scan is running; _on_scan_finished re-checks for stragglers
+        pending = [item.path for item in self._items.values() if item.known_fields is None]
+        if not pending:
+            return
+        self._scan_thread = QThread(self)
+        self._scan_worker = MetadataScanWorker(pending)
+        self._scan_worker.moveToThread(self._scan_thread)
+        self._scan_thread.started.connect(self._scan_worker.run)
+        self._scan_worker.done.connect(self._on_scan_done)
+        self._scan_worker.finished.connect(self._on_scan_finished)
+        self._scan_thread.start()
+
+    def _on_scan_done(self, presence: dict[str, set[str]]) -> None:
+        """Record the scanned field sets and repaint the Tagged column."""
+        for key, fields in presence.items():
+            item = self._items.get(key)
+            if item is not None:
+                item.known_fields = set(fields)
+                self._refresh_status_cell(item)
+
+    def _on_scan_finished(self) -> None:
+        """Tear down the scan thread and pick up photos added while it ran."""
+        self._stop_scan()
+        self._start_metadata_scan()
+
+    def _stop_scan(self) -> None:
+        if self._scan_thread is not None:
+            self._scan_thread.quit()
+            self._scan_thread.wait()
+            self._scan_thread = None
+        self._scan_worker = None
 
     def _build_right_pane(self) -> QWidget:
         """Build a stack showing the idle placeholder, one photo's detail, or a folder's grid."""
@@ -832,10 +1113,13 @@ class MainWindow(QMainWindow):
         grid.addWidget(self._title, 2, 2)
 
         top = Qt.AlignmentFlag.AlignTop
-        self._existing_description = _readonly_box(70)
+        self._existing_description = _readonly_box(44)
         self._description = QPlainTextEdit()
-        self._description.setMinimumHeight(70)
         self._description.setToolTip("The description to write.")
+        # Descriptions are usually a sentence or two; grow the boxes with the text instead of
+        # reserving a fixed block of the pane (textChanged also fires on programmatic fills).
+        self._description.textChanged.connect(lambda: _fit_text_height(self._description))
+        _fit_text_height(self._description)
         grid.addWidget(QLabel("Description"), 3, 0, top)
         grid.addWidget(self._existing_description, 3, 1)
         grid.addWidget(self._description, 3, 2)
@@ -908,9 +1192,16 @@ class MainWindow(QMainWindow):
             "Write keywords. Uncheck to leave existing keywords untouched, e.g. to refresh only "
             "the title and description.",
         )
-        for action in (self._write_title, self._write_description, self._write_keywords):
+        # Defaults come from the config file, so choices saved via Settings > Save Settings as
+        # Defaults come back on the next launch.
+        output = self._defaults.output
+        for action, checked in (
+            (self._write_title, output.write_title),
+            (self._write_description, output.write_description),
+            (self._write_keywords, output.write_keywords),
+        ):
             action.setCheckable(True)
-            action.setChecked(True)
+            action.setChecked(checked)
             menu.addAction(action)
         # Connect only after setChecked above, so building the menu does not fire the handler
         # before _overwrite (which it toggles) has been created further down.
@@ -924,9 +1215,15 @@ class MainWindow(QMainWindow):
         self._overwrite.toggled.connect(self._refresh_derived)
         self._embed = QAction("Embed in Photo", self)
         self._embed.setToolTip("Write into the image file instead of an XMP sidecar.")
-        for action in (self._overwrite, self._embed):
+        for action, checked in (
+            (self._overwrite, not output.preserve_keywords),
+            (self._embed, not output.use_sidecar),
+        ):
             action.setCheckable(True)
+            action.setChecked(checked)
             menu.addAction(action)
+        # A config that starts with keywords off must also start with Overwrite grayed out.
+        self._overwrite.setEnabled(self._write_keywords.isChecked())
         return menu
 
     def _build_save_row(self) -> QHBoxLayout:
@@ -1031,6 +1328,7 @@ class MainWindow(QMainWindow):
             self._items[str(path)] = PhotoItem(path=path)
         self._rebuild_tree()
         self._update_status()
+        self._start_metadata_scan()
 
     def _remove_selected(self) -> None:
         item = self._tree.currentItem()
@@ -1057,6 +1355,7 @@ class MainWindow(QMainWindow):
         if self._thread is not None:
             return
         self._stop_thumbs()
+        self._stop_scan()
         self._items.clear()
         self._preview_cache.clear()
         self._thumb_cache.clear()
@@ -1086,6 +1385,8 @@ class MainWindow(QMainWindow):
             presence = find_field_presence([item.path for item in self._items.values()])
         finally:
             QApplication.restoreOverrideCursor()
+        # The read just told us every photo's fields; refresh the Tagged column for free.
+        self._on_scan_done({str(path): set(fields) for path, fields in presence.items()})
         matched = paths_matching_fields(presence, set(required), match_all=match_all)
         changed = self._deselect(matched)
         if changed:
@@ -1177,12 +1478,15 @@ class MainWindow(QMainWindow):
             self._add_folder_node(folder_item, sub)
         for path in node.files:
             item = self._items[str(path)]
-            leaf = _SortableTreeItem(folder_item, [path.name, _STATUS_LABEL[item.status]])
+            leaf = _SortableTreeItem(
+                folder_item,
+                [path.name, file_type_label(path), "", ""],
+            )
             leaf.setData(0, _PATH_ROLE, str(path))
-            leaf.setData(1, _STATUS_RANK_ROLE, status_sort_rank(item.status))
             # Files leave _IS_DIR_ROLE unset (None), which reads as "not a folder".
             leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             leaf.setCheckState(0, _checked(item.selected))
+            self._render_status_cells(leaf, item)
         self._sync_folder_check(folder_item)
 
     # --- tree interaction ------------------------------------------------------------------
@@ -1309,6 +1613,7 @@ class MainWindow(QMainWindow):
         self._existing_source.setText(", ".join(item.existing_sources) or _NONE)
         self._existing_title.setText(item.existing_title or _NONE)
         self._existing_description.setPlainText(item.existing_description or _NONE)
+        _fit_text_height(self._existing_description)
         existing_kw = format_existing_keywords(item.existing_keywords)
         self._existing_keywords.setPlainText(existing_kw or _NONE)
         self._title.setText(item.title)
@@ -1522,7 +1827,7 @@ class MainWindow(QMainWindow):
             return
         self._run_generation(failed)
 
-    def _run_generation(self, items: list[PhotoItem]) -> None:
+    def _run_generation(self, items: list[PhotoItem], *, use_cache: bool = True) -> None:
         if self._thread is not None or not items:
             return
         for item in items:
@@ -1543,6 +1848,7 @@ class MainWindow(QMainWindow):
             self._url.text().strip() or None,
             [item.path for item in items],
             api_key=self._api_key_value(),
+            cache_file=self._active_cache_file() if use_cache else None,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -1686,11 +1992,26 @@ class MainWindow(QMainWindow):
     def _refresh_status_cell(self, item: PhotoItem) -> None:
         leaf = self._leaf_for(item.path)
         if leaf is not None:
-            leaf.setText(1, _STATUS_LABEL[item.status])
-            leaf.setData(1, _STATUS_RANK_ROLE, status_sort_rank(item.status))
-            # Surface the failure reason on hover so it is discoverable straight from the tree.
-            tip = item.error if item.status == FAILED else ""
-            leaf.setToolTip(1, tip)
+            self._render_status_cells(leaf, item)
+
+    def _render_status_cells(self, leaf: QTreeWidgetItem, item: PhotoItem) -> None:
+        """Paint the Status and Tagged columns for *item*'s row."""
+        leaf.setText(_COL_STATUS, _STATUS_LABEL[item.status])
+        leaf.setData(_COL_STATUS, _STATUS_RANK_ROLE, status_sort_rank(item.status))
+        color = _STATUS_COLOR.get(item.status)
+        leaf.setData(
+            _COL_STATUS,
+            Qt.ItemDataRole.ForegroundRole,
+            QBrush(color) if color is not None else None,
+        )
+        # Surface the failure reason on hover so it is discoverable straight from the tree.
+        leaf.setToolTip(_COL_STATUS, item.error if item.status == FAILED else "")
+        if item.known_fields is not None:
+            leaf.setText(_COL_TAGGED, tagged_summary(item.known_fields))
+            leaf.setToolTip(
+                _COL_TAGGED,
+                "Already on the file: " + (", ".join(sorted(item.known_fields)) or "nothing"),
+            )
 
     def _resort(self) -> None:
         """Re-apply the active sort so changed statuses settle when sorting by the Status column."""
@@ -1726,6 +2047,7 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.stop()
         self._stop_thumbs()
+        self._stop_scan()
         self._teardown_thread()
         self._emit_telemetry()
         super().closeEvent(event)

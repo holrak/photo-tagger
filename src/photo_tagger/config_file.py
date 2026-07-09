@@ -27,6 +27,11 @@ _USER_CONFIG = Path.home() / ".config" / "photo-tagger" / "config.toml"
 _LOCAL_CONFIG = Path(".photo-tagger.toml")
 
 
+def user_config_path() -> Path:
+    """Return the XDG-style user config path; the GUI writes its saved defaults here."""
+    return _USER_CONFIG
+
+
 def find_config_file() -> Path | None:
     """Return the first existing config path from the search order, or None."""
     if env_path := os.getenv("PHOTO_TAGGER_CONFIG"):

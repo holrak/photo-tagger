@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
-from photo_tagger.metadata import select_camera_fields, select_location
+from photo_tagger.metadata import (
+    FIELD_DESCRIPTION,
+    FIELD_KEYWORDS,
+    FIELD_TITLE,
+    select_camera_fields,
+    select_location,
+)
 from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS as _PROVIDER_LABELS
 
@@ -77,6 +83,9 @@ class PhotoItem:
     status: str = PENDING
     error: str = ""
     loaded: bool = False
+    # Which indicator fields (title/description/keywords) the file already carries. None means
+    # the background metadata scan has not reported yet; a set (possibly empty) means it has.
+    known_fields: set[str] | None = None
     existing_title: str | None = None
     existing_description: str | None = None
     existing_keywords: KeywordSet = field(default_factory=KeywordSet)
@@ -516,6 +525,115 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
 def count_generated(items: Iterable[PhotoItem]) -> int:
     """Count photos with an AI proposal: the batch size the GUI session reports to telemetry."""
     return sum(1 for item in items if item.has_proposal)
+
+
+def reveal_label(platform_name: str) -> str:
+    """Name the OS file browser for the context-menu action ("Reveal in Finder" on macOS)."""
+    if platform_name == "darwin":
+        return "Reveal in Finder"
+    if platform_name.startswith("win"):
+        return "Show in Explorer"
+    return "Show in File Manager"
+
+
+def reveal_command(path: Path, platform_name: str) -> list[str] | None:
+    """
+    Return the argv that reveals *path* selected in the OS file browser, or None.
+
+    None means the platform has no standard "reveal" command (Linux file managers vary), so the
+    caller should fall back to opening the containing folder instead.
+    """
+    if platform_name == "darwin":
+        return ["open", "-R", str(path)]
+    if platform_name.startswith("win"):
+        # Explorer's /select switch takes the path in the same argument, comma-separated.
+        return ["explorer", f"/select,{path}"]
+    return None
+
+
+def file_type_label(path: Path) -> str:
+    """
+    Label a photo's Type column: its extension, plus "+xmp" when an XMP sidecar sits beside it.
+
+    The sidecar check is a plain filesystem stat, so this is cheap enough to run for every file at
+    add time (no exiftool involved).
+    """
+    suffix = path.suffix.lstrip(".").lower()
+    return f"{suffix}+xmp" if path.with_suffix(".xmp").exists() else suffix
+
+
+# Column letters for the Tagged indicator, in display order.
+_FIELD_LETTERS = ((FIELD_TITLE, "T"), (FIELD_DESCRIPTION, "D"), (FIELD_KEYWORDS, "K"))
+
+
+def tagged_summary(fields: set[str]) -> str:
+    """
+    Compress a file's present metadata fields into the Tagged column label.
+
+    "TDK" means title, description, and keywords all exist; "-" means the scan ran and found none.
+    The header tooltip spells out the letters.
+    """
+    letters = "".join(letter for field_name, letter in _FIELD_LETTERS if field_name in fields)
+    return letters or "-"
+
+
+def _toml_str(value: str) -> str:
+    """Quote *value* as a TOML basic string."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _toml_bool(value: bool) -> str:  # noqa: FBT001  # the bool is the value being rendered
+    """Render a TOML boolean."""
+    return "true" if value else "false"
+
+
+def config_toml_text(  # noqa: PLR0913  # one keyword-only parameter per persisted setting
+    *,
+    provider_name: str,
+    model_name: str,
+    api_base_url: str | None,
+    extensions: str,
+    recursive: bool,
+    write_title: bool,
+    write_description: bool,
+    write_keywords: bool,
+    preserve_keywords: bool,
+    use_sidecar: bool,
+    telemetry_enabled: bool,
+) -> str:
+    """
+    Render the GUI's current choices as the TOML config file the CLI and GUI both load.
+
+    Key names mirror the config tables ``load_defaults`` reads ([provider], [output],
+    [telemetry], plus the top-level extensions/recursive). The API key is deliberately not a
+    parameter: it must never be written to disk.
+    """
+    lines = [
+        "# Written by the Photo Tagger GUI (Settings > Save Settings as Defaults).",
+        f"extensions = {_toml_str(extensions)}",
+        f"recursive = {_toml_bool(recursive)}",
+        "",
+        "[provider]",
+        f"provider_name = {_toml_str(provider_name)}",
+        f"model_name = {_toml_str(model_name)}",
+    ]
+    if api_base_url:
+        lines.append(f"api_base_url = {_toml_str(api_base_url)}")
+    lines += [
+        "",
+        "[output]",
+        f"write_title = {_toml_bool(write_title)}",
+        f"write_description = {_toml_bool(write_description)}",
+        f"write_keywords = {_toml_bool(write_keywords)}",
+        f"preserve_keywords = {_toml_bool(preserve_keywords)}",
+        f"use_sidecar = {_toml_bool(use_sidecar)}",
+        "",
+        "[telemetry]",
+        f"enabled = {_toml_bool(telemetry_enabled)}",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 # How long to wait for the login shell to report its PATH before giving up.

@@ -51,9 +51,12 @@ def qapp() -> QApplication:
 
 
 @pytest.fixture
-def window(qapp: QApplication) -> Iterator[gui.MainWindow]:
+def window(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> Iterator[gui.MainWindow]:
     """Yield a fresh main window, closing it (and its thread) after each test."""
     win = gui.MainWindow()
+    # Adding photos kicks off the background exiftool scan for the Tagged column; keep tests
+    # deterministic (and exiftool-free) by driving _on_scan_done directly where needed.
+    monkeypatch.setattr(win, "_start_metadata_scan", lambda: None)
     yield win
     win.close()
 
@@ -312,7 +315,7 @@ def test_tree_sorts_by_status_using_lifecycle_rank(
     for path in (a, b, c):
         window._refresh_status_cell(window._items[str(path)])  # noqa: SLF001
 
-    window._tree.sortByColumn(1, Qt.SortOrder.AscendingOrder)  # noqa: SLF001
+    window._tree.sortByColumn(2, Qt.SortOrder.AscendingOrder)  # noqa: SLF001 - Status column
 
     # Ascending lifecycle: pending(b) < ready(c) < failed(a). Alphabetical-by-label would differ.
     assert _leaf_order(window) == ["b.jpg", "c.jpg", "a.jpg"]
@@ -958,7 +961,7 @@ def test_file_failure_surfaces_reason_on_the_open_photo(
     assert "model unreachable" in window._error_banner.text()  # noqa: SLF001
     leaf = window._leaf_for(img)  # noqa: SLF001
     assert leaf is not None
-    assert leaf.toolTip(1) == "model unreachable"
+    assert leaf.toolTip(2) == "model unreachable"  # Status column
 
 
 def test_opening_a_healthy_photo_hides_the_error_banner(
@@ -1460,6 +1463,199 @@ def test_file_menu_offers_csv_export(window: gui.MainWindow) -> None:
 
 
 def test_scan_options_hold_extensions_and_recursion(window: gui.MainWindow) -> None:
-    """The scan-options popover carries the folder-scan settings with the CLI-like defaults."""
+    """The Add menu's scan options carry the folder-scan settings with the GUI defaults."""
     assert window._extensions.text() == gui.DEFAULT_GUI_EXTENSIONS  # noqa: SLF001
     assert window._recursive.isChecked()  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Tree columns, colors, and context menu
+# ---------------------------------------------------------------------------
+
+
+def test_type_column_shows_extension_and_sidecar(window: gui.MainWindow, tmp_path: Path) -> None:
+    """The Type column shows the extension, plus +xmp when a sidecar sits next to the file."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    (tmp_path / "a.xmp").write_text("<x/>", encoding="utf-8")
+    _add_dir(window, {"a": a, "b": b})
+    leaf_a = window._leaf_for(a)  # noqa: SLF001
+    leaf_b = window._leaf_for(b)  # noqa: SLF001
+    assert leaf_a is not None
+    assert leaf_b is not None
+    assert leaf_a.text(1) == "jpg+xmp"
+    assert leaf_b.text(1) == "jpg"
+
+
+def test_scan_results_fill_the_tagged_column(window: gui.MainWindow, tmp_path: Path) -> None:
+    """A finished metadata scan paints the Tagged column and records the fields."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    leaf = window._leaf_for(img)  # noqa: SLF001
+    assert leaf is not None
+    assert leaf.text(3) == ""  # unknown until the scan reports
+
+    window._on_scan_done({str(img): {FIELD_TITLE, FIELD_KEYWORDS}})  # noqa: SLF001
+
+    assert leaf.text(3) == "TK"
+    assert window._items[str(img)].known_fields == {FIELD_TITLE, FIELD_KEYWORDS}  # noqa: SLF001
+
+
+def test_metadata_scan_worker_emits_string_keyed_presence(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scan worker batches one presence read and emits it keyed by path string."""
+    monkeypatch.setattr(
+        gui,
+        "find_field_presence",
+        lambda paths: {p: {FIELD_TITLE} for p in paths},
+    )
+    results: list[dict] = []
+    worker = gui.MetadataScanWorker([Path("/a.jpg")])
+    worker.done.connect(results.append)
+    worker.run()
+    assert results == [{"/a.jpg": {FIELD_TITLE}}]
+
+
+def test_failed_status_is_painted_red(window: gui.MainWindow, tmp_path: Path) -> None:
+    """A failed photo's Status cell turns red so it stands out in a long list."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    window._on_file_failed(str(img), "boom")  # noqa: SLF001
+    leaf = window._leaf_for(img)  # noqa: SLF001
+    assert leaf is not None
+    brush = leaf.data(2, Qt.ItemDataRole.ForegroundRole)
+    assert brush is not None
+    assert brush.color().name() == "#f85149"
+
+
+def test_context_menu_on_failed_photo_offers_retry(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Right-clicking a failed photo leads with Retry, plus reveal and remove actions."""
+    import sys as sys_module  # noqa: PLC0415 - platform-dependent expected label.
+
+    from photo_tagger.gui_state import reveal_label  # noqa: PLC0415
+
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    window._items[str(img)].status = FAILED  # noqa: SLF001
+
+    menu = window._build_tree_context_menu(window._leaf_for(img))  # noqa: SLF001
+    assert menu is not None
+    texts = [action.text() for action in menu.actions() if action.text()]
+
+    assert texts[0] == "Retry Generation"
+    assert "Generate (Skip Cache)" in texts
+    assert reveal_label(sys_module.platform) in texts
+    assert "Remove From List" in texts
+
+
+def test_context_menu_on_folder_skips_generate_actions(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """A folder's context menu has no per-photo generate entries."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    menu = window._build_tree_context_menu(window._tree.topLevelItem(0))  # noqa: SLF001
+    assert menu is not None
+    texts = [action.text() for action in menu.actions() if action.text()]
+    assert all("Generate" not in text and "Retry" not in text for text in texts)
+    assert "Remove From List" in texts
+
+
+# ---------------------------------------------------------------------------
+# Result cache
+# ---------------------------------------------------------------------------
+
+
+def test_worker_reuses_cached_results(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second run over the same photo hits the cache instead of calling the model."""
+    _stub_generation(monkeypatch)
+    img = _jpeg(tmp_path / "a.jpg")
+    cache_file = tmp_path / "cache.sqlite"
+
+    first = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    done_first: list[Proposal] = []
+    first.file_done.connect(done_first.append)
+    first.run()
+    assert len(done_first) == 1
+    assert cache_file.exists()
+
+    def boom(**_k: object) -> object:
+        msg = "the model was called despite a cache hit"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(gui, "analyze_image_with_ai", boom)
+    second = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+    done_second: list[Proposal] = []
+    second.file_done.connect(done_second.append)
+    second.run()
+
+    assert len(done_second) == 1
+    assert done_second[0].title == "T"
+
+
+def test_cache_toggle_controls_the_active_cache_file(window: gui.MainWindow) -> None:
+    """Caching defaults on; unchecking the Settings toggle disables it for new runs."""
+    assert window._cache_action.isChecked()  # noqa: SLF001
+    assert window._active_cache_file() is not None  # noqa: SLF001
+    window._cache_action.setChecked(False)  # noqa: SLF001
+    assert window._active_cache_file() is None  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Saving settings as the config file
+# ---------------------------------------------------------------------------
+
+
+def test_save_config_writes_the_gui_choices(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Save Settings as Defaults writes a TOML file load_defaults understands, sans API key."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    target = tmp_path / "config.toml"
+    monkeypatch.setattr(gui, "user_config_path", lambda: target)
+    window._model.setCurrentText("qwen/qwen3-vl-30b")  # noqa: SLF001
+    window._api_key.setText("sk-secret")  # noqa: SLF001 - must NOT be written
+    window._extensions.setText("jpg,cr3")  # noqa: SLF001
+    window._embed.setChecked(True)  # noqa: SLF001
+
+    window._save_config()  # noqa: SLF001
+
+    text = target.read_text(encoding="utf-8")
+    assert "sk-secret" not in text
+    data = tomllib.loads(text)
+    assert data["provider"]["model_name"] == "qwen/qwen3-vl-30b"
+    assert data["extensions"] == "jpg,cr3"
+    assert data["output"]["use_sidecar"] is False
+    assert data["telemetry"]["enabled"] is True
+
+
+def test_description_boxes_grow_only_with_content(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A short description keeps its box short; a long one grows it up to the cap."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    short = window._description.minimumHeight()  # noqa: SLF001 - setFixedHeight sets min=max
+    window._description.setPlainText("line\n" * 40)  # noqa: SLF001
+
+    grown = window._description.minimumHeight()  # noqa: SLF001
+    assert grown > short
+    assert grown <= 140  # noqa: PLR2004 - the documented cap
