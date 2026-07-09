@@ -183,6 +183,24 @@ def test_find_tagged_images_returns_empty_for_empty_input() -> None:
     helper.assert_not_called()
 
 
+def test_find_tagged_images_degrades_to_empty_on_exiftool_error(tmp_path: Path) -> None:
+    """An exiftool failure during the tagged check degrades to 'nothing tagged', never raising."""
+    a = tmp_path / "a.cr3"
+    a.write_text("x")
+
+    fake_helper = MagicMock()
+    fake_helper.__enter__.return_value = fake_helper
+    fake_helper.__exit__.return_value = False
+    # ValueError is one of the exiftool error types find_tagged_images guards against.
+    fake_helper.get_tags.side_effect = ValueError("exiftool unavailable")
+
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=fake_helper),
+    ):
+        assert find_tagged_images([a]) == set()
+
+
 def test_find_field_presence_classifies_each_field(tmp_path: Path) -> None:
     """Each image reports exactly the fields whose tags are populated, across its targets."""
     a = tmp_path / "a.cr3"  # title + description, no keywords
