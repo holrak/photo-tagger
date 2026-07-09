@@ -102,18 +102,20 @@ any of them. The status bar reports how many photos were deselected and how many
 
 Selecting a **folder** (rather than a file) shows a **thumbnail grid** of its photos on the right,
 like a contact sheet. Thumbnails load in the background, so a large folder of RAW files stays
-responsive. Click any thumbnail to open that photo's detail (the same as clicking its name in the
-tree). Each thumbnail carries small badges (hover for the explanation): the top-right one tracks the
-lifecycle (red ✗ failed, green ✓ saved, indigo dot for generated-but-not-saved), and the top-left
-ones flag a photo that already has metadata (`M`) or an XMP sidecar (`S`).
+responsive. Click any thumbnail to open that photo's detail, or right-click it for the same menu as
+its row in the tree (retry, skip cache, reveal, remove). Each thumbnail carries small badges (hover
+for the explanation): the top-right one tracks the lifecycle (red ✗ failed, green ✓ saved, indigo
+dot for generated-but-not-saved), and the top-left ones flag a photo that already has metadata (`M`)
+or an XMP sidecar (`S`).
 
 ### 3. Generate proposals
 
-Pick a **Provider** (Ollama, LM Studio, or OpenAI) and a **Model** in the header. Press **Refresh**
-to query the provider for the models it currently serves and pick from the dropdown instead of
-typing; likely vision-capable models are listed first. **Connection...** opens the settings that
-rarely change: a custom **Base URL**, a masked **API key** (leave it blank to fall back to the
-provider's environment variable), and the **Test connection** check for ExifTool and the model.
+Pick a **Provider** (Ollama, LM Studio, llama.cpp, or OpenAI) and a **Model** in the header. Press
+**Refresh** to query the provider for the models it currently serves and pick from the dropdown
+instead of typing; likely vision-capable models are listed first. **Connection...** opens the
+settings that rarely change: a custom **Base URL**, a masked **API key** (leave it blank to fall
+back to the provider's environment variable), and the **Test connection** check for ExifTool and the
+model.
 
 **Generate selected** (in the bottom bar) then runs the model on the checked photos on a background
 thread, building the same contextual prompt as the CLI (existing keywords, location, GPS, camera).
@@ -122,13 +124,15 @@ the batch down.
 
 Results are **cached by default** (see [Configuration](#configuration)): re-running a batch after a
 crash, or generating a folder you partly processed before, reuses the earlier answers for unchanged
-photos instead of calling the model again. Toggle **Settings > Cache AI Results** to turn that off,
-or right-click a single photo and pick **Generate (Skip Cache)** to force a fresh result for it.
+photos instead of calling the model again. Toggle **Settings > Cache AI Results** to turn that off
+for the session, or use the arrow on either **Generate** button (or a photo's right-click menu) for
+a one-time **Skip Cache** run.
 
 To regenerate a single photo without touching your selection, open it and press **Generate this
 photo** in the detail pane, or right-click it in the tree and choose **Generate** (a failed photo
 shows **Retry Generation** there instead). If several photos ended up `failed ✗`, **Retry failed**
-in the bottom bar re-runs the model on all of them at once.
+in the bottom bar re-runs the model on all of them at once (the button stays disabled while nothing
+has failed).
 
 To stop a run early, press **Cancel** (next to *Generate selected*). The photo already in flight
 finishes (a model request cannot be interrupted mid-call), then the run stops and the un-started

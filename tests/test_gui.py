@@ -1225,7 +1225,7 @@ def test_generate_current_targets_only_the_open_photo(
     monkeypatch.setattr(
         window,
         "_run_generation",
-        lambda items: captured.append([i.path for i in items]),
+        lambda items, **_kwargs: captured.append([i.path for i in items]),
     )
     window._generate_current()  # noqa: SLF001
 
@@ -1247,7 +1247,7 @@ def test_generate_targets_checked_photos(
     monkeypatch.setattr(
         window,
         "_run_generation",
-        lambda items: captured.append([i.path for i in items]),
+        lambda items, **_kwargs: captured.append([i.path for i in items]),
     )
     window._generate()  # noqa: SLF001
 
@@ -1466,6 +1466,58 @@ def test_scan_options_hold_extensions_and_recursion(window: gui.MainWindow) -> N
     """The Add menu's scan options carry the folder-scan settings with the GUI defaults."""
     assert window._extensions.text() == gui.DEFAULT_GUI_EXTENSIONS  # noqa: SLF001
     assert window._recursive.isChecked()  # noqa: SLF001
+
+
+def test_retry_button_enabled_only_with_failures(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Retry failed starts disabled, lights up on a failure, and resets with the list."""
+    assert not window._retry_button.isEnabled()  # noqa: SLF001 - nothing failed yet
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    assert not window._retry_button.isEnabled()  # noqa: SLF001
+
+    window._on_file_failed(str(img), "boom")  # noqa: SLF001
+    assert window._retry_button.isEnabled()  # noqa: SLF001
+
+    window._clear()  # noqa: SLF001
+    assert not window._retry_button.isEnabled()  # noqa: SLF001
+
+
+def test_generate_menus_offer_one_time_skip_cache(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Generate split buttons' arrow menus run once without the cache."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001 - so "this photo" has a target
+
+    calls: list[tuple[int, bool]] = []
+    monkeypatch.setattr(
+        window,
+        "_run_generation",
+        lambda items, **kwargs: calls.append((len(items), kwargs.get("use_cache", True))),
+    )
+    window._generate_menu.actions()[0].trigger()  # noqa: SLF001
+    window._generate_one_menu.actions()[0].trigger()  # noqa: SLF001
+
+    assert calls == [(1, False), (1, False)]
+
+
+def test_grid_thumbnails_share_the_context_menu(window: gui.MainWindow) -> None:
+    """The folder grid asks for the same custom context menu as the tree."""
+    policy = window._grid.contextMenuPolicy()  # noqa: SLF001
+    assert policy == Qt.ContextMenuPolicy.CustomContextMenu
+
+
+def test_help_menu_links_the_documentation(window: gui.MainWindow) -> None:
+    """Help offers a Documentation entry pointing at the hosted docs."""
+    texts = [action.text() for action in window._help_menu.actions()]  # noqa: SLF001
+    assert "Documentation" in texts
 
 
 # ---------------------------------------------------------------------------

@@ -183,6 +183,8 @@ _STATUS_COLOR = {FAILED: QColor("#f85149"), SAVED: QColor("#3fb950")}
 # The GUI cache lives next to the GUI logs unless the config names a cache_file. Sharing the
 # CLI's default would be wrong: the CLI has no default cache, it only caches when asked.
 _DEFAULT_CACHE_FILE = Path.home() / ".photo-tagger" / "cache.sqlite"
+
+_DOCS_URL = "https://jbsilva.github.io/photo-tagger/"
 _PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" placeholder
 _PAGE_DETAIL = 1  # right-pane stack index for one photo's detail
 _PAGE_GRID = 2  # right-pane stack index for a folder's thumbnail grid
@@ -274,18 +276,37 @@ QPushButton#menubutton { padding-right: 28px; }
 QTreeWidget::item { padding: 2px; }
 QToolButton { border: none; background: transparent; padding: 4px; font-weight: 600; }
 QToolButton:hover { color: #6366f1; }
-QToolButton#add {
+QToolButton#add, QToolButton#split {
     padding: 6px 26px 6px 12px; border-radius: 6px; font-weight: 400;
     border: 1px solid rgba(130, 130, 140, 60%);
     background: rgba(130, 130, 140, 14%);
 }
-QToolButton#add:hover { background: rgba(130, 130, 140, 26%); }
-QToolButton#add::menu-button {
+QToolButton#add:hover, QToolButton#split:hover { background: rgba(130, 130, 140, 26%); }
+QToolButton#split:disabled { color: rgba(130, 130, 140, 70%); }
+QToolButton#add::menu-button, QToolButton#split::menu-button {
     border: none; width: 22px;
     border-left: 1px solid rgba(130, 130, 140, 45%);
     margin-top: 6px; margin-bottom: 6px;
 }
-QToolButton#add::menu-arrow { image: url("@CHEVRON@"); width: 10px; height: 6px; }
+QToolButton#add::menu-arrow, QToolButton#split::menu-arrow {
+    image: url("@CHEVRON@"); width: 10px; height: 6px;
+}
+QToolButton#primarysplit {
+    padding: 6px 26px 6px 12px; border-radius: 6px; font-weight: 600;
+    background: #6366f1; color: white; border: 1px solid #6366f1;
+}
+QToolButton#primarysplit:hover { background: #4f46e5; border-color: #4f46e5; }
+QToolButton#primarysplit:disabled {
+    background: #9aa0e8; border-color: #9aa0e8; color: #eaeaff;
+}
+QToolButton#primarysplit::menu-button {
+    border: none; width: 22px;
+    border-left: 1px solid rgba(255, 255, 255, 40%);
+    margin-top: 6px; margin-bottom: 6px;
+}
+QToolButton#primarysplit::menu-arrow {
+    image: url("@CHEVRONLIGHT@"); width: 10px; height: 6px;
+}
 QProgressBar {
     border: 1px solid rgba(130, 130, 140, 60%); border-radius: 5px; text-align: center;
 }
@@ -304,7 +325,8 @@ QLabel#error {
 def _stylesheet() -> str:
     """Resolve the stylesheet's image placeholders to the bundled resource files."""
     chevron = (_RESOURCES / "chevron-down.svg").as_posix()
-    return _STYLESHEET.replace("@CHEVRON@", chevron)
+    chevron_light = (_RESOURCES / "chevron-down-light.svg").as_posix()
+    return _STYLESHEET.replace("@CHEVRONLIGHT@", chevron_light).replace("@CHEVRON@", chevron)
 
 
 def _app_icon() -> QIcon:
@@ -701,7 +723,12 @@ class MainWindow(QMainWindow):
             "surface (prompt file, sampling, workers, filters, ...). Created if missing.",
         )
 
-        help_menu = menubar.addMenu("Help")
+        help_menu = self._help_menu = menubar.addMenu("Help")
+        help_menu.addAction(
+            "Documentation",
+            lambda: QDesktopServices.openUrl(QUrl(_DOCS_URL)),
+        )
+        help_menu.addSeparator()
         help_menu.addAction("Test Connection", self._test_connection)
         help_menu.addAction("Open Logs", self._open_logs)
         help_menu.addSeparator()
@@ -843,8 +870,8 @@ class MainWindow(QMainWindow):
         self._api_key.setPlaceholderText("(uses provider env var)")
         self._api_key.setToolTip(
             "API key for the provider. Leave blank to use the provider's environment variable "
-            "(OPENAI_API_KEY, LM_STUDIO_API_KEY, or OLLAMA_API_KEY). Required for OpenAI. A typed "
-            "key is used for this session only and is never written to disk.",
+            "(OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or OLLAMA_API_KEY). Required "
+            "for OpenAI. A typed key is used for this session only and is never written to disk.",
         )
         form.addRow("API key", self._api_key)
 
@@ -1035,6 +1062,15 @@ class MainWindow(QMainWindow):
         )
         return menu
 
+    def _on_grid_context_menu(self, pos: object) -> None:
+        """Offer a thumbnail the same right-click actions as its row in the tree."""
+        grid_item = self._grid.itemAt(pos)
+        if grid_item is None:
+            return
+        menu = self._build_tree_context_menu(self._leaf_for(Path(grid_item.data(_PATH_ROLE))))
+        if menu is not None:
+            menu.exec(self._grid.viewport().mapToGlobal(pos))
+
     def _reveal(self, path: Path) -> None:
         """Show *path* selected in the OS file browser, or open its folder where unsupported."""
         argv = reveal_command(path, sys.platform)
@@ -1119,6 +1155,9 @@ class MainWindow(QMainWindow):
         grid.setUniformItemSizes(True)
         grid.setWordWrap(True)
         grid.itemClicked.connect(self._on_thumb_activated)
+        # Thumbnails answer to the same right-click menu as their row in the tree.
+        grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        grid.customContextMenuRequested.connect(self._on_grid_context_menu)
         self._grid = grid
         return grid
 
@@ -1298,11 +1337,24 @@ class MainWindow(QMainWindow):
         """Per-photo actions at the bottom of the detail pane; batch actions live below."""
         row = QHBoxLayout()
         row.addStretch(1)
-        self._generate_one_button = QPushButton("Generate this photo")
+        self._generate_one_button = QToolButton()
+        self._generate_one_button.setObjectName("split")
+        self._generate_one_button.setText("Generate this photo")
         self._generate_one_button.setToolTip(
             "Run the model on just this photo, regardless of which photos are checked.",
         )
-        self._generate_one_button.clicked.connect(self._generate_current)
+        self._generate_one_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self._generate_one_button.clicked.connect(
+            lambda: self._generate_current(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
+        )
+        self._generate_one_menu = QMenu(self)
+        self._generate_one_menu.setToolTipsVisible(True)
+        skip_one = self._generate_one_menu.addAction(
+            "Generate This Photo (Skip Cache)",
+            lambda: self._generate_current(use_cache=False),
+        )
+        skip_one.setToolTip("One-time: call the model even when a cached result exists.")
+        self._generate_one_button.setMenu(self._generate_one_menu)
         self._save_button = QPushButton("Save this photo")
         self._save_button.setToolTip(
             "Write this photo's fields, honoring the Save options next to Save selected.",
@@ -1322,7 +1374,11 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
 
         self._retry_button = QPushButton("Retry failed")
-        self._retry_button.setToolTip("Re-run the model on every photo that failed to generate.")
+        self._retry_button.setToolTip(
+            "Re-run the model on every photo that failed to generate. Enabled once a photo "
+            "has actually failed.",
+        )
+        self._retry_button.setEnabled(False)
         self._retry_button.clicked.connect(self._retry_failed)
         self._cancel_button = QPushButton("Cancel")
         self._cancel_button.setToolTip(
@@ -1332,10 +1388,25 @@ class MainWindow(QMainWindow):
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._cancel_generation)
 
-        self._generate_button = QPushButton("Generate selected")
-        self._generate_button.setObjectName("primary")
+        # A split button: a click generates normally (cache included); the arrow offers the
+        # one-time skip-cache run without changing the Settings toggle.
+        self._generate_button = QToolButton()
+        self._generate_button.setObjectName("primarysplit")
+        self._generate_button.setText("Generate selected")
         self._generate_button.setToolTip("Run the model on the checked photos.")
-        self._generate_button.clicked.connect(self._generate)
+        self._generate_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self._generate_button.clicked.connect(
+            lambda: self._generate(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
+        )
+        # Kept on self: Qt's menu() accessor returns a transient wrapper shiboken may delete.
+        self._generate_menu = QMenu(self)
+        self._generate_menu.setToolTipsVisible(True)
+        skip_all = self._generate_menu.addAction(
+            "Generate Selected (Skip Cache)",
+            lambda: self._generate(use_cache=False),
+        )
+        skip_all.setToolTip("One-time: call the model even for photos with cached results.")
+        self._generate_button.setMenu(self._generate_menu)
 
         save_options = QPushButton("Save options")
         save_options.setObjectName("menubutton")
@@ -1434,6 +1505,7 @@ class MainWindow(QMainWindow):
         self._rebuild_tree()
         self._show_empty()
         self._status.setText("Drag photos or folders here to begin.")
+        self._retry_button.setEnabled(False)
 
     def _deselect(self, paths: set[Path]) -> int:
         """Uncheck the matched photos and refresh the tree; return how many changed."""
@@ -1888,18 +1960,18 @@ class MainWindow(QMainWindow):
 
     # --- generation ------------------------------------------------------------------------
 
-    def _generate(self) -> None:
+    def _generate(self, *, use_cache: bool = True) -> None:
         selected = [item for item in self._items.values() if item.selected]
         if not selected:
             self._status.setText("Check at least one photo first.")
             return
-        self._run_generation(selected)
+        self._run_generation(selected, use_cache=use_cache)
 
-    def _generate_current(self) -> None:
+    def _generate_current(self, *, use_cache: bool = True) -> None:
         if self._current is None:
             self._status.setText("Open a photo to generate it.")
             return
-        self._run_generation([self._current])
+        self._run_generation([self._current], use_cache=use_cache)
 
     def _retry_failed(self) -> None:
         failed = [item for item in self._items.values() if item.status == FAILED]
@@ -1992,10 +2064,14 @@ class MainWindow(QMainWindow):
                 reset += 1
         return reset
 
+    def _has_failures(self) -> bool:
+        """Report whether any photo is currently in the failed state."""
+        return any(item.status == FAILED for item in self._items.values())
+
     def _set_running(self, *, running: bool, total: int = 0) -> None:
         self._generate_button.setEnabled(not running)
         self._generate_one_button.setEnabled(not running)
-        self._retry_button.setEnabled(not running)
+        self._retry_button.setEnabled(not running and self._has_failures())
         self._test_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)
         self._progress.setVisible(running)
@@ -2123,6 +2199,9 @@ class MainWindow(QMainWindow):
     def _update_status(self) -> None:
         if self._items:
             self._status.setText(status_summary(self._items.values()))
+        # Retry only makes sense when something actually failed (and no run is in flight).
+        if self._thread is None:
+            self._retry_button.setEnabled(self._has_failures())
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override.
         """
