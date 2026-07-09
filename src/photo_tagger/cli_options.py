@@ -26,6 +26,7 @@ from photo_tagger.config import (
     DEFAULT_JPEG_QUALITY,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_NAME,
+    DEFAULT_OUTPUT_LANGUAGE,
     DEFAULT_RETRIES,
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT_SECONDS,
@@ -80,8 +81,18 @@ class ProviderConfig:
 
 @dataclass
 class InferenceConfig:
-    """Sampling and image-encoding knobs sent to the model."""
+    """Sampling, prompt-language, and image-encoding knobs sent to the model."""
 
+    output_language: Annotated[
+        str,
+        Parameter(
+            name=("--output-language", "--lang"),
+            help=(
+                "Language for the generated title, description, and keywords (any language "
+                "name the model understands, e.g. 'German' or 'Brazilian Portuguese')"
+            ),
+        ),
+    ] = DEFAULT_OUTPUT_LANGUAGE
     temperature: Annotated[
         float,
         Parameter(name=("--temperature",), help="Sampling temperature (0.0-1.0)"),

@@ -115,17 +115,22 @@ TAG_XMP_TITLE = "XMP:Title"
 TAG_XMP_DESCRIPTION = "XMP:Description"
 TAG_EXIF_IMAGE_DESCRIPTION = "EXIF:ImageDescription"
 
+# The language the model writes titles, descriptions, and keywords in. Any language name the
+# model understands works ("German", "Brazilian Portuguese", ...); it is spliced into the system
+# prompt as-is.
+DEFAULT_OUTPUT_LANGUAGE = "English"
+
 # Plain text only. The OpenAI-compatible chat completion endpoint wraps this in the
 # model's chat template (e.g. <|im_start|>system ... <|im_end|> for Qwen), so embedding
 # template tokens here would cause them to be applied twice and corrupt the prompt.
-DEFAULT_SYSTEM_PROMPT = (
+_SYSTEM_PROMPT_TEMPLATE = (
     "You generate structured metadata for a single photograph. Output must conform to the schema "
     "provided by the user.\n"
     "\n"
     "**Fields**:\n"
-    "- Title: under 10 words, descriptive, Title Case, English.\n"
-    "- Description: one sentence, 15-25 words, present tense, English.\n"
-    "- Keywords: up to 15 flat keywords, Title Case, English. Cover subject, setting, action, "
+    "- Title: under 10 words, descriptive, Title Case, {language}.\n"
+    "- Description: one sentence, 15-25 words, present tense, {language}.\n"
+    "- Keywords: up to 15 flat keywords, Title Case, {language}. Cover subject, setting, action, "
     "mood, and style. Every keyword must be supported by something visible in the image.\n"
     "- Hierarchies: a SEPARATE list (the 'hierarchies' field, not 'keywords'). For each keyword "
     "that has a natural taxonomy, add one chain written specific-to-general with '<' as the "
@@ -134,8 +139,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "alternative parents for the same keyword. "
     "Populate this field whenever a subject, place, or object has an obvious parent category; "
     "leave it empty only when nothing in the image has one.\n"
-    "- Language: English only, Latin script, in every field. Never mix scripts within a keyword "
-    "or append a translation to one (write 'Bird Perching', never 'Bird栖息').\n"
+    "- Language: {language} only, in every field, including every hierarchy segment. Never mix "
+    "languages or scripts within a keyword or append a translation to one (write 'Bird Perching', "
+    "never 'Bird栖息').\n"
     "\n"
     "**Ground truth is the image.** The 'Existing Metadata' block, when present in the user "
     "message, is corroborative evidence only. Use it to disambiguate or specify what you already "
@@ -153,6 +159,20 @@ DEFAULT_SYSTEM_PROMPT = (
     "rather than 'Golden Eagle' if you cannot tell. Do not invent species, person names, or place "
     "names.\n"
 )
+
+
+def build_system_prompt(output_language: str = DEFAULT_OUTPUT_LANGUAGE) -> str:
+    """
+    Render the system prompt for *output_language*.
+
+    The language name lands in the prompt verbatim, so any name the model understands works. The
+    examples stay in English on purpose: they illustrate structure (hierarchy chains, no mixed
+    scripts), which models transfer to the target language.
+    """
+    return _SYSTEM_PROMPT_TEMPLATE.format(language=output_language)
+
+
+DEFAULT_SYSTEM_PROMPT = build_system_prompt()
 
 DEFAULT_USER_PROMPT = (
     "Execute your mission: analyze this image and generate the structured metadata."

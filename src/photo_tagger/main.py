@@ -427,6 +427,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     artifacts: ArtifactConfig,
     provider: ProviderConfig,
     options: ProcessingOptions,
+    output_language: str,
     log: LogConfig,
     telemetry_enabled: bool,
 ) -> None:
@@ -468,6 +469,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         frequency_penalty=options.frequency_penalty,
         jpeg_dimensions=options.jpeg_dimensions,
         jpeg_quality=options.jpeg_quality,
+        output_language=output_language,
         retries=provider.retries,
         log_folder=str(log.log_folder),
     )
@@ -651,6 +653,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         artifacts=artifacts,
         provider=provider,
         options=options,
+        output_language=inference.output_language,
         log=log,
         telemetry_enabled=telemetry_config.enabled,
     )
@@ -676,8 +679,9 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         api_base_url=provider.api_base_url,
         api_key=provider.api_key,
         retries=provider.retries,
+        output_language=inference.output_language,
     )
-    # Fold the prompt + sampling/JPEG settings into the cache namespace so a
+    # Fold the prompt + language + sampling/JPEG settings into the cache namespace so a
     # different configuration writes to a fresh slice instead of replaying
     # stale entries generated under earlier settings.
     cache_namespace = build_cache_namespace(
@@ -688,6 +692,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         frequency_penalty=inference.frequency_penalty,
         jpeg_dimensions=inference.jpeg_dimensions,
         jpeg_quality=inference.jpeg_quality,
+        output_language=inference.output_language,
     )
     cache = open_cache(artifacts.cache_file, namespace=cache_namespace)
     started_at = datetime.now(tz=UTC)

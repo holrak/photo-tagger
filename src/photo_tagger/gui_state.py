@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import tomlkit
 
+from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.i18n import AUTO, _, ngettext
@@ -44,6 +45,24 @@ FAILED = "failed"  # generation or save failed
 # A broad, common default for the GUI's folder-scan extensions. Each distinct extension is listed
 # because matching is case-insensitive but not variant-aware (jpg does not cover jpeg).
 DEFAULT_GUI_EXTENSIONS = "jpg,jpeg,png,dng,cr3,nef,arw,heic,heif,tif,tiff,webp"
+
+# Pre-filled choices for the metadata-language combo. English names on purpose: the value is
+# spliced into the (English) system prompt as-is, and the combo stays editable, so any language
+# the model understands can still be typed.
+OUTPUT_LANGUAGE_SUGGESTIONS = (
+    DEFAULT_OUTPUT_LANGUAGE,
+    "Brazilian Portuguese",
+    "Dutch",
+    "French",
+    "German",
+    "Italian",
+    "Japanese",
+    "Korean",
+    "Portuguese",
+    "Russian",
+    "Simplified Chinese",
+    "Spanish",
+)
 
 # Substrings that hint a model is vision-capable, used to surface likely picks first.
 _VISION_HINTS = (
@@ -726,6 +745,27 @@ def config_text_with_language(existing_text: str, language: str) -> str:
         document.pop("language", None)
     else:
         document["language"] = language
+    return tomlkit.dumps(document)
+
+
+def config_text_with_output_language(existing_text: str, language: str) -> str:
+    """
+    Set ``[inference] output_language`` in a TOML config, preserving everything else.
+
+    The key the CLI's ``--output-language`` flag reads its default from, so the GUI choice carries
+    over to CLI runs too. Choosing the built-in default (English) removes the key instead of pinning
+    it, mirroring :func:`config_text_with_language`; an ``[inference]`` table left empty by that
+    removal is dropped as well.
+    """
+    document = tomlkit.parse(existing_text)
+    if language.strip().casefold() == DEFAULT_OUTPUT_LANGUAGE.casefold():
+        inference = document.get("inference")
+        if inference is not None:
+            inference.pop("output_language", None)
+            if not inference:
+                document.pop("inference", None)
+    else:
+        document.setdefault("inference", tomlkit.table())["output_language"] = language.strip()
     return tomlkit.dumps(document)
 
 

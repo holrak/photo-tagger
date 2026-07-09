@@ -71,7 +71,7 @@ default value, so you can copy it and change only what you need.
 extensions = "cr3,jpg"   # Comma-separated extensions used when scanning directories.
 recursive = false        # Recurse into subdirectories while scanning input directories.
 workers = 1              # Process N photos concurrently with a thread pool.
-language = "auto"        # GUI language: "auto" (OS default), "en", or "pt_BR".
+language = "auto"        # GUI interface language: "auto" (OS default), "en", or "pt_BR".
 
 [provider]
 model_name = "qwen/qwen3-vl-30b"          # Vision-language model identifier.
@@ -81,6 +81,7 @@ api_base_url = "http://localhost:1234/v1" # Provider API base URL.
 retries = 5                               # Retries when output fails schema validation.
 
 [inference]
+output_language = "English"  # Language of generated titles, descriptions, and keywords.
 temperature = 0.2        # Sampling temperature.
 max_tokens = 1200        # Maximum tokens to generate.
 timeout_seconds = 60.0   # Per-image inference timeout in seconds.

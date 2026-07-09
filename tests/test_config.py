@@ -1,8 +1,33 @@
-"""Tests for environment-variable parsing helpers in photo_tagger.config."""
+"""Tests for environment-variable parsing helpers and prompts in photo_tagger.config."""
 
 import pytest
 
-from photo_tagger.config import _env_float, _env_int, exiftool_executable
+from photo_tagger.config import (
+    DEFAULT_OUTPUT_LANGUAGE,
+    DEFAULT_SYSTEM_PROMPT,
+    _env_float,
+    _env_int,
+    build_system_prompt,
+    exiftool_executable,
+)
+
+
+def test_build_system_prompt_defaults_to_english() -> None:
+    """With no argument the prompt asks for English and is what DEFAULT_SYSTEM_PROMPT holds."""
+    prompt = build_system_prompt()
+    assert DEFAULT_OUTPUT_LANGUAGE == "English"
+    assert "Title Case, English." in prompt
+    assert "English only, in every field" in prompt
+    assert prompt == DEFAULT_SYSTEM_PROMPT
+
+
+def test_build_system_prompt_swaps_in_the_requested_language() -> None:
+    """A chosen language replaces English in every field rule, leaving no placeholder behind."""
+    prompt = build_system_prompt("Brazilian Portuguese")
+    assert "Title Case, Brazilian Portuguese." in prompt
+    assert "Brazilian Portuguese only, in every field" in prompt
+    assert "{language}" not in prompt
+    assert "English" not in prompt
 
 
 def test_exiftool_executable_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:

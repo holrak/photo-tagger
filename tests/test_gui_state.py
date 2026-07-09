@@ -30,6 +30,7 @@ from photo_tagger.gui_state import (
     build_tree,
     chain_to_display,
     config_text_with_language,
+    config_text_with_output_language,
     config_toml_text,
     count_generated,
     deselect_paths,
@@ -616,6 +617,39 @@ def test_config_text_with_language_works_on_an_empty_file() -> None:
     """A missing config starts from empty text and still gets the key."""
     assert 'language = "en"' in config_text_with_language("", "en")
     assert config_text_with_language("", "auto") == ""
+
+
+def test_config_text_with_output_language_sets_and_preserves() -> None:
+    """Setting a metadata language keeps comments and unrelated [inference] keys intact."""
+    existing = '# my config\nextensions = "jpg"\n\n[inference]\ntemperature = 0.3\n'
+    result = config_text_with_output_language(existing, "German")
+    assert 'output_language = "German"' in result
+    assert "# my config" in result
+    assert "temperature = 0.3" in result
+
+
+def test_config_text_with_output_language_default_removes_the_key() -> None:
+    """Choosing English again (any casing) unpins the key but keeps the table's other keys."""
+    existing = '[inference]\noutput_language = "German"\ntemperature = 0.3\n'
+    result = config_text_with_output_language(existing, "english")
+    assert "output_language" not in result
+    assert "temperature = 0.3" in result
+
+
+def test_config_text_with_output_language_drops_an_emptied_table() -> None:
+    """Removing the key also removes an [inference] table that held nothing else."""
+    existing = 'extensions = "jpg"\n\n[inference]\noutput_language = "German"\n'
+    result = config_text_with_output_language(existing, "English")
+    assert "inference" not in result
+    assert 'extensions = "jpg"' in result
+
+
+def test_config_text_with_output_language_works_on_an_empty_file() -> None:
+    """A missing config starts from empty text; the default writes nothing at all."""
+    result = config_text_with_output_language("", "Spanish")
+    assert "[inference]" in result
+    assert 'output_language = "Spanish"' in result
+    assert config_text_with_output_language("", "English") == ""
 
 
 def test_count_generated_counts_only_proposed_photos() -> None:

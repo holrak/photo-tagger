@@ -196,6 +196,31 @@ def test_worker_passes_typed_api_key_to_create_agent(
     assert captured["api_key"] == "sk-worker"
 
 
+def test_worker_passes_output_language_to_create_agent(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generate worker forwards its metadata language to create_agent."""
+    captured: dict[str, object] = {}
+
+    def fake_create_agent(*_a: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        msg = "stop before per-photo work"
+        raise ProviderError(msg)
+
+    monkeypatch.setattr(gui, "create_agent", fake_create_agent)
+    worker = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [Path("/a.jpg")],
+        output_language="German",
+    )
+    worker.file_failed.connect(lambda *_a: None)
+    worker.run()
+    assert captured["output_language"] == "German"
+
+
 def test_run_generation_builds_worker_with_typed_api_key(
     window: gui.MainWindow,
     tmp_path: Path,
@@ -212,6 +237,25 @@ def test_run_generation_builds_worker_with_typed_api_key(
     worker = window._worker  # noqa: SLF001
     assert worker is not None
     assert worker._api_key == "sk-run"  # noqa: SLF001
+    window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
+
+
+def test_run_generation_hands_the_metadata_language_to_the_worker(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting a run passes the window's metadata language to the worker it spawns."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_generation(monkeypatch)  # so the background worker does no real I/O
+    _add_dir(window, {"a": img})
+    window._output_language = "German"  # noqa: SLF001
+
+    window._run_generation([window._items[str(img)]])  # noqa: SLF001
+
+    worker = window._worker  # noqa: SLF001
+    assert worker is not None
+    assert worker._output_language == "German"  # noqa: SLF001
     window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
 
 
@@ -1396,6 +1440,43 @@ def test_language_choice_persists_to_the_config_file(
 
     window._set_language("auto")  # noqa: SLF001
     assert "language" not in target.read_text(encoding="utf-8")
+
+
+def test_output_language_defaults_to_english_and_persists(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The metadata language starts at English; a choice persists and English unpins it."""
+    assert window._output_language == "English"  # noqa: SLF001
+    assert window._output_language_combo.currentText() == "English"  # noqa: SLF001
+    target = tmp_path / "config.toml"
+    target.write_text('# keep me\nextensions = "jpg"\n', encoding="utf-8")
+    monkeypatch.setattr(gui, "find_config_file", lambda: target)
+
+    window._set_output_language("Brazilian Portuguese")  # noqa: SLF001
+    text = target.read_text(encoding="utf-8")
+    assert 'output_language = "Brazilian Portuguese"' in text
+    assert "# keep me" in text
+    assert window._output_language == "Brazilian Portuguese"  # noqa: SLF001
+    assert "Brazilian Portuguese" in window._status.text()  # noqa: SLF001
+
+    window._set_output_language("English")  # noqa: SLF001
+    assert "output_language" not in target.read_text(encoding="utf-8")
+
+
+def test_output_language_blank_means_the_default(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Clearing the combo falls back to English instead of sending an empty language."""
+    target = tmp_path / "config.toml"
+    monkeypatch.setattr(gui, "find_config_file", lambda: target)
+    window._set_output_language("German")  # noqa: SLF001
+    window._set_output_language("   ")  # noqa: SLF001
+    assert window._output_language == "English"  # noqa: SLF001
+    assert "output_language" not in target.read_text(encoding="utf-8")
 
 
 def test_telemetry_toggle_reflects_saved_off_preference(qapp: QApplication) -> None:

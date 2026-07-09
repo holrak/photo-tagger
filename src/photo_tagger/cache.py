@@ -2,7 +2,7 @@
 SQLite-backed cache for vision-language inference results.
 
 Keyed by (image content hash, namespace), where the namespace combines model name with a digest of
-every other input that influences output: base user prompt, sampling settings, JPEG
+every other input that influences output: base user prompt, output language, sampling settings, JPEG
 quality/dimensions. Reruns with identical inputs skip the model call; reruns with any of those
 changed automatically land in a fresh namespace instead of replaying stale results.
 
@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Self
 
 from loguru import logger
 
+from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.models import InferenceResult
 
 
@@ -49,6 +50,7 @@ def build_cache_namespace(  # noqa: PLR0913 - each kwarg is a distinct input to 
     frequency_penalty: float,
     jpeg_dimensions: int,
     jpeg_quality: int,
+    output_language: str = DEFAULT_OUTPUT_LANGUAGE,
 ) -> str:
     """
     Combine *model_name* with a digest of every other inference input.
@@ -57,14 +59,16 @@ def build_cache_namespace(  # noqa: PLR0913 - each kwarg is a distinct input to 
     match on every argument share cache entries; if any of them differs the digest changes and the
     cache treats them as separate namespaces.
 
-    The system prompt is intentionally NOT folded in: it ships with the code, so a different system
-    prompt means a new release, which is the right moment for a stale cache to be re-validated by
-    the user anyway.
+    The system prompt text is intentionally NOT folded in: it ships with the code, so a different
+    system prompt means a new release, which is the right moment for a stale cache to be
+    re-validated by the user anyway. Its one runtime-configurable input, *output_language*, IS
+    folded in, so switching language never replays results generated in the old one.
     """
     h = hashlib.blake2b(digest_size=_CONFIG_DIGEST_BYTES)
     payload = (
         f"{user_prompt}\0t={temperature}\0n={max_tokens}"
         f"\0fp={frequency_penalty}\0d={jpeg_dimensions}\0q={jpeg_quality}"
+        f"\0l={output_language}"
     )
     h.update(payload.encode("utf-8"))
     return f"{model_name}#{h.hexdigest()}"

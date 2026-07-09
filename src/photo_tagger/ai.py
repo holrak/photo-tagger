@@ -10,10 +10,11 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
     DEFAULT_MAX_TOKENS,
-    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_OUTPUT_LANGUAGE,
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_USER_PROMPT,
+    build_system_prompt,
 )
 from photo_tagger.errors import ProviderError
 from photo_tagger.keywords import dedupe_keywords
@@ -25,15 +26,21 @@ if TYPE_CHECKING:
     from pydantic_ai import BinaryContent
 
 
-def create_agent(
+def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent knob
     provider_name: ProviderName,
     model_name: str,
     *,
     api_base_url: str | None,
     api_key: str | None,
     retries: int,
+    output_language: str = DEFAULT_OUTPUT_LANGUAGE,
 ) -> Agent[None, GeneratedMetadata]:
-    """Build a configured pydantic-ai Agent backed by the requested provider."""
+    """
+    Build a configured pydantic-ai Agent backed by the requested provider.
+
+    *output_language* is the language the system prompt asks for in every generated field (title,
+    description, keywords, hierarchy segments).
+    """
     backend = get_backend(provider_name)
     resolved_url = api_base_url or backend.default_base_url
     if api_base_url is None:
@@ -43,6 +50,7 @@ def create_agent(
         provider=provider_name,
         url=resolved_url,
         model=model_name,
+        output_language=output_language,
     )
 
     resolved_api_key = backend.resolve_api_key(api_key)
@@ -65,7 +73,7 @@ def create_agent(
         chat_model,
         output_type=GeneratedMetadata,  # type: ignore[arg-type]
         retries=retries,
-        system_prompt=DEFAULT_SYSTEM_PROMPT,
+        system_prompt=build_system_prompt(output_language),
     )
 
 

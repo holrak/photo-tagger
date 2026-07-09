@@ -8,6 +8,13 @@ The desktop GUI is translated at runtime with GNU gettext. English is the source
 Portuguese (`pt_BR`) ships complete. The CLI's `--help` text and the structured log events
 intentionally stay in English so scripts and bug reports remain grep-able.
 
+!!! note
+
+    This page is about the language of the **interface**. The language of the generated metadata
+    (titles, descriptions, keywords) is a separate, free-form setting: **Settings > Metadata Language**
+    in the GUI, [`--output-language`](cli-reference.md#inference) in the CLI, or `output_language` under
+    `[inference]` in the [config file](../getting-started/configuration.md).
+
 ## Choosing a language
 
 By default the GUI follows the operating system's language and falls back to English when there is

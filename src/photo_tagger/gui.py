@@ -100,6 +100,7 @@ from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
     DEFAULT_JPEG_QUALITY,
     DEFAULT_MAX_TOKENS,
+    DEFAULT_OUTPUT_LANGUAGE,
     DEFAULT_TEMPERATURE,
     DEFAULT_USER_PROMPT,
 )
@@ -117,6 +118,7 @@ from photo_tagger.gui_state import (
     BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
+    OUTPUT_LANGUAGE_SUGGESTIONS,
     PENDING,
     READY,
     REMOVED,
@@ -129,6 +131,7 @@ from photo_tagger.gui_state import (
     apply_proposal,
     build_tree,
     config_text_with_language,
+    config_text_with_output_language,
     config_toml_text,
     count_generated,
     deselect_paths,
@@ -405,6 +408,7 @@ class GenerateWorker(QObject):
         paths: list[Path],
         api_key: str | None = None,
         cache_file: Path | None = None,
+        output_language: str = DEFAULT_OUTPUT_LANGUAGE,
     ) -> None:
         """Store the run parameters; nothing happens until :meth:`run`."""
         super().__init__()
@@ -414,6 +418,7 @@ class GenerateWorker(QObject):
         self._paths = paths
         self._api_key = api_key
         self._cache_file = cache_file
+        self._output_language = output_language
         self._stop = False
 
     def stop(self) -> None:
@@ -434,6 +439,7 @@ class GenerateWorker(QObject):
                 api_base_url=self._api_base_url,
                 api_key=self._api_key,
                 retries=_GENERATE_RETRIES,
+                output_language=self._output_language,
             )
         except PhotoTaggerError as exc:
             for path in self._paths:
@@ -462,7 +468,10 @@ class GenerateWorker(QObject):
 
     def _open_cache(self) -> InferenceCache | None:
         """Open the result cache for this run, degrading to no cache on any failure."""
-        return open_cache(self._cache_file, namespace=_gui_cache_namespace(self._model))
+        return open_cache(
+            self._cache_file,
+            namespace=_gui_cache_namespace(self._model, self._output_language),
+        )
 
     def _generate_one(self, agent: object, path: Path, cache: InferenceCache | None) -> Proposal:
         """Read existing metadata, run the model (or hit the cache), and assemble a proposal."""
@@ -579,12 +588,13 @@ class MetadataScanWorker(QObject):
         self.finished.emit()
 
 
-def _gui_cache_namespace(model: str) -> str:
+def _gui_cache_namespace(model: str, output_language: str) -> str:
     """
     Build the cache namespace for GUI runs: the model plus the GUI's fixed inference settings.
 
     The GUI runs the agent with the library defaults and sends images at ``_PREVIEW_MAX``, so those
-    values (not the CLI flags) are what key its cache entries.
+    values (not the CLI flags) are what key its cache entries. The metadata language rides along so
+    switching it never replays results generated in the old language.
     """
     return build_cache_namespace(
         model,
@@ -594,6 +604,7 @@ def _gui_cache_namespace(model: str) -> str:
         frequency_penalty=DEFAULT_FREQUENCY_PENALTY,
         jpeg_dimensions=_PREVIEW_MAX,
         jpeg_quality=DEFAULT_JPEG_QUALITY,
+        output_language=output_language,
     )
 
 
@@ -667,6 +678,9 @@ class MainWindow(QMainWindow):
         # The persisted UI language choice; "auto" means follow the OS locale. Changing it in the
         # Settings menu rewrites this key and takes effect on the next launch.
         self._language = str(self._raw_config.get("language", i18n.AUTO))
+        # The language the model writes titles, descriptions, and keywords in. Distinct from the
+        # UI language above; persisted under [inference] output_language, which the CLI shares.
+        self._output_language = self._defaults.inference.output_language
         self._cache_file = self._defaults.artifacts.cache_file or _DEFAULT_CACHE_FILE
         # Wall-clock start of this GUI session, reported as the run duration on close.
         self._session_start = time.monotonic()
@@ -751,6 +765,7 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(self._telemetry_action)
         settings_menu.addSeparator()
         self._build_language_menu(settings_menu)
+        self._build_output_language_menu(settings_menu)
         settings_menu.addSeparator()
         save_defaults = settings_menu.addAction(
             _("Save Settings as Defaults..."),
@@ -786,6 +801,12 @@ class MainWindow(QMainWindow):
     def _build_language_menu(self, settings_menu: QMenu) -> None:
         """Add the Language submenu: System Default plus every shipped catalog."""
         self._language_menu = settings_menu.addMenu(_("Language"))
+        self._language_menu.menuAction().setToolTip(
+            _(
+                "Language of the app itself (menus, buttons, messages). The language of the "
+                "generated metadata is set under Metadata Language.",
+            ),
+        )
         self._language_group = QActionGroup(self)
         entries = [(i18n.AUTO, _("System Default")), *i18n.SUPPORTED_LANGUAGES.items()]
         for code, label in entries:
@@ -812,6 +833,65 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, _("Could not save the config file"), str(exc))
             return
         self._status.setText(_("Language saved. Restart Photo Tagger to apply it."))
+
+    def _build_output_language_menu(self, settings_menu: QMenu) -> None:
+        """Add the Metadata Language submenu: the language the model writes the metadata in."""
+        menu = self._output_language_menu = settings_menu.addMenu(_("Metadata Language"))
+        menu.menuAction().setToolTip(
+            _(
+                "Language of the generated titles, descriptions, and keywords. The language of "
+                "the app itself is set under Language.",
+            ),
+        )
+        panel = QWidget()
+        form = QFormLayout(panel)
+        combo = self._output_language_combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.addItems(list(OUTPUT_LANGUAGE_SUGGESTIONS))
+        combo.setCurrentText(self._output_language)
+        combo.setMinimumWidth(220)
+        combo.setToolTip(
+            _(
+                "The model writes titles, descriptions, and keywords in this language. Pick one "
+                "or type any language name; it is sent to the model as is. Applies from the next "
+                "generation on and is saved to the config file, which the CLI's "
+                "--output-language default also reads.",
+            ),
+        )
+        # activated covers picking from the list; editingFinished covers a typed language
+        # (committed on Enter or when the menu closes and focus leaves the field).
+        combo.activated.connect(lambda _index: self._set_output_language(combo.currentText()))
+        combo.lineEdit().editingFinished.connect(
+            lambda: self._set_output_language(combo.currentText()),
+        )
+        form.addRow(_("Language"), combo)
+        host = QWidgetAction(menu)
+        host.setDefaultWidget(panel)
+        menu.addAction(host)
+
+    def _set_output_language(self, language: str) -> None:
+        """Persist the metadata language into the config file; used from the next generation on."""
+        normalized = language.strip() or DEFAULT_OUTPUT_LANGUAGE
+        if normalized == self._output_language:
+            return
+        self._output_language = normalized
+        target = self._config_target()
+        try:
+            existing = target.read_text(encoding="utf-8") if target.exists() else ""
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                config_text_with_output_language(existing, normalized),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            QMessageBox.warning(self, _("Could not save the config file"), str(exc))
+            return
+        self._status.setText(
+            _("Metadata language set to {language} for the next generation.").format(
+                language=normalized,
+            ),
+        )
 
     def _on_telemetry_toggled(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
         """Persist the telemetry choice and apply it to this session right away."""
@@ -2362,6 +2442,7 @@ class MainWindow(QMainWindow):
             [item.path for item in items],
             api_key=self._api_key_value(),
             cache_file=self._active_cache_file() if use_cache else None,
+            output_language=self._output_language,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)

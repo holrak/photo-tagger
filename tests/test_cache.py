@@ -178,6 +178,7 @@ def test_build_cache_namespace_changes_with_each_input() -> None:
         {"frequency_penalty": 1.0},
         {"jpeg_dimensions": 2048},
         {"jpeg_quality": 95},
+        {"output_language": "German"},
     ]
     seen = {baseline}
     for override in variants:

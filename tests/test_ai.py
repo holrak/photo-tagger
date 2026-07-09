@@ -66,6 +66,32 @@ def test_create_agent_lmstudio_validates_and_builds_agent(monkeypatch: pytest.Mo
     assert agent is not None
 
 
+def test_create_agent_system_prompt_follows_output_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The output language lands in the system prompt handed to the Agent."""
+    _patch_listing(monkeypatch, {"data": [{"id": "test-model"}]})
+    captured: dict[str, Any] = {}
+    # The real class comes from pydantic_ai; ai.py's import of it is not a re-export.
+    from pydantic_ai import Agent  # noqa: PLC0415
+
+    def spying_agent(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        captured.update(kwargs)
+        return Agent(*args, **kwargs)
+
+    monkeypatch.setattr(ai_module, "Agent", spying_agent)
+    ai_module.create_agent(
+        "lmstudio",
+        "test-model",
+        api_base_url="http://localhost:1234/v1",
+        api_key=None,
+        retries=1,
+        output_language="German",
+    )
+    assert "German" in captured["system_prompt"]
+    assert "English" not in captured["system_prompt"]
+
+
 def test_create_agent_openai_validates_with_supplied_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """create_agent('openai') accepts an explicit key and validates the model id."""
     _patch_listing(monkeypatch, {"data": [{"id": "gpt-4o-mini"}]})
