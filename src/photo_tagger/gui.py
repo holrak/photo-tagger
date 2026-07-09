@@ -246,15 +246,31 @@ QPushButton#primary:disabled {
     background: #9aa0e8; border-color: #9aa0e8; color: #eaeaff;
 }
 QLineEdit, QPlainTextEdit, QComboBox { padding: 4px 6px; border-radius: 5px; }
+QComboBox::drop-down {
+    subcontrol-origin: padding; subcontrol-position: center right;
+    width: 22px; border: none; background: transparent;
+}
+QComboBox::down-arrow { image: url("@CHEVRON@"); width: 10px; height: 6px; }
+QPushButton::menu-indicator {
+    image: url("@CHEVRON@"); width: 10px; height: 6px;
+    subcontrol-origin: padding; subcontrol-position: center right; right: 10px;
+}
+QPushButton#menubutton { padding-right: 28px; }
 QTreeWidget::item { padding: 2px; }
 QToolButton { border: none; background: transparent; padding: 4px; font-weight: 600; }
 QToolButton:hover { color: #6366f1; }
 QToolButton#add {
-    padding: 6px 12px; border-radius: 6px; font-weight: 400;
+    padding: 6px 26px 6px 12px; border-radius: 6px; font-weight: 400;
     border: 1px solid rgba(130, 130, 140, 60%);
     background: rgba(130, 130, 140, 14%);
 }
 QToolButton#add:hover { background: rgba(130, 130, 140, 26%); }
+QToolButton#add::menu-button {
+    border: none; width: 22px;
+    border-left: 1px solid rgba(130, 130, 140, 45%);
+    margin-top: 6px; margin-bottom: 6px;
+}
+QToolButton#add::menu-arrow { image: url("@CHEVRON@"); width: 10px; height: 6px; }
 QProgressBar {
     border: 1px solid rgba(130, 130, 140, 60%); border-radius: 5px; text-align: center;
 }
@@ -268,6 +284,12 @@ QLabel#error {
     border: 1px solid rgba(248, 81, 73, 45%); border-radius: 6px; padding: 8px;
 }
 """
+
+
+def _stylesheet() -> str:
+    """Resolve the stylesheet's image placeholders to the bundled resource files."""
+    chevron = (_RESOURCES / "chevron-down.svg").as_posix()
+    return _STYLESHEET.replace("@CHEVRON@", chevron)
 
 
 def _app_icon() -> QIcon:
@@ -859,6 +881,7 @@ class MainWindow(QMainWindow):
         controls.addStretch(1)
 
         select = QPushButton("Select")
+        select.setObjectName("menubutton")
         select.setToolTip("Check or uncheck photos in bulk.")
         select.setMenu(self._build_select_menu())
         controls.addWidget(select)
@@ -1270,6 +1293,7 @@ class MainWindow(QMainWindow):
         self._generate_button.clicked.connect(self._generate)
 
         save_options = QPushButton("Save options")
+        save_options.setObjectName("menubutton")
         save_options.setToolTip("Which fields a save writes, merge vs overwrite, and sidecar.")
         save_options.setMenu(self._build_save_options_menu())
         self._save_selected_button = QPushButton("Save selected")
@@ -2161,7 +2185,7 @@ def launch(argv: list[str] | None = None) -> int:
     app.setApplicationName("Photo Tagger")
     app.setApplicationDisplayName("Photo Tagger")
     app.setWindowIcon(_app_icon())
-    app.setStyleSheet(_STYLESHEET)
+    app.setStyleSheet(_stylesheet())
     window = MainWindow()
     window.show()
     window.maybe_show_telemetry_notice()
