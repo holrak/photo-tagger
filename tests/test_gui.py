@@ -1659,6 +1659,57 @@ def test_bulk_context_menu_checks_unchecks_and_removes(
     assert str(c) in window._items  # noqa: SLF001
 
 
+def test_bulk_menu_check_only_and_skip_cache(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Check Only keeps just the selection checked; the bulk generate can skip the cache."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    c = _jpeg(tmp_path / "c.jpg")
+    _add_dir(window, {"a": a, "b": b, "c": c})
+    for path in (a, b):
+        leaf = window._leaf_for(path)  # noqa: SLF001
+        assert leaf is not None
+        leaf.setSelected(True)
+
+    menu = window._build_tree_context_menu(window._leaf_for(a))  # noqa: SLF001
+    assert menu is not None
+    actions = {action.text(): action for action in menu.actions() if action.text()}
+
+    actions["Check Only 2 Photos"].trigger()
+    assert window._items[str(a)].selected is True  # noqa: SLF001
+    assert window._items[str(b)].selected is True  # noqa: SLF001
+    assert window._items[str(c)].selected is False  # noqa: SLF001 - not in the selection
+
+    calls: list[tuple[int, bool]] = []
+    monkeypatch.setattr(
+        window,
+        "_run_generation",
+        lambda items, **kwargs: calls.append((len(items), kwargs.get("use_cache", True))),
+    )
+    actions["Generate 2 Photos (Skip Cache)"].trigger()
+    assert calls == [(2, False)]
+
+
+def test_select_menu_inverts_the_checkboxes(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Invert Checked flips every checkbox, model and rendered tree alike."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+    window._items[str(a)].selected = False  # noqa: SLF001
+    texts = [action.text() for action in window._select_menu.actions()]  # noqa: SLF001
+    assert "Invert Checked" in texts
+
+    window._invert_checked()  # noqa: SLF001
+
+    assert window._items[str(a)].selected is True  # noqa: SLF001
+    assert window._items[str(b)].selected is False  # noqa: SLF001
+    assert _check_state(window, a) == Qt.CheckState.Checked
+    assert _check_state(window, b) == Qt.CheckState.Unchecked
+
+
 def test_single_row_right_click_keeps_the_per_photo_menu(
     window: gui.MainWindow,
     tmp_path: Path,

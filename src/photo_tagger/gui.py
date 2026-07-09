@@ -992,9 +992,10 @@ class MainWindow(QMainWindow):
 
     def _build_select_menu(self) -> QMenu:
         """Bulk check/uncheck actions, including the CLI's --skip-tagged/--skip-from mirrors."""
-        menu = QMenu(self)
+        menu = self._select_menu = QMenu(self)
         menu.addAction("Check All", lambda: self._set_all_checked(checked=True))
         menu.addAction("Uncheck All", lambda: self._set_all_checked(checked=False))
+        menu.addAction("Invert Checked", self._invert_checked)
         menu.addSeparator()
 
         self._tagged_menu = menu.addMenu("Uncheck Already Tagged")
@@ -1029,6 +1030,16 @@ class MainWindow(QMainWindow):
             return
         for item in self._items.values():
             item.selected = checked
+        self._rebuild_tree()
+        self._update_status()
+
+    def _invert_checked(self) -> None:
+        """Flip every photo's checkbox: checked becomes unchecked and vice versa."""
+        if not self._items:
+            self._status.setText("Add photos before selecting.")
+            return
+        for item in self._items.values():
+            item.selected = not item.selected
         self._rebuild_tree()
         self._update_status()
 
@@ -1097,15 +1108,33 @@ class MainWindow(QMainWindow):
             f"Uncheck {count}",
             lambda: self._set_items_checked(items, checked=False),
         )
+        only = menu.addAction(
+            f"Check Only {count}",
+            lambda: self._check_only_items(items),
+        )
+        only.setToolTip("Check the selected photos and uncheck every other photo in the list.")
         menu.addSeparator()
         generate = menu.addAction(f"Generate {count}", lambda: self._run_generation(items))
         generate.setEnabled(self._thread is None)
+        fresh = menu.addAction(
+            f"Generate {count} (Skip Cache)",
+            lambda: self._run_generation(items, use_cache=False),
+        )
+        fresh.setToolTip("One-time: call the model even for photos with cached results.")
+        fresh.setEnabled(self._thread is None)
         menu.addSeparator()
         menu.addAction(
             "Remove From List",
             lambda: self._remove_items([str(item.path) for item in items]),
         )
         return menu
+
+    def _check_only_items(self, items: list[PhotoItem]) -> None:
+        """Check exactly *items*: everything else in the list is unchecked."""
+        keys = {str(item.path) for item in items}
+        others = [item for item in self._items.values() if str(item.path) not in keys]
+        self._set_items_checked(others, checked=False)
+        self._set_items_checked(items, checked=True)
 
     def _set_items_checked(self, items: list[PhotoItem], *, checked: bool) -> None:
         """Check or uncheck *items* in place, keeping tree, folders, and grid in step."""
