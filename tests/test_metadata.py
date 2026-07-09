@@ -3,6 +3,8 @@
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
     FIELD_KEYWORDS,
@@ -42,6 +44,41 @@ def _fake_helper(get_tags_result: object = None) -> MagicMock:
     if get_tags_result is not None:
         helper.get_tags.return_value = get_tags_result
     return helper
+
+
+def test_managed_helper_uses_configured_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With PHOTO_TAGGER_EXIFTOOL set, the helper is built with that explicit binary."""
+    monkeypatch.setenv("PHOTO_TAGGER_EXIFTOOL", "/opt/et/exiftool")
+    helper = _fake_helper()
+    with (
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper) as ctor,
+        managed_helper(None) as opened,
+    ):
+        assert opened is helper
+    ctor.assert_called_once_with(executable="/opt/et/exiftool")
+
+
+def test_managed_helper_defaults_to_path_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no override, the helper is built with no executable, so pyexiftool searches PATH."""
+    monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
+    helper = _fake_helper()
+    with (
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper) as ctor,
+        managed_helper(None),
+    ):
+        pass
+    ctor.assert_called_once_with()
+
+
+def test_managed_helper_yields_supplied_helper_without_opening() -> None:
+    """A caller-supplied helper is reused as-is; no new ExifToolHelper is constructed."""
+    supplied = MagicMock()
+    with (
+        patch("photo_tagger.metadata.ExifToolHelper") as ctor,
+        managed_helper(supplied) as opened,
+    ):
+        assert opened is supplied
+    ctor.assert_not_called()
 
 
 def test_format_metadata_value_passes_strings_through() -> None:

@@ -18,6 +18,7 @@ from coverage and the static analyzers.
 """
 
 import html
+import os
 import sys
 import time
 from pathlib import Path
@@ -90,12 +91,14 @@ from photo_tagger.gui_state import (
     build_tree,
     count_generated,
     deselect_paths,
+    ensure_path_dirs,
     expand_inputs,
     format_existing_keywords,
     hierarchy_preview,
     keyword_diff,
     keywords_to_save,
     keywords_to_text,
+    login_shell_path,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -1656,6 +1659,13 @@ def _diff_html(existing: KeywordSet, edited_keywords: list[str], *, overwrite: b
 
 def launch(argv: list[str] | None = None) -> int:
     """Create the application, show the main window, and run the event loop."""
+    # A Finder/Dock launch inherits a minimal PATH, so graft on the PATH the user's login shell
+    # would set. That recovers exiftool wherever their package manager put it (Homebrew, Nix,
+    # MacPorts, ...). A no-op for a normal shell launch, where those dirs are already present.
+    os.environ["PATH"] = ensure_path_dirs(os.environ.get("PATH", ""), login_shell_path())
+    # And bridge a config-file exiftool path into the env var metadata reads (an exported var wins).
+    if (exiftool_path := load_defaults().exiftool_path) is not None:
+        os.environ.setdefault("PHOTO_TAGGER_EXIFTOOL", exiftool_path)
     # File-only logging: the window carries the live status, so the terminal stays quiet, but a
     # durable log (with full tracebacks for failed photos) is written for the "Open logs" button.
     setup_logging(file_log_level="DEBUG", console_log_level="OFF", log_folder=_LOG_FOLDER)

@@ -83,6 +83,8 @@ Environment variables provide defaults so you can keep the CLI concise:
 - `OPENAI_API_KEY` – API key for the `openai` provider (required for that provider)
 - `MODEL_NAME` – default model name (default `qwen/qwen3-vl-30b`)
 - `JPEG_DIMENSIONS`, `JPEG_QUALITY`, `TEMPERATURE`, `MAX_TOKENS`, `RETRIES` – fine-tune runtime
+- `PHOTO_TAGGER_EXIFTOOL` – path to the ExifTool binary, for installs not on `PATH` (overrides the
+  config file's `exiftool_path`)
 
 Any CLI flag takes precedence over the environment.
 
@@ -125,7 +127,8 @@ enabled = true
 
 The section names match the internal option groups: `provider`, `inference`, `output`, `log`,
 `display`, `filter`, `artifacts`, and `telemetry`. Top-level keys cover `extensions`, `recursive`,
-and `workers`. Unknown keys are silently ignored, so the file stays forward-compatible.
+`workers`, and `exiftool_path` (set this to your ExifTool binary if it lives somewhere unusual).
+Unknown keys are silently ignored, so the file stays forward-compatible.
 
 ## Usage
 
@@ -311,9 +314,10 @@ source and spec live in [`packaging/`](packaging/)). Two things to know:
 
 - It is **unsigned**, so the first launch needs a right-click > **Open** (Gatekeeper asks once); it
   opens normally after that.
-- ExifTool is **not** bundled - install it with `brew install exiftool`. The app adds Homebrew's bin
-  directories to `PATH` on launch so it is found even when started from Finder (which otherwise
-  gives apps a minimal `PATH`); **Test connection** reports a clear error if it is still missing.
+- ExifTool is **not** bundled - install it however you like (`brew install exiftool`, Nix, MacPorts,
+  ...). A Finder launch gives apps a minimal `PATH`, so on startup the app inherits the `PATH` your
+  login shell would set, finding exiftool wherever your package manager put it. **Test connection**
+  reports a clear error if it is still missing.
 
 ## Telemetry
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 
 from photo_tagger import __version__
+from photo_tagger.config import exiftool_executable
 from photo_tagger.errors import ProviderError
 from photo_tagger.providers import get_backend
 
@@ -31,13 +32,21 @@ class CheckResult:
 
 
 def check_exiftool() -> CheckResult:
-    """Verify the ExifTool binary is on PATH (pyexiftool shells out to it)."""
-    path = shutil.which("exiftool")
+    """
+    Verify the ExifTool binary is available (pyexiftool shells out to it).
+
+    Resolves the same way the pipeline does: an explicit ``PHOTO_TAGGER_EXIFTOOL`` /
+    config ``exiftool_path`` if set, otherwise ``exiftool`` on PATH. ``shutil.which`` handles
+    both - it validates an absolute path and searches PATH for a bare name.
+    """
+    target = exiftool_executable() or "exiftool"
+    path = shutil.which(target)
     if path is None:
         return CheckResult(
             "ExifTool",
             ok=False,
-            detail="not found on PATH; install it (https://exiftool.org) and retry",
+            detail=f"{target!r} not found; install ExifTool (https://exiftool.org) or set "
+            "PHOTO_TAGGER_EXIFTOOL",
         )
     return CheckResult("ExifTool", ok=True, detail=path)
 

@@ -422,6 +422,7 @@ class Defaults:
     extensions: str
     workers: int
     recursive: bool
+    exiftool_path: str | None
 
 
 def load_defaults(config: dict[str, Any] | None = None) -> Defaults:
@@ -444,4 +445,5 @@ def load_defaults(config: dict[str, Any] | None = None) -> Defaults:
         extensions=file_config.get("extensions", "cr3,jpg"),
         workers=file_config.get("workers", 1),
         recursive=file_config.get("recursive", False),
+        exiftool_path=file_config.get("exiftool_path"),
     )

@@ -56,10 +56,20 @@ def test_check_exiftool_reports_path_when_present(monkeypatch: pytest.MonkeyPatc
 
 def test_check_exiftool_reports_failure_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing binary yields ok=False with an install hint."""
+    monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     result = check_exiftool()
     assert result.ok is False
     assert "not found" in result.detail
+
+
+def test_check_exiftool_honors_configured_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With PHOTO_TAGGER_EXIFTOOL set, the check resolves and reports that exact binary."""
+    monkeypatch.setenv("PHOTO_TAGGER_EXIFTOOL", "/opt/et/exiftool")
+    monkeypatch.setattr(shutil, "which", lambda name: name if name == "/opt/et/exiftool" else None)
+    result = check_exiftool()
+    assert result.ok is True
+    assert result.detail == "/opt/et/exiftool"
 
 
 # ---------------------------------------------------------------------------

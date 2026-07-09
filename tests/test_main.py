@@ -851,3 +851,28 @@ def test_suite_is_isolated_from_developer_config() -> None:
     defaults = load_defaults()
     assert defaults.artifacts.summary_file is None
     assert defaults.telemetry.enabled is True
+
+
+def test_load_defaults_reads_exiftool_path() -> None:
+    """A config-file exiftool_path surfaces on Defaults; absent means None."""
+    assert load_defaults({"exiftool_path": "/x/exiftool"}).exiftool_path == "/x/exiftool"
+    assert load_defaults({}).exiftool_path is None
+
+
+def test_apply_exiftool_path_bridges_to_env_without_overriding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fill an unset env var from config; never override an exported one; no-op on None."""
+    import os  # noqa: PLC0415 - test-local
+
+    monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
+    main_module._apply_exiftool_path("/cfg/exiftool")  # noqa: SLF001
+    assert os.environ["PHOTO_TAGGER_EXIFTOOL"] == "/cfg/exiftool"
+
+    monkeypatch.setenv("PHOTO_TAGGER_EXIFTOOL", "/env/exiftool")
+    main_module._apply_exiftool_path("/cfg/exiftool")  # noqa: SLF001
+    assert os.environ["PHOTO_TAGGER_EXIFTOOL"] == "/env/exiftool"
+
+    monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
+    main_module._apply_exiftool_path(None)  # noqa: SLF001
+    assert "PHOTO_TAGGER_EXIFTOOL" not in os.environ

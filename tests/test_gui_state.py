@@ -1,6 +1,10 @@
 """Tests for the Qt-free GUI helpers (no PySide6, no display required)."""
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from photo_tagger.gui_state import (
     ADDED,
@@ -22,6 +26,7 @@ from photo_tagger.gui_state import (
     count_generated,
     descendant_files,
     deselect_paths,
+    ensure_path_dirs,
     expand_inputs,
     format_existing_keywords,
     group_by_parent,
@@ -29,6 +34,7 @@ from photo_tagger.gui_state import (
     keyword_diff,
     keywords_to_save,
     keywords_to_text,
+    login_shell_path,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -407,3 +413,49 @@ def test_count_generated_counts_only_proposed_photos() -> None:
     ]
     assert count_generated(items) == 2  # noqa: PLR2004 - two of three were generated
     assert count_generated([]) == 0
+
+
+def test_ensure_path_dirs_prepends_missing_and_dedups() -> None:
+    """Absent dirs are prepended in order; ones already on PATH are not duplicated."""
+    base = os.pathsep.join(["/usr/bin", "/bin"])
+    out = ensure_path_dirs(base, ["/opt/homebrew/bin", "/usr/bin"])
+    assert out == os.pathsep.join(["/opt/homebrew/bin", "/usr/bin", "/bin"])
+
+
+def test_ensure_path_dirs_returns_input_unchanged_when_all_present() -> None:
+    """When every dir is already present, the original string is returned as-is."""
+    base = os.pathsep.join(["/opt/homebrew/bin", "/usr/bin"])
+    assert ensure_path_dirs(base, ["/usr/bin"]) is base
+
+
+def test_ensure_path_dirs_handles_empty_path() -> None:
+    """An empty starting PATH yields just the added dirs (no leading separator)."""
+    assert ensure_path_dirs("", ["/opt/homebrew/bin"]) == "/opt/homebrew/bin"
+
+
+def test_login_shell_path_parses_shell_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The login shell's reported PATH is split into entries, blanks dropped."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    out = os.pathsep.join(["/run/current-system/sw/bin", "/usr/bin", ""])
+    monkeypatch.setattr(
+        "photo_tagger.gui_state.subprocess.run",
+        lambda *_a, **_k: SimpleNamespace(stdout=out),
+    )
+    assert login_shell_path() == ["/run/current-system/sw/bin", "/usr/bin"]
+
+
+def test_login_shell_path_empty_without_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no $SHELL there is nothing to ask, so it returns []."""
+    monkeypatch.delenv("SHELL", raising=False)
+    assert login_shell_path() == []
+
+
+def test_login_shell_path_empty_on_shell_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shell that errors or times out degrades to [] rather than raising."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+
+    def boom(*_a: object, **_k: object) -> object:
+        raise OSError
+
+    monkeypatch.setattr("photo_tagger.gui_state.subprocess.run", boom)
+    assert login_shell_path() == []

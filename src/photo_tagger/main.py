@@ -89,6 +89,13 @@ _DEFAULT_TELEMETRY = _DEFAULTS.telemetry
 _DEFAULT_EXTENSIONS = _DEFAULTS.extensions
 _DEFAULT_WORKERS = _DEFAULTS.workers
 _DEFAULT_RECURSIVE = _DEFAULTS.recursive
+_DEFAULT_EXIFTOOL_PATH = _DEFAULTS.exiftool_path
+
+
+def _apply_exiftool_path(path: str | None) -> None:
+    """Bridge a config ``exiftool_path`` into ``PHOTO_TAGGER_EXIFTOOL`` (an exported var wins)."""
+    if path:
+        os.environ.setdefault("PHOTO_TAGGER_EXIFTOOL", path)
 
 
 @app.command
@@ -122,6 +129,7 @@ def doctor(
     # Silence loguru so only the checklist reaches the terminal; failures are
     # captured in the report itself, not the logs.
     logger.remove()
+    _apply_exiftool_path(_DEFAULT_EXIFTOOL_PATH)
     results = run_checks(provider, model, api_base_url=url, api_key=api_key)
     if not render_report(results):
         raise SystemExit(1)
@@ -588,6 +596,7 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
         console_log_level=log.console_log_level,
         log_folder=log.log_folder,
     )
+    _apply_exiftool_path(_DEFAULT_EXIFTOOL_PATH)
 
     with contextlib.ExitStack() as stack:
         if artifacts.lock_file is not None:

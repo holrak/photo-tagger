@@ -70,6 +70,18 @@ DEFAULT_TIMEOUT_SECONDS = _env_float("TIMEOUT_SECONDS", 60.0)
 # strongly suppressing pathological loops.
 DEFAULT_FREQUENCY_PENALTY = _env_float("FREQUENCY_PENALTY", 0.5)
 
+
+def exiftool_executable() -> str | None:
+    """
+    Return an explicit ExifTool binary path, or None to find ``exiftool`` on PATH.
+
+    Lets users on non-standard installs point at their exact binary. Read at call time (not import)
+    so a config-file ``exiftool_path`` bridged into ``PHOTO_TAGGER_EXIFTOOL`` at startup is honored;
+    an explicitly-exported env var always wins over the config file.
+    """
+    return os.getenv("PHOTO_TAGGER_EXIFTOOL") or None
+
+
 LOCATION_TAGS = (
     "XMP-photoshop:Country",
     "IPTC:Country-PrimaryLocationName",

@@ -24,6 +24,7 @@ from photo_tagger.config import (
     TAG_XMP_SUBJECT,
     TAG_XMP_TITLE,
     TAG_XMP_WEIGHTED_FLAT_SUBJECT,
+    exiftool_executable,
 )
 from photo_tagger.models import KeywordSet
 
@@ -41,11 +42,18 @@ _IMAGE_HASH_API = ["-api", "ImageHashType=SHA256"]
 
 @contextlib.contextmanager
 def managed_helper(et: ExifToolHelper | None) -> Iterator[ExifToolHelper]:
-    """Yield *et* if supplied, otherwise spin up and tear down a one-shot helper."""
+    """
+    Yield *et* if supplied, otherwise spin up and tear down a one-shot helper.
+
+    Honors an explicit ExifTool binary (``PHOTO_TAGGER_EXIFTOOL`` / config ``exiftool_path``); with
+    none configured, pyexiftool finds ``exiftool`` on PATH as before.
+    """
     if et is not None:
         yield et
         return
-    with ExifToolHelper() as own:  # type: ignore[no-untyped-call]
+    executable = exiftool_executable()
+    helper = ExifToolHelper(executable=executable) if executable else ExifToolHelper()
+    with helper as own:  # type: ignore[no-untyped-call]
         yield own
 
 

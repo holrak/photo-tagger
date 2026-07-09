@@ -2,7 +2,21 @@
 
 import pytest
 
-from photo_tagger.config import _env_float, _env_int
+from photo_tagger.config import _env_float, _env_int, exiftool_executable
+
+
+def test_exiftool_executable_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No (or blank) PHOTO_TAGGER_EXIFTOOL means 'find exiftool on PATH' (None)."""
+    monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
+    assert exiftool_executable() is None
+    monkeypatch.setenv("PHOTO_TAGGER_EXIFTOOL", "")
+    assert exiftool_executable() is None
+
+
+def test_exiftool_executable_returns_env_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit PHOTO_TAGGER_EXIFTOOL is returned verbatim."""
+    monkeypatch.setenv("PHOTO_TAGGER_EXIFTOOL", "/opt/et/exiftool")
+    assert exiftool_executable() == "/opt/et/exiftool"
 
 
 def test_env_int_returns_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
