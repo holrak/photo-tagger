@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- The GUI is translated at runtime (gettext) and ships a complete Brazilian Portuguese (`pt_BR`)
+  translation. Pick a language with **Settings > Language**, the `language` config key, or
+  `PHOTO_TAGGER_LANG`; the default follows the OS locale.
 - New `llamacpp` provider for llama.cpp's `llama-server`. Default endpoint
   `http://localhost:8080/v1`; env vars `LLAMA_CPP_BASE_URL` and `LLAMA_CPP_API_KEY` (the key is only
   needed when `llama-server` was started with `--api-key`).

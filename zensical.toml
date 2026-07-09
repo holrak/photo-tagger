@@ -35,6 +35,7 @@ nav = [
     "usage/index.md",
     { "CLI reference" = "usage/cli-reference.md" },
     { "Desktop GUI" = "usage/gui.md" },
+    { "Translations" = "usage/translations.md" },
     { "Recipes" = "usage/recipes.md" },
   ] },
   { "Troubleshooting" = "troubleshooting.md" },

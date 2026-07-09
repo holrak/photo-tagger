@@ -10,8 +10,8 @@ bakllava
 betterem
 capsys
 casefold
-casefolded
 Casefolded
+casefolded
 charliermarsh
 CHEVRONLIGHT
 cogvlm
@@ -60,8 +60,8 @@ importorskips
 imread
 inlinehilite
 internvl
-IPTC
 iptc
+IPTC
 isort
 jbsilva
 LANCZOS
@@ -78,8 +78,8 @@ litellm
 LLAMACPP
 llamacpp
 llava
-lmstudio
 LMSTUDIO
+lmstudio
 logfire
 loguru
 lucide
@@ -109,6 +109,7 @@ Português
 prek
 primarysplit
 psutil
+pybabel
 pycache
 pycqa
 pycroscope

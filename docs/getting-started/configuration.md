@@ -71,6 +71,7 @@ default value, so you can copy it and change only what you need.
 extensions = "cr3,jpg"   # Comma-separated extensions used when scanning directories.
 recursive = false        # Recurse into subdirectories while scanning input directories.
 workers = 1              # Process N photos concurrently with a thread pool.
+language = "auto"        # GUI language: "auto" (OS default), "en", or "pt_BR".
 
 [provider]
 model_name = "qwen/qwen3-vl-30b"          # Vision-language model identifier.
