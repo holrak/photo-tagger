@@ -154,6 +154,24 @@ def test_merge_keywords_preserves_existing_and_adds_hierarchies() -> None:
     assert merged.hierarchical == ["Animal|Bird", "Animal|Bird|Duck"]
 
 
+def test_merge_keywords_dedupes_hierarchies_case_insensitively() -> None:
+    """
+    An existing lowercase hierarchy suppresses the same path in canonical casing.
+
+    Guards the casefold in the hierarchical-seen set: without it, files tagged by other tools
+    with "animal|bird" would gain a duplicate "Animal|Bird" entry on every run.
+    """
+    existing = KeywordSet(
+        subject=["animal", "bird"],
+        hierarchical=["animal|bird"],
+        weighted=["animal", "bird"],
+    )
+
+    merged = merge_keywords(existing, ["Duck<Bird<Animal"])
+
+    assert merged.hierarchical == ["animal|bird", "Animal|Bird|Duck"]  # no duplicate Animal|Bird
+
+
 def test_build_contextual_prompt_includes_metadata_and_truncates_keywords() -> None:
     """The contextual prompt surfaces existing metadata and shortens long keyword lists."""
     prompt = build_contextual_prompt(

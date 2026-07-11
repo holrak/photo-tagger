@@ -339,6 +339,23 @@ def test_apply_date_filter_supports_window(tmp_path: Path) -> None:
     assert kept == [inside]
 
 
+def test_apply_date_filter_excludes_the_exact_boundary(tmp_path: Path) -> None:
+    """
+    A file whose mtime equals the bound is dropped by BOTH bounds.
+
+    That is the documented "on or before" / "on or after" semantics; it guards the <= / >=
+    comparisons against an off-by-one regression to strict inequality, which the existing
+    plus/minus-a-day fixtures cannot see.
+    """
+    at_bound = tmp_path / "at.cr3"
+    at_bound.write_text("x")
+    boundary = datetime(2024, 6, 1, tzinfo=UTC)
+    _set_mtime(at_bound, boundary)
+
+    assert apply_date_filter([at_bound], newer_than=boundary) == []
+    assert apply_date_filter([at_bound], older_than=boundary) == []
+
+
 def test_apply_date_filter_logs_warning_for_unreadable_stat(tmp_path: Path) -> None:
     """A path that fails stat() is logged and skipped, not raised."""
     ghost = tmp_path / "ghost.cr3"  # never created
@@ -364,6 +381,26 @@ def test_make_skip_list_appender_is_thread_safe(tmp_path: Path) -> None:
     # No interleaved/partial lines, no duplicate entries, no missing entries.
     assert sorted(lines) == sorted(str(p) for p in paths)
     assert len(set(lines)) == image_count
+
+
+def test_resolve_image_files_recursive_walks_subdirectories(tmp_path: Path) -> None:
+    """
+    Recursive=True finds nested files; recursive=False stays at the top level.
+
+    The rglob branch had no coverage at all: --recursive silently processing nothing would
+    have passed the suite.
+    """
+    top = tmp_path / "top.cr3"
+    top.write_text("x")
+    nested = tmp_path / "sub" / "deeper" / "nested.cr3"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("x")
+
+    flat = resolve_image_files([tmp_path], {".cr3"}, recursive=False)
+    deep = resolve_image_files([tmp_path], {".cr3"}, recursive=True)
+
+    assert [p.name for p in flat] == ["top.cr3"]
+    assert sorted(p.name for p in deep) == ["nested.cr3", "top.cr3"]
 
 
 def test_resolve_image_files_keeps_path_when_resolve_fails() -> None:
