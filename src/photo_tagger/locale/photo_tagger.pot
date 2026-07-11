@@ -1,17 +1,17 @@
 # Translations template for photo-tagger.
-# Copyright (C) 2026 ORGANIZATION
+# Copyright (C) 2026 Julio Batista Silva
 # This file is distributed under the same license as the photo-tagger
 # project.
-# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+# Julio Batista Silva <python@juliobs.com>, 2026.
 #
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: photo-tagger VERSION\n"
-"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-07-10 22:13+0200\n"
+"Report-Msgid-Bugs-To: python@juliobs.com\n"
+"POT-Creation-Date: 2026-07-10 22:32+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Last-Translator: Julio Batista Silva <python@juliobs.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"

@@ -59,12 +59,11 @@ Then add the language code and its native-language label to `SUPPORTED_LANGUAGES
 to `tests/test_i18n.py`.
 
 After changing translatable strings in the source, refresh the template and merge it into the
-existing catalogs:
+existing catalogs. The script wraps `pybabel extract` + `pybabel update` and fills in the catalog
+header metadata (copyright holder, bug-report address, translator) that the bare commands would
+leave as placeholders:
 
 ```bash
-uv run pybabel extract -k gettext_noop --project photo-tagger \
-    -o src/photo_tagger/locale/photo_tagger.pot src/photo_tagger
-uv run pybabel update -i src/photo_tagger/locale/photo_tagger.pot \
-    -d src/photo_tagger/locale -D photo_tagger
+uv run scripts/extract_translations.py
 uv run scripts/compile_translations.py
 ```
