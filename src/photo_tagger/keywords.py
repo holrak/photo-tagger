@@ -206,7 +206,7 @@ def _collect_cumulative_entries(
         New cumulative paths like "A|B", "A|B|C", starting at MIN_HIERARCHICAL_DEPTH.
 
     Examples:
-        >>> collect_cumulative_entries({"duck": ["Animal", "Bird", "Duck"]}, set())
+        >>> _collect_cumulative_entries({"duck": ["Animal", "Bird", "Duck"]}, set())
         ['Animal|Bird', 'Animal|Bird|Duck']
     """
     additions: list[str] = []
