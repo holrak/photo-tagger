@@ -832,8 +832,9 @@ class MainWindow(QMainWindow):
         self._telemetry_action.setChecked(self._telemetry_enabled)
         self._telemetry_action.setToolTip(
             _(
-                "Anonymous usage stats (model, batch size, OS, CPU arch, timing). No photos or "
-                "personal data.",
+                "Anonymous usage stats (model, batch size, OS, CPU/GPU model, RAM, timing) and "
+                "crash reports (error type and code location only). No photos, error messages, "
+                "or personal data.",
             ),
         )
         self._telemetry_action.toggled.connect(self._on_telemetry_toggled)

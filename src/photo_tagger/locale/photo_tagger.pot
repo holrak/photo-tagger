@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photo-tagger VERSION\n"
 "Report-Msgid-Bugs-To: python@juliobs.com\n"
-"POT-Creation-Date: 2026-07-10 22:32+0200\n"
+"POT-Creation-Date: 2026-07-11 13:55+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: Julio Batista Silva <python@juliobs.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,22 +18,22 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: src/photo_tagger/gui.py:240
+#: src/photo_tagger/gui.py:241
 msgid "(none)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:243
+#: src/photo_tagger/gui.py:244
 msgid "Could not save the config file"
 msgstr ""
 
-#: src/photo_tagger/gui.py:249
+#: src/photo_tagger/gui.py:250
 msgid ""
 "Add photos to get started.\n"
 "\n"
 "Drag photos or folders onto the window, or use the Add Photos button."
 msgstr ""
 
-#: src/photo_tagger/gui.py:253
+#: src/photo_tagger/gui.py:254
 msgid ""
 "Select a photo to review it.\n"
 "\n"
@@ -41,102 +41,102 @@ msgid ""
 "saving."
 msgstr ""
 
-#: src/photo_tagger/gui.py:260
+#: src/photo_tagger/gui.py:261
 msgid "working..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:261
+#: src/photo_tagger/gui.py:262
 msgid "ready"
 msgstr ""
 
-#: src/photo_tagger/gui.py:262
+#: src/photo_tagger/gui.py:263
 msgid "saved ✓"
 msgstr ""
 
-#: src/photo_tagger/gui.py:263
+#: src/photo_tagger/gui.py:264
 msgid "failed ✗"
 msgstr ""
 
-#: src/photo_tagger/gui.py:273
+#: src/photo_tagger/gui.py:274
 msgid "Has any metadata"
 msgstr ""
 
-#: src/photo_tagger/gui.py:276
+#: src/photo_tagger/gui.py:277
 msgid "any metadata"
 msgstr ""
 
-#: src/photo_tagger/gui.py:278
+#: src/photo_tagger/gui.py:279
 msgid "Has a title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:278
+#: src/photo_tagger/gui.py:279
 msgid "a title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:280
+#: src/photo_tagger/gui.py:281
 msgid "Has a description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:283
+#: src/photo_tagger/gui.py:284
 msgid "a description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:286
+#: src/photo_tagger/gui.py:287
 msgid "Has a title and a description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:289
+#: src/photo_tagger/gui.py:290
 msgid "a title and a description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:291
+#: src/photo_tagger/gui.py:292
 msgid "Has keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:291 src/photo_tagger/gui.py:1872
+#: src/photo_tagger/gui.py:292 src/photo_tagger/gui.py:1891
 #: src/photo_tagger/gui_state.py:637
 msgid "keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:794
+#: src/photo_tagger/gui.py:799
 msgid "File"
 msgstr ""
 
-#: src/photo_tagger/gui.py:795 src/photo_tagger/gui.py:1213
+#: src/photo_tagger/gui.py:800 src/photo_tagger/gui.py:1219
 msgid "Add Photos..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:796 src/photo_tagger/gui.py:1241
+#: src/photo_tagger/gui.py:801 src/photo_tagger/gui.py:1247
 msgid "Add Folder..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:798
+#: src/photo_tagger/gui.py:803
 msgid "Export CSV Report..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:801
+#: src/photo_tagger/gui.py:806
 msgid ""
 "Save a CSV report of every photo: generated and existing metadata, EXIF, "
 "and token usage."
 msgstr ""
 
-#: src/photo_tagger/gui.py:806
+#: src/photo_tagger/gui.py:811
 msgid "Clear List"
 msgstr ""
 
-#: src/photo_tagger/gui.py:808
+#: src/photo_tagger/gui.py:813
 msgid "Quit"
 msgstr ""
 
-#: src/photo_tagger/gui.py:812
+#: src/photo_tagger/gui.py:817
 msgid "Settings"
 msgstr ""
 
-#: src/photo_tagger/gui.py:814
+#: src/photo_tagger/gui.py:819
 msgid "Cache AI Results"
 msgstr ""
 
-#: src/photo_tagger/gui.py:819
+#: src/photo_tagger/gui.py:824
 #, python-brace-format
 msgid ""
 "Reuse earlier results for unchanged photos ({cache_file}). Uncheck to "
@@ -144,183 +144,184 @@ msgid ""
 "from its right-click menu."
 msgstr ""
 
-#: src/photo_tagger/gui.py:825
+#: src/photo_tagger/gui.py:830
 msgid "Send Anonymous Telemetry"
 msgstr ""
 
-#: src/photo_tagger/gui.py:830
+#: src/photo_tagger/gui.py:835
 msgid ""
-"Anonymous usage stats (model, batch size, OS, CPU arch, timing). No "
-"photos or personal data."
+"Anonymous usage stats (model, batch size, OS, CPU/GPU model, RAM, timing)"
+" and crash reports (error type and code location only). No photos, error "
+"messages, or personal data."
 msgstr ""
 
-#: src/photo_tagger/gui.py:841
+#: src/photo_tagger/gui.py:847
 msgid "Save Settings as Defaults..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:846
+#: src/photo_tagger/gui.py:852
 msgid ""
 "Update the config file with the current provider, model, URL, file types,"
 " and save options. Other settings and comments in the file are preserved;"
 " the API key is never written."
 msgstr ""
 
-#: src/photo_tagger/gui.py:851
+#: src/photo_tagger/gui.py:857
 msgid "Edit Config File..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:854
+#: src/photo_tagger/gui.py:860
 msgid ""
 "Open the config file in your default editor for the settings the GUI does"
 " not surface (prompt file, sampling, workers, filters, ...). Created if "
 "missing."
 msgstr ""
 
-#: src/photo_tagger/gui.py:859
+#: src/photo_tagger/gui.py:865
 msgid "Help"
 msgstr ""
 
-#: src/photo_tagger/gui.py:861
+#: src/photo_tagger/gui.py:867
 msgid "Documentation"
 msgstr ""
 
-#: src/photo_tagger/gui.py:865 src/photo_tagger/gui.py:1147
+#: src/photo_tagger/gui.py:871 src/photo_tagger/gui.py:1153
 msgid "Test Connection"
 msgstr ""
 
-#: src/photo_tagger/gui.py:866
+#: src/photo_tagger/gui.py:872
 msgid "Open Logs"
 msgstr ""
 
-#: src/photo_tagger/gui.py:868 src/photo_tagger/gui.py:1068
+#: src/photo_tagger/gui.py:874 src/photo_tagger/gui.py:1074
 msgid "About Photo Tagger"
 msgstr ""
 
-#: src/photo_tagger/gui.py:873
+#: src/photo_tagger/gui.py:879
 msgid "Language"
 msgstr ""
 
-#: src/photo_tagger/gui.py:876
+#: src/photo_tagger/gui.py:882
 msgid ""
 "Language of the app itself (menus, buttons, messages). The language of "
 "the generated metadata is set under Metadata Language."
 msgstr ""
 
-#: src/photo_tagger/gui.py:881
+#: src/photo_tagger/gui.py:887
 msgid "System Default"
 msgstr ""
 
-#: src/photo_tagger/gui.py:905
+#: src/photo_tagger/gui.py:911
 msgid "Language saved. Restart Photo Tagger to apply it."
 msgstr ""
 
-#: src/photo_tagger/gui.py:909 src/photo_tagger/gui.py:967
+#: src/photo_tagger/gui.py:915 src/photo_tagger/gui.py:973
 msgid "Metadata Language"
 msgstr ""
 
-#: src/photo_tagger/gui.py:913
+#: src/photo_tagger/gui.py:919
 msgid ""
 "Language of the generated titles, descriptions, and keywords. The "
 "language of the app itself is set under Language."
 msgstr ""
 
-#: src/photo_tagger/gui.py:922
+#: src/photo_tagger/gui.py:928
 msgid "Other..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:925
+#: src/photo_tagger/gui.py:931
 msgid ""
 "Any language name the model understands works; it is sent to the model as"
 " is. Saved to the config file, which the CLI's --output-language default "
 "also reads."
 msgstr ""
 
-#: src/photo_tagger/gui.py:968
+#: src/photo_tagger/gui.py:974
 msgid "Language for the generated titles, descriptions, and keywords:"
 msgstr ""
 
-#: src/photo_tagger/gui.py:996
+#: src/photo_tagger/gui.py:1002
 #, python-brace-format
 msgid "Metadata language set to {language} for the next generation."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1006
+#: src/photo_tagger/gui.py:1012
 msgid "Anonymous telemetry on."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1006
+#: src/photo_tagger/gui.py:1012
 msgid "Anonymous telemetry off."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1045
+#: src/photo_tagger/gui.py:1051
 #, python-brace-format
 msgid "Updated {target} (other settings and comments preserved)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1048
+#: src/photo_tagger/gui.py:1054
 #, python-brace-format
 msgid "Saved defaults to {target}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1070
+#: src/photo_tagger/gui.py:1076
 msgid "Describe photos and add keywords with a vision-language model."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1086
+#: src/photo_tagger/gui.py:1092
 msgid "Backend that serves the vision-language model."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1093
+#: src/photo_tagger/gui.py:1099
 msgid ""
 "Model identifier. Type it, or press Refresh to list what the provider "
 "serves."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1095
+#: src/photo_tagger/gui.py:1101
 msgid "Refresh"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1096
+#: src/photo_tagger/gui.py:1102
 msgid "Query the provider for the models it currently serves."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1100
+#: src/photo_tagger/gui.py:1106
 msgid "Connection..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1101
+#: src/photo_tagger/gui.py:1107
 msgid "Server URL, API key, and a connection test."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1105
+#: src/photo_tagger/gui.py:1111
 msgid "Provider"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1107
+#: src/photo_tagger/gui.py:1113
 msgid "Model"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1117
+#: src/photo_tagger/gui.py:1123
 msgid "Connection settings"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1125
+#: src/photo_tagger/gui.py:1131
 msgid "(provider default URL)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1126
+#: src/photo_tagger/gui.py:1132
 msgid "Provider API base URL. Leave blank to use the provider's default."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1127
+#: src/photo_tagger/gui.py:1133
 msgid "Base URL"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1136
+#: src/photo_tagger/gui.py:1142
 msgid "(uses provider env var)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1139
+#: src/photo_tagger/gui.py:1145
 msgid ""
 "API key for the provider. Leave blank to use the provider's environment "
 "variable (OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or "
@@ -328,35 +329,35 @@ msgid ""
 "session only and is never written to disk."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1145
+#: src/photo_tagger/gui.py:1151
 msgid "API key"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1148
+#: src/photo_tagger/gui.py:1154
 msgid "Check ExifTool and that the provider serves the model."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1150
+#: src/photo_tagger/gui.py:1156
 msgid "Close"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1166
+#: src/photo_tagger/gui.py:1172
 msgid "Photos"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1166 src/photo_tagger/gui.py:1622
+#: src/photo_tagger/gui.py:1172 src/photo_tagger/gui.py:1641
 msgid "Type"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1166 src/photo_tagger/gui.py:1623
+#: src/photo_tagger/gui.py:1172 src/photo_tagger/gui.py:1642
 msgid "Status"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1166 src/photo_tagger/gui.py:1624
+#: src/photo_tagger/gui.py:1172 src/photo_tagger/gui.py:1643
 msgid "Tagged"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1185
+#: src/photo_tagger/gui.py:1191
 #, python-brace-format
 msgid ""
 "Click a column header to sort. Type: file extension, +xmp when a sidecar "
@@ -364,379 +365,379 @@ msgid ""
 "Tagged: metadata already on the file ({legend})."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1199
+#: src/photo_tagger/gui.py:1205
 msgid "Drag photos or folders here. Select one and press Delete to remove it."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1216
+#: src/photo_tagger/gui.py:1222
 msgid ""
 "Add photos (click), or open the arrow for adding a whole folder and for "
 "the folder-scan options. Dragging files or folders onto the window also "
 "works."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1226
+#: src/photo_tagger/gui.py:1232
 msgid "Select"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1228
+#: src/photo_tagger/gui.py:1234
 msgid "Check or uncheck photos in bulk."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1232
+#: src/photo_tagger/gui.py:1238
 msgid "Remove"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1233
+#: src/photo_tagger/gui.py:1239
 msgid "Remove the selected folder or photo from the list (or press Delete)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1249
+#: src/photo_tagger/gui.py:1255
 msgid ""
 "Extensions to scan for in folders (comma-separated).\n"
 "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1253
+#: src/photo_tagger/gui.py:1259
 msgid "File types"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1254
+#: src/photo_tagger/gui.py:1260
 msgid "Include subfolders"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1256
+#: src/photo_tagger/gui.py:1262
 msgid "Descend into subfolders when adding a folder."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1266
+#: src/photo_tagger/gui.py:1272
 msgid "Check All"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1267
+#: src/photo_tagger/gui.py:1273
 msgid "Uncheck All"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1268
+#: src/photo_tagger/gui.py:1274
 msgid "Invert Checked"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1271
+#: src/photo_tagger/gui.py:1277
 msgid "Uncheck Already Tagged"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1274
+#: src/photo_tagger/gui.py:1280
 msgid ""
 "Uncheck photos that already have the chosen metadata (in the image or its"
 " XMP sidecar), e.g. 'a title and a description' to skip those while "
 "keeping keyword-only photos. Mirrors the CLI's --skip-tagged."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1291
+#: src/photo_tagger/gui.py:1297
 msgid "Uncheck From Skip List..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1294
+#: src/photo_tagger/gui.py:1300
 msgid ""
 "Uncheck photos whose filename or full path is listed in a text file (one "
 "per line), like the CLI's --skip-from."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1303 src/photo_tagger/gui.py:1313
+#: src/photo_tagger/gui.py:1309 src/photo_tagger/gui.py:1319
 msgid "Add photos before selecting."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1344
+#: src/photo_tagger/gui.py:1350
 msgid "Retry Generation"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1344
+#: src/photo_tagger/gui.py:1350
 msgid "Generate"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1348
+#: src/photo_tagger/gui.py:1354
 msgid "Generate (Skip Cache)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1351
+#: src/photo_tagger/gui.py:1357
 msgid "Call the model even when a cached result exists for this photo."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1356 src/photo_tagger/gui.py:1408
+#: src/photo_tagger/gui.py:1362 src/photo_tagger/gui.py:1414
 msgid "Remove From List"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1378
+#: src/photo_tagger/gui.py:1384
 #, python-brace-format
 msgid "Check {n} Photo"
 msgid_plural "Check {n} Photos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:1382
+#: src/photo_tagger/gui.py:1388
 #, python-brace-format
 msgid "Uncheck {n} Photo"
 msgid_plural "Uncheck {n} Photos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:1386
+#: src/photo_tagger/gui.py:1392
 #, python-brace-format
 msgid "Check Only {n} Photo"
 msgid_plural "Check Only {n} Photos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:1389
+#: src/photo_tagger/gui.py:1395
 msgid "Check the selected photos and uncheck every other photo in the list."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1392
+#: src/photo_tagger/gui.py:1398
 #, python-brace-format
 msgid "Generate {n} Photo"
 msgid_plural "Generate {n} Photos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:1398
+#: src/photo_tagger/gui.py:1404
 #, python-brace-format
 msgid "Generate {n} Photo (Skip Cache)"
 msgid_plural "Generate {n} Photos (Skip Cache)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:1404 src/photo_tagger/gui.py:2000
+#: src/photo_tagger/gui.py:1410 src/photo_tagger/gui.py:2019
 msgid "One-time: call the model even for photos with cached results."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1601
+#: src/photo_tagger/gui.py:1620
 msgid "Show"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1604
+#: src/photo_tagger/gui.py:1623
 msgid "All"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1605
+#: src/photo_tagger/gui.py:1624
 msgid "Selected"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1606
+#: src/photo_tagger/gui.py:1625
 msgid "Not generated"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1607
+#: src/photo_tagger/gui.py:1626
 msgid "Generated"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1608
+#: src/photo_tagger/gui.py:1627
 msgid "Saved"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1609
+#: src/photo_tagger/gui.py:1628
 msgid "Failed"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1610
+#: src/photo_tagger/gui.py:1629
 msgid "Untagged"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1613
+#: src/photo_tagger/gui.py:1632
 msgid "Show only the photos in the chosen state."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1618
+#: src/photo_tagger/gui.py:1637
 msgid "Sort by"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1621
+#: src/photo_tagger/gui.py:1640
 msgid "Name"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1628
+#: src/photo_tagger/gui.py:1647
 msgid "Order the thumbnails by name, file type, status, or existing metadata."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1637 src/photo_tagger/gui.py:1663
+#: src/photo_tagger/gui.py:1656 src/photo_tagger/gui.py:1682
 msgid "Ascending. Click to sort descending."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1661
+#: src/photo_tagger/gui.py:1680
 msgid "Descending. Click to sort ascending."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1683
+#: src/photo_tagger/gui.py:1702
 msgid "Select a photo to preview it."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1710
+#: src/photo_tagger/gui.py:1729
 msgid "Existing"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1715
+#: src/photo_tagger/gui.py:1734
 msgid ""
 "Where the existing metadata was read from: the image file, an XMP "
 "sidecar, or both."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1722
+#: src/photo_tagger/gui.py:1741
 msgid "New (editable)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1727
+#: src/photo_tagger/gui.py:1746
 msgid "The title to write. Edit freely before saving."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1728
+#: src/photo_tagger/gui.py:1747
 msgid "Title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1735
+#: src/photo_tagger/gui.py:1754
 msgid "The description to write."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1740
+#: src/photo_tagger/gui.py:1759
 msgid "Description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1747
+#: src/photo_tagger/gui.py:1766
 msgid "One per line. Use < for hierarchy (Duck<Bird<Animal)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1750
+#: src/photo_tagger/gui.py:1769
 msgid ""
 "Keywords to write, one per line. Use '<' for a hierarchy (e.g. "
 "'Duck<Bird<Animal'); the changes and resulting paths show below."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1755
+#: src/photo_tagger/gui.py:1774
 msgid "Keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1764
+#: src/photo_tagger/gui.py:1783
 msgid "Keyword changes"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1770
+#: src/photo_tagger/gui.py:1789
 msgid ""
 "Show exactly what saving will change: added and removed keywords, plus "
 "the resulting keyword tree."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1784
+#: src/photo_tagger/gui.py:1803
 msgid "Keyword changes a save will make: green added, red removed."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1788
+#: src/photo_tagger/gui.py:1807
 msgid ""
 "The keyword tree that saving will write (stored as Lightroom hierarchy "
 "paths)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1790
+#: src/photo_tagger/gui.py:1809
 msgid "Changes"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1791
+#: src/photo_tagger/gui.py:1810
 msgid "Tree"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1806
+#: src/photo_tagger/gui.py:1825
 msgid "Write Title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1808
+#: src/photo_tagger/gui.py:1827
 msgid "Write the title. Uncheck to leave the existing title as is."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1810
+#: src/photo_tagger/gui.py:1829
 msgid "Write Description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1812
+#: src/photo_tagger/gui.py:1831
 msgid "Write the description. Uncheck to leave the existing description as is."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1814
+#: src/photo_tagger/gui.py:1833
 msgid "Write Keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1817
+#: src/photo_tagger/gui.py:1836
 msgid ""
 "Write keywords. Uncheck to leave existing keywords untouched, e.g. to "
 "refresh only the title and description."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1837
+#: src/photo_tagger/gui.py:1856
 msgid "Overwrite Existing Keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1839
+#: src/photo_tagger/gui.py:1858
 msgid "Replace existing keywords instead of merging the new ones in."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1842
+#: src/photo_tagger/gui.py:1861
 msgid "Embed in Photo"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1843
+#: src/photo_tagger/gui.py:1862
 msgid "Write into the image file instead of an XMP sidecar."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1870 src/photo_tagger/gui_state.py:635
+#: src/photo_tagger/gui.py:1889 src/photo_tagger/gui_state.py:635
 msgid "title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1871 src/photo_tagger/gui_state.py:636
+#: src/photo_tagger/gui.py:1890 src/photo_tagger/gui_state.py:636
 msgid "description"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1876
+#: src/photo_tagger/gui.py:1895
 msgid "nothing (pick a field in the arrow menu)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1879
+#: src/photo_tagger/gui.py:1898
 msgid "overwriting existing keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1881
+#: src/photo_tagger/gui.py:1900
 msgid "merging with existing keywords"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1884
+#: src/photo_tagger/gui.py:1903
 msgid "into the image file"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1884
+#: src/photo_tagger/gui.py:1903
 msgid "to an XMP sidecar"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1890
+#: src/photo_tagger/gui.py:1909
 #, python-brace-format
 msgid "Currently writes {options}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1892
+#: src/photo_tagger/gui.py:1911
 #, python-brace-format
 msgid "Write this photo. {summary} Change what is written with the arrow."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1898
+#: src/photo_tagger/gui.py:1917
 #, python-brace-format
 msgid ""
 "Write the checked photos that have a generated proposal. {summary} Change"
 " what is written with the arrow."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1906
+#: src/photo_tagger/gui.py:1925
 msgid "Hint for the AI"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1908
+#: src/photo_tagger/gui.py:1927
 msgid "e.g. 'The animal is a deer, not a boar'"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1912
+#: src/photo_tagger/gui.py:1931
 msgid ""
 "A note about this photo that the model trusts over its own reading of the"
 " image; useful when it misidentifies the subject. It is sent along on "
@@ -744,158 +745,158 @@ msgid ""
 "and is never written to the file. Press Enter to regenerate right away."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1925
+#: src/photo_tagger/gui.py:1944
 msgid "Generate This Photo"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1927
+#: src/photo_tagger/gui.py:1946
 msgid "Run the model on just this photo, regardless of which photos are checked."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1936
+#: src/photo_tagger/gui.py:1955
 msgid "Generate This Photo (Skip Cache)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1939
+#: src/photo_tagger/gui.py:1958
 msgid "One-time: call the model even when a cached result exists."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1945
+#: src/photo_tagger/gui.py:1964
 msgid "Save This Photo"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1957 src/photo_tagger/gui.py:2103
+#: src/photo_tagger/gui.py:1976 src/photo_tagger/gui.py:2131
 msgid "Drag photos or folders here to begin."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1964
+#: src/photo_tagger/gui.py:1983
 msgid "Retry Failed"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1967
+#: src/photo_tagger/gui.py:1986
 msgid ""
 "Re-run the model on every photo that failed to generate. Enabled once a "
 "photo has actually failed."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1973
+#: src/photo_tagger/gui.py:1992
 msgid "Cancel"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1976
+#: src/photo_tagger/gui.py:1995
 msgid ""
 "Stop generating. The photo currently in flight finishes; the rest are "
 "left untouched so you can resume them later."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1987
+#: src/photo_tagger/gui.py:2006
 msgid "Generate Selected"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1988
+#: src/photo_tagger/gui.py:2007
 msgid "Run the model on the checked photos."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1997
+#: src/photo_tagger/gui.py:2016
 msgid "Generate Selected (Skip Cache)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2005
+#: src/photo_tagger/gui.py:2024
 msgid "Save Selected"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2038
+#: src/photo_tagger/gui.py:2057
 msgid "Add Photos"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2043
+#: src/photo_tagger/gui.py:2062
 msgid "Add a folder of photos"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2116 src/photo_tagger/gui.py:2143
+#: src/photo_tagger/gui.py:2144 src/photo_tagger/gui.py:2171
 msgid "Add photos before deselecting."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2132
+#: src/photo_tagger/gui.py:2160
 #, python-brace-format
 msgid "Deselected {n} photo with {phrase}; {selected} still selected."
 msgid_plural "Deselected {n} photos with {phrase}; {selected} still selected."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2138
+#: src/photo_tagger/gui.py:2166
 #, python-brace-format
 msgid "No checked photos have {phrase}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2145
+#: src/photo_tagger/gui.py:2173
 msgid "Choose a skip-list file"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2154
+#: src/photo_tagger/gui.py:2182
 msgid "Could not read the skip list"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2160
+#: src/photo_tagger/gui.py:2188
 msgid "That skip list had no usable entries (empty or only comments)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2168
+#: src/photo_tagger/gui.py:2196
 #, python-brace-format
 msgid "Deselected {n} photo from the skip list; {selected} still selected."
 msgid_plural "Deselected {n} photos from the skip list; {selected} still selected."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2174
+#: src/photo_tagger/gui.py:2202
 msgid "No photos in the list matched the skip list."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2179
+#: src/photo_tagger/gui.py:2207
 msgid "Add photos before exporting a CSV."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2183
+#: src/photo_tagger/gui.py:2211
 msgid "Export CSV report"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2185
+#: src/photo_tagger/gui.py:2213
 msgid "CSV files (*.csv)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2201
+#: src/photo_tagger/gui.py:2229
 msgid "Could not write the CSV"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2205
+#: src/photo_tagger/gui.py:2233
 #, python-brace-format
 msgid "Exported {n} photo to {name}."
 msgid_plural "Exported {n} photos to {name}."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2344
+#: src/photo_tagger/gui.py:2394
 #, python-brace-format
 msgid "{n} photo in {folder}."
 msgid_plural "{n} photos in {folder}."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2348
+#: src/photo_tagger/gui.py:2398
 #, python-brace-format
 msgid "Showing {shown} of {total} in {folder}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2428
+#: src/photo_tagger/gui.py:2484
 #, python-brace-format
 msgid "(from {sources})"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2428
+#: src/photo_tagger/gui.py:2484
 msgid "(no metadata found)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2448
+#: src/photo_tagger/gui.py:2504
 #, python-brace-format
 msgid ""
 "Generation failed: {error}\n"
@@ -903,151 +904,153 @@ msgid ""
 "traceback."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2481
+#: src/photo_tagger/gui.py:2537
 msgid "(no preview available)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2517
+#: src/photo_tagger/gui.py:2573
 msgid "(keywords will not be written)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2519
+#: src/photo_tagger/gui.py:2575
 msgid "Keyword changes (not written)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2531
+#: src/photo_tagger/gui.py:2587
 msgid "no change"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2532
+#: src/photo_tagger/gui.py:2588
 #, python-brace-format
 msgid "Keyword changes ({summary})"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2613 src/photo_tagger/gui.py:2630
+#: src/photo_tagger/gui.py:2669 src/photo_tagger/gui.py:2686
 msgid "Pick at least one field to write (Title, Description, or Keywords)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2620
+#: src/photo_tagger/gui.py:2676
 #, python-brace-format
 msgid "Saved {name}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2622
+#: src/photo_tagger/gui.py:2678
 #, python-brace-format
 msgid "Failed to save {name}."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2636
+#: src/photo_tagger/gui.py:2692
 msgid "No checked photos have a proposal to save."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2641
+#: src/photo_tagger/gui.py:2697
 #, python-brace-format
 msgid "Saved {saved} of {n} checked photo."
 msgid_plural "Saved {saved} of {n} checked photos."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2654
+#: src/photo_tagger/gui.py:2710
 msgid "Check at least one photo first."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2660
+#: src/photo_tagger/gui.py:2716
 msgid "Open a photo to generate it."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2667
+#: src/photo_tagger/gui.py:2723
 msgid "No failed photos to retry."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2687
+#: src/photo_tagger/gui.py:2743
 #, python-brace-format
 msgid "Generating {n} photo..."
 msgid_plural "Generating {n} photos..."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2741
+#: src/photo_tagger/gui.py:2797
 msgid "Cancelling after the current photo finishes..."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2754
+#: src/photo_tagger/gui.py:2810
 #, python-brace-format
 msgid "Cancelled. {n} photo not generated."
 msgid_plural "Cancelled. {n} photos not generated."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2760
+#: src/photo_tagger/gui.py:2816
 msgid "Generation finished."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2818
+#: src/photo_tagger/gui.py:2874
 msgid "Could not list models"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2828
+#: src/photo_tagger/gui.py:2884
 #, python-brace-format
 msgid "Found {n} model on {provider}."
 msgid_plural "Found {n} models on {provider}."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:2846
+#: src/photo_tagger/gui.py:2902
 msgid "Connection check"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2881
+#: src/photo_tagger/gui.py:2937
 msgid "ready (cached)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2954
+#: src/photo_tagger/gui.py:3010
 msgid "Anonymous usage telemetry"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2955
+#: src/photo_tagger/gui.py:3011
 msgid "Photo Tagger sends anonymous usage stats to guide development."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2958
+#: src/photo_tagger/gui.py:3014
 msgid ""
-"Collected: model name, batch size, OS, CPU architecture, timing.\n"
-"Never: photos, file paths, filenames, tags, or personal data.\n"
+"Collected: model name, batch size, OS, CPU/GPU model, RAM size, timing, "
+"and anonymous crash reports (error type and code location only).\n"
+"Never: photos, file paths, filenames, tags, error messages, or personal "
+"data.\n"
 "\n"
 "You can turn this off now, or anytime from Settings > Send Anonymous "
 "Telemetry."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2963
+#: src/photo_tagger/gui.py:3020
 msgid "Keep Enabled"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2964
+#: src/photo_tagger/gui.py:3021
 msgid "Turn It Off"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3012
+#: src/photo_tagger/gui.py:3070
 msgid "generation failed"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3013
+#: src/photo_tagger/gui.py:3071
 msgid "saved"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3014
+#: src/photo_tagger/gui.py:3072
 msgid "generated, not saved yet"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3015
+#: src/photo_tagger/gui.py:3073
 msgid "already has metadata"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3016
+#: src/photo_tagger/gui.py:3074
 msgid "has an XMP sidecar"
 msgstr ""
 
-#: src/photo_tagger/gui.py:3095
+#: src/photo_tagger/gui.py:3153
 msgid "(no change)"
 msgstr ""
 
