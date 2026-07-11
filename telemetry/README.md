@@ -26,7 +26,7 @@ One data point per event, in one shared column layout (see the map in [`queries.
   model, output language, UI language, file types (extensions only, e.g. `cr3,jpg`), CPU arch, OS,
   OS release, Python version, CPU/GPU model, core count, RAM in GB, batch size, run duration,
   outcome counts (successes, failures, cache hits, retry recoveries, workers, tokens, model time,
-  dry-run flag), and a random install id.
+  dry-run flag), coarse failure buckets (e.g. `timeout:3`), and a random install id.
 - **`crash`** (an unhandled exception): the same platform/hardware facts plus the exception *type*
   and its code location inside photo-tagger (`module:function:line`). Never the error message, which
   could embed paths.

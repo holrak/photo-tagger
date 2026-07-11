@@ -741,6 +741,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
                 total_tokens=totals.total_tokens,
                 inference_seconds=totals.inference_seconds,
                 dry_run=totals.dry_run,
+                failure_kinds=telemetry.failure_kinds_summary(totals.failure_kinds),
             ),
             enabled=telemetry_config.enabled,
             block=True,

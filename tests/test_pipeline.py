@@ -22,6 +22,7 @@ from photo_tagger.pipeline import (
     _notify_success,
     _resolve_inference,
     _UsageAccumulator,
+    classify_failure,
     execute_process,
     process_photo,
     run_batch,
@@ -388,6 +389,52 @@ def test_run_batch_concurrent_calls_on_success_per_image(tmp_path: Path) -> None
         )
 
     assert sorted(p.name for p in notified) == sorted(p.name for p in files)
+
+
+def test_classify_failure_buckets_common_exceptions() -> None:
+    """Exception classes map to the coarse buckets by name/module, never by message."""
+
+    class ReadTimeout(Exception): ...  # noqa: N818 - mirrors httpx's real class name
+
+    class ConnectError(Exception): ...
+
+    class UnexpectedModelBehavior(Exception): ...  # noqa: N818 - mirrors pydantic-ai's name
+
+    class HTTPStatusError(Exception): ...
+
+    assert classify_failure(TimeoutError()) == "timeout"
+    assert classify_failure(ReadTimeout()) == "timeout"
+    assert classify_failure(ConnectError()) == "connection"
+    assert classify_failure(UnexpectedModelBehavior()) == "model-validation"
+    assert classify_failure(HTTPStatusError()) == "model-api"
+    assert classify_failure(RuntimeError("anything")) == "other"
+
+
+def test_run_batch_reports_failure_kinds_in_totals(tmp_path: Path) -> None:
+    """Final failures land in BatchTotals.failure_kinds, bucketed by cause."""
+    timeout_file = tmp_path / "slow.cr3"
+    write_file = tmp_path / "readonly.cr3"
+    for path in (timeout_file, write_file):
+        path.write_text("x")
+
+    def fake_process_photo(image: Path, *_a: Any, **_kw: Any) -> bool:  # noqa: ANN401
+        if image.name == timeout_file.name:
+            raise TimeoutError
+        return False  # metadata write failed
+
+    received: list[Any] = []
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=fake_process_photo),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            [timeout_file, write_file],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            on_complete=received.append,
+        )
+
+    assert received[0].failure_kinds == {"timeout": 1, "metadata-write": 1}
 
 
 class _DictCache:

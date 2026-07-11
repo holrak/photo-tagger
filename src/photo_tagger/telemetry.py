@@ -127,6 +127,18 @@ class RunInfo:
     total_tokens: int = 0  # tokens across every model call in the run
     inference_seconds: float = 0.0  # time spent inside model calls (vs wall-clock duration)
     dry_run: bool = False  # the run previewed metadata without writing it
+    failure_kinds: str = ""  # compact final-failure buckets, e.g. "timeout:3,metadata-write:1"
+
+
+def failure_kinds_summary(kinds: dict[str, int]) -> str:
+    """
+    Encode per-run failure buckets as a compact, sorted string: ``"timeout:3,other:1"``.
+
+    The keys are the pipeline's fixed coarse buckets (timeout, connection, model-validation, model-
+    api, image-read, metadata-write, other), never message text, so nothing user-derived can ride
+    along.
+    """
+    return ",".join(f"{kind}:{count}" for kind, count in sorted(kinds.items()) if count)
 
 
 def file_types_summary(paths: Iterable[Path]) -> str:
@@ -297,6 +309,7 @@ def build_payload(run: RunInfo) -> dict[str, object]:
         "total_tokens": run.total_tokens,
         "inference_seconds": round(run.inference_seconds, 3),
         "dry_run": int(run.dry_run),
+        "failure_kinds": run.failure_kinds,
     }
 
 

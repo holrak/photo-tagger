@@ -340,7 +340,8 @@ sizes), and one when the app crashes so breakage is visible without waiting for 
 - app version and interface (`cli` or `gui`)
 - provider and model name
 - batch size (photo count), run duration, and outcome counts (successes, failures, cache hits, retry
-  recoveries, worker count, token totals, model time, dry-run flag)
+  recoveries, worker count, token totals, model time, dry-run flag), plus coarse failure buckets
+  (fixed labels like `timeout` or `metadata-write`, never error text)
 - CPU architecture, OS, OS release, and Python version
 - CPU and GPU model names (for example "Apple M3 Pro" or "NVIDIA GeForce RTX 4070"), logical core
   count, and RAM size in whole gigabytes: generic values shared by millions of machines

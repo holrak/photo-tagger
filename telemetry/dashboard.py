@@ -771,7 +771,10 @@ def _(chart_card, hbar, mo, query, runs_v2_where):
             "gpu",
             "runs",
             title="GPUs",
-            subtitle="weighted runs per graphics hardware (Apple Silicon reports the SoC)",
+            subtitle=(
+                "client-machine hardware; inference may run on a remote server "
+                "(Apple Silicon reports the SoC)"
+            ),
         ),
         gpu_frame,
     )
@@ -1005,6 +1008,48 @@ def _(COLORS, chart_card, crash_where, hbar, mo, query, version_key):
 @app.cell
 def _(crash_trend_view, crash_version_view, mo):
     mo.hstack([crash_trend_view, crash_version_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(COLORS, chart_card, hbar, mo, pd, query, runs_v2_where):
+    _kinds_raw = query(
+        f"""
+        SELECT blob18 AS failure_kinds, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND blob18 != ''
+        GROUP BY failure_kinds
+        """,
+    )
+    mo.stop(
+        _kinds_raw.empty,
+        mo.md("_No per-photo failures in this window._ :tada:").callout(kind="success"),
+    )
+
+    # blob18 is a per-run set like "timeout:3,other:1"; AE SQL cannot split it, so explode
+    # client-side and weight each bucket by its count times the run weight.
+    _pairs: list[tuple[str, float]] = []
+    for _kinds, _runs in zip(_kinds_raw["failure_kinds"], _kinds_raw["runs"], strict=True):
+        for _entry in str(_kinds).split(","):
+            _kind, _, _count = _entry.partition(":")
+            if _kind and _count.isdigit():
+                _pairs.append((_kind, int(_count) * _runs))
+    failure_kinds_frame = (
+        pd.DataFrame(_pairs, columns=["kind", "photos"])
+        .groupby("kind", as_index=False)["photos"]
+        .sum()
+        .sort_values("photos", ascending=False)
+    )
+    chart_card(
+        hbar(
+            failure_kinds_frame,
+            "kind",
+            "photos",
+            title="Why photos fail",
+            subtitle="final failures after the retry pass, bucketed by coarse cause",
+            color=COLORS["critical"],
+        ),
+        failure_kinds_frame,
+    )
 
 
 @app.cell

@@ -78,6 +78,7 @@ export default {
         str(body.exception_type), //   blob15 crash only: exception class name
         str(body.crash_location), //   blob16 crash only: deepest in-app frame "module:func:line"
         str(body.crash_frames), //     blob17 crash only: last in-app frames, '>'-joined
+        str(body.failure_kinds), //    blob18 run only: final-failure buckets "timeout:3,other:1"
       ],
       // double1..double13. double1..double3 match schema v1; the rest are v2 additions.
       doubles: [

@@ -221,6 +221,7 @@ _EXPECTED_PAYLOAD_KEYS = _PLATFORM_KEYS | {
     "total_tokens",
     "inference_seconds",
     "dry_run",
+    "failure_kinds",
 }
 
 _EXPECTED_CRASH_KEYS = _PLATFORM_KEYS | {
@@ -305,6 +306,15 @@ def test_build_payload_carries_hardware_and_outcome_fields() -> None:
     assert payload["total_tokens"] == 12345  # noqa: PLR2004 - the sample run's count
     assert payload["inference_seconds"] == 41.5  # noqa: PLR2004 - the sample run's value
     assert payload["dry_run"] == 1
+
+
+def test_failure_kinds_summary_is_compact_sorted_and_skips_zeros() -> None:
+    """The per-run failure buckets encode as a stable "kind:count" list."""
+    assert telemetry.failure_kinds_summary({}) == ""
+    assert (
+        telemetry.failure_kinds_summary({"timeout": 3, "other": 1, "connection": 0})
+        == "other:1,timeout:3"
+    )
 
 
 def test_file_types_summary_is_sorted_lowercased_and_deduplicated() -> None:

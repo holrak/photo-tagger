@@ -22,7 +22,7 @@
 --   blob7   = os_release          blob8   = python_version       blob9   = output_language
 --   blob10  = ui_language         blob11  = file_types           blob12  = event (run|crash)
 --   blob13  = cpu model           blob14  = gpu model            blob15  = exception_type
---   blob16  = crash_location      blob17  = crash_frames
+--   blob16  = crash_location      blob17  = crash_frames         blob18  = failure_kinds
 --   double1 = schema_version      double2 = batch_size           double3 = duration_seconds
 --   double4 = success_count       double5 = failure_count        double6 = cache_hits
 --   double7 = retry_successes     double8 = workers              double9 = total_tokens
@@ -150,6 +150,15 @@ SELECT
   SUM(double9 * _sample_interval) AS total_tokens
 FROM photo_tagger_telemetry
 WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND double9 > 0;
+
+
+-- 13b. Why photos fail: per-run failure buckets, e.g. "timeout:3,metadata-write:1". Like
+-- file_types, the compact set cannot be exploded in AE SQL; the dashboard splits it client-side.
+SELECT blob18 AS failure_kinds, SUM(_sample_interval) AS runs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND blob18 != ''
+GROUP BY failure_kinds
+ORDER BY runs DESC;
 
 
 -- 14a. Crash count and affected installs, last 30 days.

@@ -120,7 +120,7 @@ def _no_helper() -> Iterator[None]:
 
 @dataclass(slots=True)
 class _UsageAccumulator:
-    """Thread-safe running totals for token usage across a batch."""
+    """Thread-safe running totals for token usage and failure kinds across a batch."""
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -128,6 +128,7 @@ class _UsageAccumulator:
     inference_seconds: float = 0.0
     inference_calls: int = 0
     cache_hits: int = 0
+    failure_kinds: dict[str, int] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, result: InferenceResult) -> None:
@@ -143,6 +144,40 @@ class _UsageAccumulator:
         """Count one photo that skipped the model call thanks to a cache hit."""
         with self._lock:
             self.cache_hits += 1
+
+    def add_failure(self, kind: str) -> None:
+        """Count one photo that failed for good, bucketed by coarse *kind*."""
+        with self._lock:
+            self.failure_kinds[kind] = self.failure_kinds.get(kind, 0) + 1
+
+
+# The coarse failure buckets. Classification is heuristic by exception class name/module so no
+# provider SDK needs importing here; the buckets answer "why do photos fail" without carrying
+# any message text.
+FAILURE_TIMEOUT = "timeout"
+FAILURE_CONNECTION = "connection"
+FAILURE_MODEL_VALIDATION = "model-validation"
+FAILURE_MODEL_API = "model-api"
+FAILURE_IMAGE_READ = "image-read"
+FAILURE_METADATA_WRITE = "metadata-write"
+FAILURE_OTHER = "other"
+
+
+def classify_failure(exc: BaseException) -> str:
+    """Map an exception from one photo's processing to a coarse failure bucket."""
+    name = type(exc).__name__
+    module = type(exc).__module__ or ""
+    if isinstance(exc, TimeoutError) or "Timeout" in name:
+        return FAILURE_TIMEOUT
+    if "Connect" in name or "Network" in name or "Pool" in name:
+        return FAILURE_CONNECTION
+    if "UnexpectedModelBehavior" in name or "Validation" in name:
+        return FAILURE_MODEL_VALIDATION
+    if module.startswith(("rawpy", "PIL")) or "Image" in name:
+        return FAILURE_IMAGE_READ
+    if "Status" in name or "HTTP" in name or "API" in name:
+        return FAILURE_MODEL_API
+    return FAILURE_OTHER
 
 
 @dataclass(slots=True)
@@ -457,6 +492,9 @@ def execute_process(
         except Exception as exc:  # noqa: BLE001 - process_photo wraps several SDKs
             event = "processing_retry_exception" if retry else "processing_exception"
             logger.exception(event, error=str(exc))
+            if retry:
+                # Only the retry pass records a kind: it is the photo's final failure.
+                ctx.usage.add_failure(classify_failure(exc))
             _emit_outcome(ctx.on_image_result, image_file, scratch, success=False, retry=retry)
             return False
 
@@ -468,6 +506,8 @@ def execute_process(
 
         if retry:
             logger.error("retry_failed", index=index)
+            # A clean False from process_photo means every step up to the write succeeded.
+            ctx.usage.add_failure(FAILURE_METADATA_WRITE)
         else:
             logger.error("processing_failed", index=index, queued_for_retry=True)
         _emit_outcome(ctx.on_image_result, image_file, scratch, success=False, retry=retry)
@@ -496,6 +536,9 @@ class BatchTotals:
     cache_hits: int = 0
     workers: int = 1
     dry_run: bool = False
+    # Final failures bucketed by coarse kind (timeout, connection, model-validation, ...), so
+    # the summary file and telemetry can say WHY photos failed, not just how many.
+    failure_kinds: dict[str, int] = field(default_factory=dict)
 
 
 def _notify_success(on_success: OnSuccess | None, image_file: Path) -> None:
@@ -810,6 +853,7 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
         cache_hits=usage.cache_hits,
         workers=workers,
         dry_run=options.dry_run,
+        failure_kinds=dict(usage.failure_kinds),
     )
 
     logger.info(
