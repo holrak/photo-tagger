@@ -1297,6 +1297,78 @@ def test_grid_sort_survives_navigating_between_folders(
     assert _grid_order(window) == ["d.jpg", "c.jpg"]
 
 
+def test_grid_filter_shows_only_matching_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Show filter hides photos not in the chosen state, leaving the rest in the list."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    c = _jpeg(tmp_path / "c.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": b, "c": c})
+    window._items[str(a)].status = SAVED  # noqa: SLF001
+    window._items[str(b)].status = SAVED  # noqa: SLF001
+    window._items[str(c)].status = FAILED  # noqa: SLF001
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    combo = window._grid_filter_combo  # noqa: SLF001
+    combo.setCurrentIndex(combo.findData(gui.FILTER_SAVED))
+
+    assert _grid_order(window) == ["a.jpg", "b.jpg"]
+    assert len(window._items) == 3  # noqa: SLF001, PLR2004 - filtered from the grid, not removed
+
+
+def test_grid_filter_status_message_reports_hidden_count(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a filter active, the status bar shows how many of the folder's photos are visible."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": b})
+    window._items[str(a)].status = FAILED  # noqa: SLF001
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    combo = window._grid_filter_combo  # noqa: SLF001
+    combo.setCurrentIndex(combo.findData(gui.FILTER_FAILED))
+
+    text = window._status.text()  # noqa: SLF001
+    assert "1" in text
+    assert "2" in text
+
+
+def test_grid_filter_untagged_refreshes_after_metadata_scan(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Untagged filter re-evaluates when the background scan reports, not just at build time."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": b})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+    combo = window._grid_filter_combo  # noqa: SLF001
+    combo.setCurrentIndex(combo.findData(gui.FILTER_UNTAGGED))
+    # Nothing is scanned yet (known_fields is None), so no photo is hidden or shown as untagged.
+    assert _grid_order(window) == []
+
+    window._on_scan_done({str(a): set(), str(b): {FIELD_TITLE}})  # noqa: SLF001
+
+    assert _grid_order(window) == ["a.jpg"]  # only the scanned-empty photo
+
+
+def test_grid_combos_are_sized_to_their_widest_label(window: gui.MainWindow) -> None:
+    """Both grid combos reserve room for their longest entry so no label is clipped."""
+    for combo in (window._grid_filter_combo, window._grid_sort_combo):  # noqa: SLF001
+        widest = max(len(combo.itemText(i)) for i in range(combo.count()))
+        assert combo.minimumContentsLength() == widest
+
+
 # ---------------------------------------------------------------------------
 # Generation worker
 # ---------------------------------------------------------------------------

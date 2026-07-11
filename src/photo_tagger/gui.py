@@ -124,6 +124,13 @@ from photo_tagger.gui_state import (
     BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
+    FILTER_ALL,
+    FILTER_FAILED,
+    FILTER_GENERATED,
+    FILTER_PENDING,
+    FILTER_SAVED,
+    FILTER_SELECTED,
+    FILTER_UNTAGGED,
     OUTPUT_LANGUAGE_SUGGESTIONS,
     PENDING,
     READY,
@@ -148,6 +155,7 @@ from photo_tagger.gui_state import (
     expand_inputs,
     fields_written,
     file_type_label,
+    filter_photos,
     format_existing_keywords,
     hierarchy_preview,
     keyword_diff,
@@ -406,6 +414,18 @@ def _fit_text_height(box: QPlainTextEdit, *, min_h: int = 44, max_h: int = 140) 
     lines = max(1, int(box.document().size().height()))
     height = lines * box.fontMetrics().lineSpacing() + 14
     box.setFixedHeight(max(min_h, min(max_h, height)))
+
+
+def _fit_combo(combo: QComboBox) -> None:
+    """
+    Size a combo box to its widest entry so the drop-down arrow never clips the label.
+
+    The grid toolbar's labels vary in length (and more so once translated), and the default policy
+    sizes to the current item only, which clipped the wider entries behind the arrow. Sizing to the
+    widest entry keeps every option readable in any language.
+    """
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    combo.setMinimumContentsLength(max(len(combo.itemText(i)) for i in range(combo.count())))
 
 
 class GenerateWorker(QObject):
@@ -697,11 +717,7 @@ class MainWindow(QMainWindow):
         self._preview_cache: dict[str, QPixmap] = {}
         self._thumb_cache: dict[str, QPixmap] = {}
         self._grid_items: dict[str, QListWidgetItem] = {}
-        # The folder whose grid is showing, plus its sort choice, so the sort controls can rebuild
-        # it in place. The choice persists across folders for the session; it does not go to disk.
-        self._grid_folder: Path | None = None
-        self._grid_sort = SORT_NAME
-        self._grid_sort_desc = False
+        self._init_grid_view_state()
         self._current: PhotoItem | None = None
         self._thread: QThread | None = None
         self._worker: GenerateWorker | None = None
@@ -753,6 +769,18 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self._refresh_save_tooltips()
         self._show_empty()
+
+    def _init_grid_view_state(self) -> None:
+        """
+        Seed the folder grid's view state: which folder is shown and how it is filtered and sorted.
+
+        Kept as session state (never written to disk), so the choices carry across folders but reset
+        on relaunch. ``_grid_folder`` is what lets the filter/sort controls rebuild the grid.
+        """
+        self._grid_folder: Path | None = None
+        self._grid_sort = SORT_NAME
+        self._grid_sort_desc = False
+        self._grid_filter = FILTER_ALL
 
     # --- construction ----------------------------------------------------------------------
 
@@ -1486,6 +1514,10 @@ class MainWindow(QMainWindow):
                 # Merge rather than replace: a save may have added fields while the scan ran.
                 item.known_fields = set(fields) | (item.known_fields or set())
                 self._refresh_status_cell(item)
+        # The Untagged filter depends on this scan, so a grid showing it must re-evaluate once the
+        # results land; other filters and the Tagged sort read state the scan does not change.
+        if self._grid_filter == FILTER_UNTAGGED:
+            self._resort_grid()
 
     def _on_scan_finished(self) -> None:
         """Tear down the scan thread and pick up photos added while it ran."""
@@ -1530,7 +1562,7 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_grid(self) -> QWidget:
-        """Build the folder grid page: a sort toolbar above the thumbnail list."""
+        """Build the folder grid page: a filter/sort toolbar above the thumbnail list."""
         page = QWidget()
         box = QVBoxLayout(page)
         box.setContentsMargins(0, 0, 0, 0)
@@ -1557,12 +1589,31 @@ class MainWindow(QMainWindow):
 
     def _build_grid_toolbar(self) -> QHBoxLayout:
         """
-        Sort controls for the folder grid: a field picker plus an ascending/descending toggle.
+        Filter and sort controls for the folder grid, standing in for the tree's column headers.
 
-        Mirrors the tree's clickable column headers, which the grid has no room for. The signals are
-        wired only after both widgets are populated so the setup fires no spurious re-sort.
+        The grid has no headers to click, so a Show filter narrows which photos appear and a Sort by
+        field picker plus an ascending/descending toggle order what remains. Each combo is sized to
+        its widest entry so no label is clipped. Signals are wired only after the widgets are
+        populated, so building them fires no spurious rebuild.
         """
         row = QHBoxLayout()
+        row.addWidget(QLabel(_("Show")))
+        self._grid_filter_combo = QComboBox()
+        for label, criterion in (
+            (_("All"), FILTER_ALL),
+            (_("Selected"), FILTER_SELECTED),
+            (_("Not generated"), FILTER_PENDING),
+            (_("Generated"), FILTER_GENERATED),
+            (_("Saved"), FILTER_SAVED),
+            (_("Failed"), FILTER_FAILED),
+            (_("Untagged"), FILTER_UNTAGGED),
+        ):
+            self._grid_filter_combo.addItem(label, criterion)
+        self._grid_filter_combo.setToolTip(_("Show only the photos in the chosen state."))
+        _fit_combo(self._grid_filter_combo)
+        row.addWidget(self._grid_filter_combo)
+        row.addSpacing(16)
+
         row.addWidget(QLabel(_("Sort by")))
         self._grid_sort_combo = QComboBox()
         for label, criterion in (
@@ -1575,6 +1626,7 @@ class MainWindow(QMainWindow):
         self._grid_sort_combo.setToolTip(
             _("Order the thumbnails by name, file type, status, or existing metadata."),
         )
+        _fit_combo(self._grid_sort_combo)
         row.addWidget(self._grid_sort_combo)
 
         self._grid_sort_dir = QToolButton()
@@ -1585,9 +1637,15 @@ class MainWindow(QMainWindow):
         row.addWidget(self._grid_sort_dir)
         row.addStretch(1)
 
+        self._grid_filter_combo.currentIndexChanged.connect(self._on_grid_filter_changed)
         self._grid_sort_combo.currentIndexChanged.connect(self._on_grid_sort_changed)
         self._grid_sort_dir.toggled.connect(self._on_grid_sort_dir_toggled)
         return row
+
+    def _on_grid_filter_changed(self) -> None:
+        """Re-filter the visible grid when the Show choice changes."""
+        self._grid_filter = self._grid_filter_combo.currentData()
+        self._resort_grid()
 
     def _on_grid_sort_changed(self) -> None:
         """Re-sort the visible grid when the sort field changes."""
@@ -1606,7 +1664,7 @@ class MainWindow(QMainWindow):
         self._resort_grid()
 
     def _resort_grid(self) -> None:
-        """Rebuild the current folder grid in the chosen order; cached thumbnails are reused."""
+        """Rebuild the grid with the current filter and order; cached thumbnails are reused."""
         if self._grid_folder is not None and self._right.currentIndex() == _PAGE_GRID:
             self._show_grid(self._grid_folder)
 
@@ -2249,9 +2307,9 @@ class MainWindow(QMainWindow):
         self._grid_folder = folder
         self._grid.clear()
         self._grid_items = {}
-        under = paths_under([item.path for item in self._items.values()], folder)
+        under = [self._items[str(path)] for path in paths_under(self._item_paths(), folder)]
         items = sort_photos(
-            [self._items[str(path)] for path in under],
+            filter_photos(under, self._grid_filter),
             self._grid_sort,
             descending=self._grid_sort_desc,
         )
@@ -2269,14 +2327,27 @@ class MainWindow(QMainWindow):
                 pending.append(item.path)
         self._syncing = False
         self._right.setCurrentIndex(_PAGE_GRID)
-        self._status.setText(
-            ngettext("{n} photo in {folder}.", "{n} photos in {folder}.", len(items)).format(
-                n=len(items),
-                folder=folder.name or folder,
-            ),
-        )
+        self._status.setText(self._grid_status_text(folder, shown=len(items), total=len(under)))
         if pending:
             self._start_thumbs(pending)
+
+    def _item_paths(self) -> list[Path]:
+        """Return the path of every photo currently in the list."""
+        return [item.path for item in self._items.values()]
+
+    def _grid_status_text(self, folder: Path, *, shown: int, total: int) -> str:
+        """Describe the grid's contents, noting when a filter is hiding some of the folder."""
+        name = folder.name or folder
+        if shown == total:
+            return ngettext("{n} photo in {folder}.", "{n} photos in {folder}.", total).format(
+                n=total,
+                folder=name,
+            )
+        return _("Showing {shown} of {total} in {folder}.").format(
+            shown=shown,
+            total=total,
+            folder=name,
+        )
 
     def _update_grid_item(self, item: PhotoItem, grid_item: QListWidgetItem) -> None:
         """Refresh a grid thumbnail: image (or placeholder), state badges, and checkbox."""

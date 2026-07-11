@@ -699,6 +699,43 @@ def sort_photos(items: Iterable[PhotoItem], criterion: str, *, descending: bool)
     return sorted(items, key=lambda item: photo_sort_key(item, criterion), reverse=descending)
 
 
+# Folder grid filters: which photos the grid shows. FILTER_ALL (the default) shows everything.
+FILTER_ALL = "all"
+FILTER_SELECTED = "selected"
+FILTER_PENDING = "pending"
+FILTER_GENERATED = "generated"
+FILTER_SAVED = "saved"
+FILTER_FAILED = "failed"
+FILTER_UNTAGGED = "untagged"
+
+
+def photo_matches_filter(item: PhotoItem, criterion: str) -> bool:
+    """
+    Report whether *item* passes the grid filter *criterion*.
+
+    The status filters key off the lifecycle state the badges show, FILTER_SELECTED follows the
+    checkbox, and FILTER_UNTAGGED matches only once the metadata scan has run and found nothing (a
+    None/unknown scan state does not match, so no photo is hidden while the scan is still pending).
+    FILTER_ALL and any unrecognized value match everything.
+    """
+    # A dict of cheap boolean checks keeps this to one return (no PLR0911). FILTER_ALL is not a
+    # key, so it falls through to the default True, as does any value the grid never sends.
+    checks = {
+        FILTER_SELECTED: item.selected,
+        FILTER_PENDING: item.status == PENDING,
+        FILTER_GENERATED: item.has_proposal,
+        FILTER_SAVED: item.status == SAVED,
+        FILTER_FAILED: item.status == FAILED,
+        FILTER_UNTAGGED: item.known_fields is not None and not item.known_fields,
+    }
+    return checks.get(criterion, True)
+
+
+def filter_photos(items: Iterable[PhotoItem], criterion: str) -> list[PhotoItem]:
+    """Keep only the photos that pass the grid filter *criterion*, order preserved."""
+    return [item for item in items if photo_matches_filter(item, criterion)]
+
+
 # Badge names for the folder grid's thumbnail overlays, in the order they are drawn.
 BADGE_FAILED = "failed"
 BADGE_SAVED = "saved"

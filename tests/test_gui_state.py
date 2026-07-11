@@ -15,6 +15,13 @@ from photo_tagger.gui_state import (
     BADGE_UNSAVED,
     DEFAULT_GUI_EXTENSIONS,
     FAILED,
+    FILTER_ALL,
+    FILTER_FAILED,
+    FILTER_GENERATED,
+    FILTER_PENDING,
+    FILTER_SAVED,
+    FILTER_SELECTED,
+    FILTER_UNTAGGED,
     OUTPUT_LANGUAGE_SUGGESTIONS,
     PENDING,
     READY,
@@ -42,6 +49,7 @@ from photo_tagger.gui_state import (
     expand_inputs,
     fields_written,
     file_type_label,
+    filter_photos,
     format_existing_keywords,
     group_by_parent,
     hierarchy_preview,
@@ -56,6 +64,7 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    photo_matches_filter,
     photo_sort_key,
     rank_vision_models,
     reveal_command,
@@ -667,6 +676,47 @@ def test_photo_sort_key_is_uniformly_shaped_across_criteria() -> None:
         key = photo_sort_key(item, criterion)
         assert len(key) == 3  # noqa: PLR2004 - primary, name, full-path tiebreaks
         assert all(isinstance(part, str) for part in key)
+
+
+def test_filter_photos_all_keeps_everything_in_order() -> None:
+    """FILTER_ALL is a pass-through: every photo survives, order preserved."""
+    items = [
+        PhotoItem(path=Path("/d/a.jpg"), status=PENDING),
+        PhotoItem(path=Path("/d/b.jpg"), status=SAVED),
+    ]
+    assert filter_photos(items, FILTER_ALL) == items
+
+
+def test_filter_photos_by_status_and_selection() -> None:
+    """The status and selection filters each keep only the photos in that state."""
+    saved = PhotoItem(path=Path("/d/a.jpg"), status=SAVED, selected=False)
+    failed = PhotoItem(path=Path("/d/b.jpg"), status=FAILED, selected=True)
+    pending = PhotoItem(path=Path("/d/c.jpg"), status=PENDING, selected=True)
+    items = [saved, failed, pending]
+    assert filter_photos(items, FILTER_SAVED) == [saved]
+    assert filter_photos(items, FILTER_FAILED) == [failed]
+    assert filter_photos(items, FILTER_PENDING) == [pending]
+    assert filter_photos(items, FILTER_SELECTED) == [failed, pending]
+
+
+def test_filter_photos_generated_uses_has_proposal() -> None:
+    """The Generated filter keys off has_proposal, not the lifecycle status."""
+    generated = PhotoItem(path=Path("/d/a.jpg"), has_proposal=True)
+    plain = PhotoItem(path=Path("/d/b.jpg"), has_proposal=False)
+    assert filter_photos([generated, plain], FILTER_GENERATED) == [generated]
+
+
+def test_filter_untagged_matches_only_scanned_empty() -> None:
+    """Untagged keeps a scanned-but-empty photo, and never a tagged or still-unscanned one."""
+    empty = PhotoItem(path=Path("/d/a.jpg"), known_fields=set())
+    tagged = PhotoItem(path=Path("/d/b.jpg"), known_fields={FIELD_TITLE})
+    unscanned = PhotoItem(path=Path("/d/c.jpg"), known_fields=None)
+    assert filter_photos([empty, tagged, unscanned], FILTER_UNTAGGED) == [empty]
+
+
+def test_photo_matches_filter_unknown_criterion_matches_all() -> None:
+    """An unrecognized criterion behaves like FILTER_ALL rather than hiding every photo."""
+    assert photo_matches_filter(PhotoItem(path=Path("/d/a.jpg")), "bogus") is True
 
 
 def test_status_summary_counts_states() -> None:

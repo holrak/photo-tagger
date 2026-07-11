@@ -169,6 +169,7 @@ tobytes
 tomlkit
 tristates
 twemoji
+unscanned
 unwritable
 usefixtures
 venv
