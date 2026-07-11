@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from photo_tagger.models import GeneratedMetadata
+from photo_tagger.models import GeneratedMetadata, KeywordSet
 
 
 def test_generated_metadata_accepts_typical_payload() -> None:
@@ -17,16 +17,20 @@ def test_generated_metadata_accepts_typical_payload() -> None:
     assert len(payload.keywords) == 3  # noqa: PLR2004 - asserting fixture shape
 
 
-def test_generated_metadata_rejects_blank_title() -> None:
-    """An empty title would silently strip the photo's display name; reject it."""
+@pytest.mark.parametrize("field_name", ["title", "description"])
+@pytest.mark.parametrize(
+    "bad_value",
+    ["", "x" * 2000],
+    ids=["blank", "over-long"],
+)
+def test_generated_metadata_rejects_blank_and_runaway_text_fields(
+    field_name: str,
+    bad_value: str,
+) -> None:
+    """Blank or runaway titles/descriptions are model drift; reject so pydantic-ai retries."""
+    values: dict[str, object] = {"title": "ok", "description": "ok", field_name: bad_value}
     with pytest.raises(ValidationError):
-        GeneratedMetadata(title="", description="ok", keywords=[])
-
-
-def test_generated_metadata_rejects_long_title() -> None:
-    """A 500-char "title" is almost always model drift; cap it so pydantic-ai retries."""
-    with pytest.raises(ValidationError):
-        GeneratedMetadata(title="x" * 500, description="ok", keywords=[])
+        GeneratedMetadata(**values)  # type: ignore[arg-type]
 
 
 def test_generated_metadata_truncates_too_many_keywords() -> None:
@@ -82,3 +86,21 @@ def test_generated_metadata_truncates_too_many_hierarchies() -> None:
         hierarchies=[f"Leaf{i}<Branch<Root" for i in range(40)],
     )
     assert len(meta.hierarchies) == 20  # noqa: PLR2004 - matches _MAX_HIERARCHIES
+
+
+@pytest.mark.parametrize(
+    ("keyword_set", "empty"),
+    [
+        (KeywordSet(), True),
+        (KeywordSet(subject=["Bird"]), False),
+        (KeywordSet(hierarchical=["Animal|Bird"]), False),
+        (KeywordSet(weighted=["Bird"]), False),
+    ],
+    ids=["all-empty", "subject-only", "hierarchical-only", "weighted-only"],
+)
+def test_keyword_set_is_empty_checks_every_view(
+    keyword_set: KeywordSet,
+    empty: bool,  # noqa: FBT001 - parametrized expectation, not an API flag.
+) -> None:
+    """is_empty is False when ANY of the three views holds a keyword, not just subject."""
+    assert keyword_set.is_empty() is empty
