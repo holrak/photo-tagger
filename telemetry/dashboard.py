@@ -14,8 +14,9 @@
 """
 Marimo dashboard over the photo-tagger telemetry dataset.
 
-Reads the Cloudflare Analytics Engine SQL API directly; nothing here can write. Each chart answers
-one of the questions in queries.sql, plus release-adoption views, and a free-form SQL console.
+Reads the Cloudflare Analytics Engine SQL API directly; nothing here can write. Sections: adoption,
+usage, performance and hardware, reliability and crashes, languages, plus a free-form SQL console.
+Every chart pairs with a table twin, and a window + interface filter scopes everything at once.
 
 Run it (read-only app view, dependencies resolved into an isolated venv):
 
@@ -38,9 +39,10 @@ def _(mo):
     mo.md(
         """
         # photo-tagger telemetry
-        Anonymous usage beacons from the [collector](README.md), one data point per run.
-        All totals weight rows by `_sample_interval`, so they stay honest once Analytics Engine
-        starts sampling.
+        Anonymous usage and crash beacons from the [collector](README.md), one data point per
+        event. All totals weight rows by `_sample_interval`, so they stay honest once Analytics
+        Engine starts sampling. Fields added in schema v2 (hardware, outcome counters, crashes)
+        are empty on rows sent by older installs; those views quietly cover v2 rows only.
         """,
     )
 
@@ -61,11 +63,15 @@ def _():
 
 @app.cell
 def _(mo):
-    # Validated categorical/ink palette, stepped per theme. Marks wear the hue; text and chrome
-    # wear the ink tokens, never the series color.
+    # Validated categorical/ink palette (the project's reference palette), stepped per theme.
+    # Marks wear the hue; text and chrome wear the ink tokens, never the series color. Crash
+    # views wear the reserved status hues (critical/good), which clear 3:1 on both surfaces and
+    # never impersonate a data series.
     _dark = mo.app_meta().theme == "dark"
     COLORS = {
         "hue": "#3987e5" if _dark else "#2a78d6",
+        "critical": "#d03b3b",
+        "good": "#0ca30c",
         "surface": "#1a1a19" if _dark else "#fcfcfb",
         "grid": "#2c2c2a" if _dark else "#e1e0d9",
         "baseline": "#383835" if _dark else "#c3c2b7",
@@ -110,15 +116,27 @@ def _(mo):
         value="Last 30 days",
         label="Window",
     )
+    interface_filter = mo.ui.dropdown(
+        options={"All interfaces": "", "CLI only": "cli", "GUI only": "gui"},
+        value="All interfaces",
+        label="Interface",
+    )
     refresh = mo.ui.button(label="Refresh", value=0, on_click=lambda count: count + 1)
-    mo.hstack([window, refresh], justify="start", align="center", gap=1)
-    return refresh, window
+    mo.hstack([window, interface_filter, refresh], justify="start", align="center", gap=1)
+    return interface_filter, refresh, window
 
 
 @app.cell
-def _(window):
+def _(interface_filter, window):
     days = int(window.value)
-    return (days,)
+    # Composable WHERE fragments. Run rows are everything that is not a crash (v1 rows have ''
+    # in the event column); v2-only metrics additionally require double1 >= 2.
+    _iface = f" AND blob2 = '{interface_filter.value}'" if interface_filter.value else ""
+    since = f"timestamp > NOW() - INTERVAL '{days}' DAY"
+    runs_where = f"{since} AND blob12 != 'crash'{_iface}"
+    runs_v2_where = f"{runs_where} AND double1 >= 2"
+    crash_where = f"{since} AND blob12 = 'crash'{_iface}"
+    return crash_where, days, runs_v2_where, runs_where, since
 
 
 @app.cell
@@ -159,11 +177,18 @@ def _(pd, re):
     def fmt_secs(value: float) -> str:
         return "n/a" if pd.isna(value) else f"{value:,.1f} s"
 
+    def fmt_pct(value: float) -> str:
+        return "n/a" if pd.isna(value) else f"{value:.1%}"
+
     def version_key(text: str) -> tuple[int, ...]:
         """Sort key so '0.10.2' orders above '0.9.0' (string sort would not)."""
         return tuple(int(part) for part in re.findall(r"\d+", str(text))[:4]) or (0,)
 
-    return fmt_int, fmt_secs, version_key
+    def ratio(numerator: float, denominator: float) -> float:
+        """Divide safely, yielding NaN (rendered "n/a") instead of exploding on zero."""
+        return numerator / denominator if denominator else float("nan")
+
+    return fmt_int, fmt_pct, fmt_secs, ratio, version_key
 
 
 @app.cell
@@ -207,6 +232,7 @@ def _(COLORS, alt, mo, pd):
         subtitle: str = "",
         label: str | None = None,
         tooltips: list | None = None,
+        color: str | None = None,
     ) -> alt.LayerChart:
         """
         Ranked horizontal bars in a single hue, magnitude read by length.
@@ -223,7 +249,7 @@ def _(COLORS, alt, mo, pd):
         x = alt.X(f"{val}:Q", axis=None)
         bars = (
             alt.Chart(frame)
-            .mark_bar(size=18, cornerRadiusEnd=4, color=COLORS["hue"])
+            .mark_bar(size=18, cornerRadiusEnd=4, color=color or COLORS["hue"])
             .encode(
                 y=y,
                 x=x,
@@ -243,58 +269,56 @@ def _(COLORS, alt, mo, pd):
         )
         return _themed((bars + tips).properties(height=alt.Step(30)), title, subtitle)
 
-    def trend_line(frame: pd.DataFrame, *, title: str, subtitle: str = "") -> alt.LayerChart:
+    def trend_line(
+        frame: pd.DataFrame,
+        val: str,
+        *,
+        title: str,
+        subtitle: str = "",
+        val_title: str | None = None,
+        color: str | None = None,
+    ) -> alt.LayerChart:
         """
         Single-series daily trend as a 2px line over a 10% area wash.
 
         A hover tooltip and end-dot mark the reading, and the last value is labeled (no legend,
         since the title already names the one series).
         """
+        hue = color or COLORS["hue"]
         x = alt.X("day:T", title=None, axis=alt.Axis(grid=False, format="%b %d"))
         y = alt.Y(
-            "active_installs:Q",
+            f"{val}:Q",
             title=None,
             axis=alt.Axis(domain=False, ticks=False, tickCount=4, tickMinStep=1, format=","),
         )
         base = alt.Chart(frame).encode(x=x, y=y)
         tooltip = [
             alt.Tooltip("day:T", title="Day", format="%b %d"),
-            alt.Tooltip("active_installs:Q", title="Active installs", format=","),
+            alt.Tooltip(f"{val}:Q", title=val_title or val, format=","),
         ]
         hover = alt.selection_point(fields=["day"], nearest=True, on="pointerover", empty=False)
-        line = base.mark_line(
-            strokeWidth=2,
-            strokeCap="round",
-            strokeJoin="round",
-            color=COLORS["hue"],
-        )
-        wash = base.mark_area(opacity=0.1, color=COLORS["hue"])
+        line = base.mark_line(strokeWidth=2, strokeCap="round", strokeJoin="round", color=hue)
+        wash = base.mark_area(opacity=0.1, color=hue)
         # Invisible wide targets carry the hover selection and the tooltip, so the reader never
         # has to land on the 2px line itself.
         targets = base.mark_point(size=400, opacity=0).encode(tooltip=tooltip).add_params(hover)
         dot = base.mark_point(
             filled=True,
             size=80,
-            color=COLORS["hue"],
+            color=hue,
             stroke=COLORS["surface"],
             strokeWidth=2,
         ).encode(opacity=alt.condition(hover, alt.value(1), alt.value(0)))
         last = frame.tail(1)
         end_dot = (
             alt.Chart(last)
-            .mark_point(
-                filled=True,
-                size=70,
-                color=COLORS["hue"],
-                stroke=COLORS["surface"],
-                strokeWidth=2,
-            )
+            .mark_point(filled=True, size=70, color=hue, stroke=COLORS["surface"], strokeWidth=2)
             .encode(x=x, y=y)
         )
         end_label = (
             alt.Chart(last)
             .mark_text(align="left", dx=8, fontWeight=600, color=COLORS["ink2"], fontSize=11)
-            .encode(x=x, y=y, text=alt.Text("active_installs:Q", format=","))
+            .encode(x=x, y=y, text=alt.Text(f"{val}:Q", format=","))
         )
         chart = (wash + line + targets + dot + end_dot + end_label).properties(height=260)
         return _themed(chart, title, subtitle)
@@ -307,7 +331,7 @@ def _(COLORS, alt, mo, pd):
 
 
 @app.cell
-def _(days, fmt_int, fmt_secs, mo, query):
+def _(days, fmt_int, fmt_secs, mo, query, runs_where):
     _totals = query(
         f"""
         SELECT
@@ -315,14 +339,14 @@ def _(days, fmt_int, fmt_secs, mo, query):
           SUM(_sample_interval) AS runs,
           quantileWeighted(0.5)(double2, _sample_interval) AS median_batch
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
+        WHERE {runs_where}
         """,
     ).iloc[0]
     _cli = query(
         f"""
         SELECT quantileWeighted(0.5)(double3, _sample_interval) AS median_seconds
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob2 = 'cli'
+        WHERE {runs_where} AND blob2 = 'cli'
         """,
     ).iloc[0]
     mo.hstack(
@@ -359,14 +383,77 @@ def _(days, fmt_int, fmt_secs, mo, query):
 
 
 @app.cell
-def _(chart_card, days, mo, pd, query, trend_line):
+def _(crash_where, days, fmt_int, fmt_pct, mo, pd, query, ratio, runs_v2_where):
+    _outcome = query(
+        f"""
+        SELECT
+          SUM(double4 * _sample_interval) AS ok,
+          SUM(double5 * _sample_interval) AS failed,
+          SUM(double6 * _sample_interval) AS cache_hits,
+          SUM(double2 * _sample_interval) AS photos
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND double13 = 0
+        """,
+    ).iloc[0]
+    # SUM over zero crash rows comes back null; a quiet window means 0 crashes, not "n/a".
+    _crashes = (
+        query(
+            f"""
+            SELECT SUM(_sample_interval) AS crashes, COUNT(DISTINCT index1) AS affected
+            FROM photo_tagger_telemetry
+            WHERE {crash_where}
+            """,
+        )
+        .iloc[0]
+        .map(lambda v: 0 if pd.isna(v) else v)
+    )
+    mo.hstack(
+        [
+            mo.stat(
+                fmt_pct(ratio(_outcome["ok"], _outcome["ok"] + _outcome["failed"])),
+                label="Photo success rate",
+                caption="written / attempted, real writes only",
+                bordered=True,
+            ),
+            mo.stat(
+                fmt_pct(ratio(_outcome["cache_hits"], _outcome["photos"])),
+                label="Cache hit rate",
+                caption="photos answered without a model call",
+                bordered=True,
+            ),
+            mo.stat(
+                fmt_int(_crashes["crashes"]),
+                label="Crashes",
+                caption=f"weighted, last {days} days",
+                bordered=True,
+            ),
+            mo.stat(
+                fmt_int(_crashes["affected"]),
+                label="Crash-affected installs",
+                caption="distinct installs that crashed",
+                bordered=True,
+            ),
+        ],
+        widths="equal",
+        gap=1,
+        wrap=True,
+    )
+
+
+@app.cell
+def _(mo):
+    mo.md("## Adoption")
+
+
+@app.cell
+def _(chart_card, mo, pd, query, since, trend_line):
     installs_frame = query(
         f"""
         SELECT
           toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day,
           COUNT(DISTINCT index1) AS active_installs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
+        WHERE {since}
         GROUP BY day
         ORDER BY day
         """,
@@ -376,149 +463,22 @@ def _(chart_card, days, mo, pd, query, trend_line):
     chart_card(
         trend_line(
             installs_frame,
+            "active_installs",
             title="Active installs per day",
-            subtitle="distinct install ids seen each day",
+            subtitle="distinct install ids seen each day (runs and crashes)",
+            val_title="Active installs",
         ),
         installs_frame,
     )
 
 
 @app.cell
-def _(chart_card, days, hbar, mo, query):
-    models_frame = query(
-        f"""
-        SELECT blob4 AS model, SUM(_sample_interval) AS runs
-        FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
-        GROUP BY model
-        ORDER BY runs DESC
-        LIMIT 12
-        """,
-    )
-    mo.stop(models_frame.empty, mo.md("_No model data in this window._"))
-    models_view = chart_card(
-        hbar(
-            models_frame,
-            "model",
-            "runs",
-            title="Most-used models",
-            subtitle=f"top 12 by weighted runs, last {days} days",
-        ),
-        models_frame,
-    )
-    return (models_view,)
-
-
-@app.cell
-def _(chart_card, days, hbar, mo, query):
-    interface_frame = query(
-        f"""
-        SELECT blob2 AS interface, SUM(_sample_interval) AS runs
-        FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
-        GROUP BY interface
-        ORDER BY runs DESC
-        """,
-    )
-    mo.stop(interface_frame.empty, mo.md("_No interface data in this window._"))
-    interface_frame["interface"] = interface_frame["interface"].str.upper()
-    _total = interface_frame["runs"].sum()
-    interface_frame["share"] = interface_frame["runs"] / _total if _total else 0.0
-    interface_frame["label"] = interface_frame.apply(
-        lambda row: f"{row['runs']:,.0f} ({row['share']:.0%})",
-        axis=1,
-    )
-    interface_view = chart_card(
-        hbar(
-            interface_frame,
-            "interface",
-            "runs",
-            title="CLI vs GUI",
-            subtitle=f"weighted runs, last {days} days",
-            label="label",
-        ),
-        interface_frame,
-    )
-    return (interface_view,)
-
-
-@app.cell
-def _(interface_view, mo, models_view):
-    mo.hstack([models_view, interface_view], widths="equal", gap=1, wrap=True)
-
-
-@app.cell
-def _(chart_card, days, hbar, mo, query):
-    os_frame = query(
-        f"""
-        SELECT blob6 AS os, SUM(_sample_interval) AS runs
-        FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
-        GROUP BY os
-        ORDER BY runs DESC
-        """,
-    )
-    mo.stop(os_frame.empty, mo.md("_No OS data in this window._"))
-    os_view = chart_card(
-        hbar(
-            os_frame,
-            "os",
-            "runs",
-            title="Operating systems",
-            subtitle=f"weighted runs, last {days} days",
-        ),
-        os_frame,
-    )
-    return (os_view,)
-
-
-@app.cell
-def _(alt, chart_card, days, hbar, mo, query):
-    arch_frame = query(
-        f"""
-        SELECT
-          blob5 AS arch,
-          quantileWeighted(0.5)(double3, _sample_interval) AS median_seconds,
-          SUM(_sample_interval) AS runs
-        FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob2 = 'cli'
-        GROUP BY arch
-        ORDER BY runs DESC
-        """,
-    )
-    mo.stop(arch_frame.empty, mo.md("_No CLI runs in this window._"))
-    arch_frame["label"] = arch_frame["median_seconds"].map(lambda s: f"{s:,.1f} s")
-    arch_view = chart_card(
-        hbar(
-            arch_frame,
-            "arch",
-            "median_seconds",
-            title="Median run duration by CPU architecture",
-            subtitle="CLI only: GUI durations include idle review time",
-            label="label",
-            tooltips=[
-                alt.Tooltip("arch:N"),
-                alt.Tooltip("median_seconds:Q", title="Median seconds", format=",.1f"),
-                alt.Tooltip("runs:Q", title="Runs", format=",.0f"),
-            ],
-        ),
-        arch_frame,
-    )
-    return (arch_view,)
-
-
-@app.cell
-def _(arch_view, mo, os_view):
-    mo.hstack([os_view, arch_view], widths="equal", gap=1, wrap=True)
-
-
-@app.cell
-def _(chart_card, days, hbar, mo, query, version_key):
+def _(chart_card, days, hbar, mo, query, runs_where, version_key):
     app_version_frame = query(
         f"""
         SELECT blob1 AS app_version, SUM(_sample_interval) AS runs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
+        WHERE {runs_where}
         GROUP BY app_version
         ORDER BY runs DESC
         LIMIT 12
@@ -531,7 +491,7 @@ def _(chart_card, days, hbar, mo, query, version_key):
             "app_version",
             "runs",
             title="photo-tagger versions",
-            subtitle="newest first: is the latest release being picked up?",
+            subtitle=f"newest first, last {days} days: is the latest release being picked up?",
         ),
         app_version_frame,
     )
@@ -539,12 +499,12 @@ def _(chart_card, days, hbar, mo, query, version_key):
 
 
 @app.cell
-def _(chart_card, days, hbar, mo, query, version_key):
+def _(chart_card, hbar, mo, query, runs_where, version_key):
     python_version_frame = query(
         f"""
         SELECT blob8 AS python_version, SUM(_sample_interval) AS runs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY
+        WHERE {runs_where}
         GROUP BY python_version
         ORDER BY runs DESC
         LIMIT 12
@@ -570,12 +530,147 @@ def _(app_version_view, mo, python_version_view):
 
 
 @app.cell
-def _(chart_card, days, hbar, mo, query):
+def _(mo):
+    mo.md("## Usage")
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query, runs_where):
+    models_frame = query(
+        f"""
+        SELECT blob4 AS model, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_where}
+        GROUP BY model
+        ORDER BY runs DESC
+        LIMIT 12
+        """,
+    )
+    mo.stop(models_frame.empty, mo.md("_No model data in this window._"))
+    models_view = chart_card(
+        hbar(
+            models_frame,
+            "model",
+            "runs",
+            title="Most-used models",
+            subtitle=f"top 12 by weighted runs, last {days} days",
+        ),
+        models_frame,
+    )
+    return (models_view,)
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query, runs_where):
+    provider_frame = query(
+        f"""
+        SELECT blob3 AS provider, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_where}
+        GROUP BY provider
+        ORDER BY runs DESC
+        """,
+    )
+    mo.stop(provider_frame.empty, mo.md("_No provider data in this window._"))
+    provider_view = chart_card(
+        hbar(
+            provider_frame,
+            "provider",
+            "runs",
+            title="Providers",
+            subtitle=f"weighted runs, last {days} days",
+        ),
+        provider_frame,
+    )
+    return (provider_view,)
+
+
+@app.cell
+def _(mo, models_view, provider_view):
+    mo.hstack([models_view, provider_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query, since):
+    # Deliberately unfiltered by the interface control: this chart IS the interface split.
+    interface_frame = query(
+        f"""
+        SELECT blob2 AS interface, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {since} AND blob12 != 'crash'
+        GROUP BY interface
+        ORDER BY runs DESC
+        """,
+    )
+    mo.stop(interface_frame.empty, mo.md("_No interface data in this window._"))
+    interface_frame["interface"] = interface_frame["interface"].str.upper()
+    _total = interface_frame["runs"].sum()
+    interface_frame["share"] = interface_frame["runs"] / _total if _total else 0.0
+    interface_frame["label"] = interface_frame.apply(
+        lambda row: f"{row['runs']:,.0f} ({row['share']:.0%})",
+        axis=1,
+    )
+    interface_view = chart_card(
+        hbar(
+            interface_frame,
+            "interface",
+            "runs",
+            title="CLI vs GUI",
+            subtitle=f"weighted runs, last {days} days (ignores the interface filter)",
+            label="label",
+        ),
+        interface_frame,
+    )
+    return (interface_view,)
+
+
+@app.cell
+def _(chart_card, hbar, mo, pd, query, runs_where):
+    _sizes_raw = query(
+        f"""
+        SELECT double2 AS batch_size, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_where} AND double2 > 0
+        GROUP BY batch_size
+        """,
+    )
+    mo.stop(_sizes_raw.empty, mo.md("_No batch-size data in this window._"))
+    _bucket_edges = [0, 1, 5, 20, 100, float("inf")]
+    _bucket_names = ["1 photo", "2-5", "6-20", "21-100", "100+"]
+    batch_frame = (
+        _sizes_raw.assign(
+            bucket=pd.cut(_sizes_raw["batch_size"], _bucket_edges, labels=_bucket_names),
+        )
+        .groupby("bucket", as_index=False, observed=True)["runs"]
+        .sum()
+    )
+    # Ordered small-to-large (an ordinal axis), not ranked by magnitude like the other bars.
+    batch_frame["bucket"] = batch_frame["bucket"].astype(str)
+    batch_view = chart_card(
+        hbar(
+            batch_frame,
+            "bucket",
+            "runs",
+            title="Batch sizes",
+            subtitle="photos per run, weighted runs per bucket",
+        ),
+        batch_frame,
+    )
+    return (batch_view,)
+
+
+@app.cell
+def _(batch_view, interface_view, mo):
+    mo.hstack([interface_view, batch_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_where):
     _formats_raw = query(
         f"""
         SELECT blob11 AS file_types, SUM(_sample_interval) AS runs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob11 != ''
+        WHERE {runs_where} AND blob11 != ''
         GROUP BY file_types
         ORDER BY runs DESC
         """,
@@ -590,7 +685,7 @@ def _(chart_card, days, hbar, mo, query):
         .sum()
         .sort_values("runs", ascending=False)
     )
-    chart_card(
+    formats_view = chart_card(
         hbar(
             formats_frame,
             "fmt",
@@ -600,15 +695,344 @@ def _(chart_card, days, hbar, mo, query):
         ),
         formats_frame,
     )
+    return (formats_view,)
 
 
 @app.cell
-def _(chart_card, days, hbar, mo, query):
+def _(chart_card, days, fmt_int, hbar, mo, query, runs_v2_where):
+    _tokens_frame = query(
+        f"""
+        SELECT
+          blob4 AS model,
+          quantileWeighted(0.5)(double9, _sample_interval) AS median_tokens,
+          SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND double9 > 0
+        GROUP BY model
+        ORDER BY runs DESC
+        LIMIT 10
+        """,
+    )
+    mo.stop(_tokens_frame.empty, mo.md("_No token data in this window yet (schema v2 rows only)._"))
+    _tokens_frame["label"] = _tokens_frame["median_tokens"].map(fmt_int)
+    tokens_view = chart_card(
+        hbar(
+            _tokens_frame,
+            "model",
+            "median_tokens",
+            title="Token appetite by model",
+            subtitle=f"median tokens per run, top models, last {days} days",
+            label="label",
+        ),
+        _tokens_frame,
+    )
+    return (tokens_view,)
+
+
+@app.cell
+def _(formats_view, mo, tokens_view):
+    mo.hstack([formats_view, tokens_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(mo):
+    mo.md("## Hardware & performance")
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_v2_where):
+    gpu_frame = query(
+        f"""
+        SELECT blob14 AS gpu, SUM(_sample_interval) AS runs, COUNT(DISTINCT index1) AS installs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND blob14 != ''
+        GROUP BY gpu
+        ORDER BY runs DESC
+        LIMIT 12
+        """,
+    )
+    mo.stop(gpu_frame.empty, mo.md("_No GPU data in this window yet (schema v2 rows only)._"))
+    gpu_view = chart_card(
+        hbar(
+            gpu_frame,
+            "gpu",
+            "runs",
+            title="GPUs",
+            subtitle="weighted runs per graphics hardware (Apple Silicon reports the SoC)",
+        ),
+        gpu_frame,
+    )
+    return (gpu_view,)
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_v2_where):
+    cpu_frame = query(
+        f"""
+        SELECT blob13 AS cpu, SUM(_sample_interval) AS runs, COUNT(DISTINCT index1) AS installs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND blob13 != ''
+        GROUP BY cpu
+        ORDER BY runs DESC
+        LIMIT 12
+        """,
+    )
+    mo.stop(cpu_frame.empty, mo.md("_No CPU data in this window yet (schema v2 rows only)._"))
+    cpu_view = chart_card(
+        hbar(
+            cpu_frame,
+            "cpu",
+            "runs",
+            title="CPUs",
+            subtitle="weighted runs per processor model",
+        ),
+        cpu_frame,
+    )
+    return (cpu_view,)
+
+
+@app.cell
+def _(cpu_view, gpu_view, mo):
+    mo.hstack([cpu_view, gpu_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_v2_where):
+    memory_frame = query(
+        f"""
+        SELECT double12 AS memory_gb, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND double12 > 0
+        GROUP BY memory_gb
+        ORDER BY memory_gb
+        """,
+    )
+    mo.stop(memory_frame.empty, mo.md("_No RAM data in this window yet (schema v2 rows only)._"))
+    # Ordered small-to-large (an ordinal axis), so the RAM ladder reads top-down.
+    memory_frame["ram"] = memory_frame["memory_gb"].map(lambda gb: f"{gb:,.0f} GB")
+    memory_view = chart_card(
+        hbar(
+            memory_frame,
+            "ram",
+            "runs",
+            title="RAM",
+            subtitle="weighted runs per memory size",
+        ),
+        memory_frame,
+    )
+    return (memory_view,)
+
+
+@app.cell
+def _(alt, chart_card, hbar, mo, query, runs_where):
+    duration_frame = query(
+        f"""
+        SELECT
+          blob5 AS arch,
+          quantileWeighted(0.5)(double3, _sample_interval) AS median_seconds,
+          SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_where} AND blob2 = 'cli'
+        GROUP BY arch
+        ORDER BY runs DESC
+        """,
+    )
+    mo.stop(duration_frame.empty, mo.md("_No CLI runs in this window._"))
+    duration_frame["label"] = duration_frame["median_seconds"].map(lambda s: f"{s:,.1f} s")
+    duration_view = chart_card(
+        hbar(
+            duration_frame,
+            "arch",
+            "median_seconds",
+            title="Median run duration by CPU architecture",
+            subtitle="CLI only: GUI durations include idle review time",
+            label="label",
+            tooltips=[
+                alt.Tooltip("arch:N"),
+                alt.Tooltip("median_seconds:Q", title="Median seconds", format=",.1f"),
+                alt.Tooltip("runs:Q", title="Runs", format=",.0f"),
+            ],
+        ),
+        duration_frame,
+    )
+    return (duration_view,)
+
+
+@app.cell
+def _(duration_view, memory_view, mo):
+    mo.hstack([memory_view, duration_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(chart_card, days, hbar, mo, query, runs_where):
+    os_frame = query(
+        f"""
+        SELECT blob6 AS os, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_where}
+        GROUP BY os
+        ORDER BY runs DESC
+        """,
+    )
+    mo.stop(os_frame.empty, mo.md("_No OS data in this window._"))
+    os_view = chart_card(
+        hbar(
+            os_frame,
+            "os",
+            "runs",
+            title="Operating systems",
+            subtitle=f"weighted runs, last {days} days",
+        ),
+        os_frame,
+    )
+    return (os_view,)
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_v2_where):
+    cores_frame = query(
+        f"""
+        SELECT double11 AS cores, SUM(_sample_interval) AS runs
+        FROM photo_tagger_telemetry
+        WHERE {runs_v2_where} AND double11 > 0
+        GROUP BY cores
+        ORDER BY cores
+        """,
+    )
+    mo.stop(cores_frame.empty, mo.md("_No core-count data in this window yet (schema v2 only)._"))
+    cores_frame["cores_label"] = cores_frame["cores"].map(lambda n: f"{n:,.0f} cores")
+    cores_view = chart_card(
+        hbar(
+            cores_frame,
+            "cores_label",
+            "runs",
+            title="Logical CPU cores",
+            subtitle="weighted runs per core count",
+        ),
+        cores_frame,
+    )
+    return (cores_view,)
+
+
+@app.cell
+def _(cores_view, mo, os_view):
+    mo.hstack([os_view, cores_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(mo):
+    mo.md("## Reliability & crashes")
+
+
+@app.cell
+def _(COLORS, chart_card, crash_where, mo, pd, query, trend_line):
+    crash_trend_frame = query(
+        f"""
+        SELECT
+          toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day,
+          SUM(_sample_interval) AS crashes
+        FROM photo_tagger_telemetry
+        WHERE {crash_where}
+        GROUP BY day
+        ORDER BY day
+        """,
+    )
+    mo.stop(
+        crash_trend_frame.empty,
+        mo.md("_No crashes in this window._ :tada:").callout(kind="success"),
+    )
+    crash_trend_frame["day"] = pd.to_datetime(crash_trend_frame["day"])
+    crash_trend_view = chart_card(
+        trend_line(
+            crash_trend_frame,
+            "crashes",
+            title="Crashes per day",
+            subtitle="weighted crash beacons (status color: this is a state, not a series)",
+            val_title="Crashes",
+            color=COLORS["critical"],
+        ),
+        crash_trend_frame,
+    )
+    return (crash_trend_view,)
+
+
+@app.cell
+def _(COLORS, chart_card, crash_where, hbar, mo, query, version_key):
+    crash_version_frame = query(
+        f"""
+        SELECT blob1 AS app_version, SUM(_sample_interval) AS crashes
+        FROM photo_tagger_telemetry
+        WHERE {crash_where}
+        GROUP BY app_version
+        ORDER BY crashes DESC
+        LIMIT 12
+        """,
+    ).sort_values("app_version", key=lambda s: s.map(version_key), ascending=False)
+    mo.stop(crash_version_frame.empty, mo.md("_No crashes to attribute to versions._"))
+    crash_version_view = chart_card(
+        hbar(
+            crash_version_frame,
+            "app_version",
+            "crashes",
+            title="Crashes by app version",
+            subtitle="newest first: did the last release make things better or worse?",
+            color=COLORS["critical"],
+        ),
+        crash_version_frame,
+    )
+    return (crash_version_view,)
+
+
+@app.cell
+def _(crash_trend_view, crash_version_view, mo):
+    mo.hstack([crash_trend_view, crash_version_view], widths="equal", gap=1, wrap=True)
+
+
+@app.cell
+def _(crash_where, mo, query):
+    signatures_frame = query(
+        f"""
+        SELECT
+          blob15 AS exception_type,
+          blob16 AS crash_location,
+          blob1 AS app_version,
+          blob6 AS os,
+          SUM(_sample_interval) AS crashes,
+          COUNT(DISTINCT index1) AS installs
+        FROM photo_tagger_telemetry
+        WHERE {crash_where}
+        GROUP BY exception_type, crash_location, app_version, os
+        ORDER BY crashes DESC
+        LIMIT 50
+        """,
+    )
+    mo.stop(signatures_frame.empty, mo.md("_No crash signatures in this window._"))
+    mo.vstack(
+        [
+            mo.md(
+                "### Crash signatures\n"
+                "Exception type and the deepest photo-tagger frame (`module:function:line`); "
+                "messages are never collected, so a signature is the whole story the beacon "
+                "tells. The full in-app frame chain is in `blob17` via the SQL console.",
+            ),
+            mo.ui.table(signatures_frame, page_size=10),
+        ],
+        gap=1,
+    )
+
+
+@app.cell
+def _(mo):
+    mo.md("## Languages")
+
+
+@app.cell
+def _(chart_card, hbar, mo, query, runs_where):
     output_language_frame = query(
         f"""
         SELECT blob9 AS output_language, SUM(_sample_interval) AS runs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob9 != ''
+        WHERE {runs_where} AND blob9 != ''
         GROUP BY output_language
         ORDER BY runs DESC
         LIMIT 12
@@ -629,12 +1053,12 @@ def _(chart_card, days, hbar, mo, query):
 
 
 @app.cell
-def _(chart_card, days, hbar, mo, query):
+def _(chart_card, hbar, mo, query, runs_where):
     ui_language_frame = query(
         f"""
         SELECT blob10 AS ui_language, SUM(_sample_interval) AS runs
         FROM photo_tagger_telemetry
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob10 != ''
+        WHERE {runs_where} AND blob10 != ''
         GROUP BY ui_language
         ORDER BY runs DESC
         LIMIT 12
@@ -662,15 +1086,22 @@ def _(mo, output_language_view, ui_language_view):
 @app.cell
 def _(mo):
     _default_sql = """\
-    -- Column map (see worker.js):
-    --   index1  = install_id          blob1  = app_version    blob2  = interface (cli|gui)
-    --   blob3   = provider            blob4  = model          blob5  = arch
-    --   blob6   = os                  blob7  = os_release     blob8  = python_version
-    --   blob9   = output_language     blob10 = ui_language    blob11 = file_types
-    --   double1 = schema_version      double2 = batch_size    double3 = duration_seconds
+    -- Column map (see worker.js). Run rows: blob12 != 'crash'; crash rows: blob12 = 'crash';
+    -- v2-only fields (hardware, outcome counters): add AND double1 >= 2.
+    --   index1  = install_id         blob1  = app_version    blob2  = interface (cli|gui)
+    --   blob3   = provider           blob4  = model          blob5  = arch
+    --   blob6   = os                 blob7  = os_release     blob8  = python_version
+    --   blob9   = output_language    blob10 = ui_language    blob11 = file_types
+    --   blob12  = event (run|crash)  blob13 = cpu            blob14 = gpu
+    --   blob15  = exception_type     blob16 = crash_location blob17 = crash_frames
+    --   double1 = schema_version     double2 = batch_size    double3 = duration_seconds
+    --   double4 = success_count      double5 = failure_count double6 = cache_hits
+    --   double7 = retry_successes    double8 = workers       double9 = total_tokens
+    --   double10 = inference_seconds double11 = cpu_count    double12 = memory_gb
+    --   double13 = dry_run (0|1)
     SELECT blob3 AS provider, SUM(_sample_interval) AS runs
     FROM photo_tagger_telemetry
-    WHERE timestamp > NOW() - INTERVAL '30' DAY
+    WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash'
     GROUP BY provider
     ORDER BY runs DESC;
     """
@@ -708,7 +1139,8 @@ def _(mo):
         ---
         Counts are `SUM(_sample_interval)` and medians are `quantileWeighted`, so numbers stay
         correct once Analytics Engine samples (the weight is 1 until then). The collector stores
-        no IPs and no cookies; see [README.md](README.md) in this directory.
+        no IPs and no cookies; crash beacons carry the exception type and in-app code location
+        only, never messages. See [README.md](README.md) in this directory.
         """,
     )
 

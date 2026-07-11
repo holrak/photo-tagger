@@ -1,26 +1,39 @@
 -- Starter queries for the photo-tagger telemetry dataset.
 --
 -- Run these against the Cloudflare Analytics Engine SQL API (or paste into the dashboard's SQL
--- console). All of these (including quantileWeighted, toStartOfInterval, and COUNT(DISTINCT
--- index1)) are verified to run on the live dataset. AE speaks a subset of the ClickHouse SQL
--- dialect, so consult the AE SQL reference if you extend them.
+-- console). AE speaks a subset of the ClickHouse SQL dialect; the schema-v1-era statements here
+-- were verified against the live dataset, and the schema-v2 additions follow the same verified
+-- constructs (SUM/quantileWeighted/COUNT DISTINCT/toStartOfInterval and plain WHERE filters).
 --
--- Every row counts SUM(_sample_interval) rather than COUNT(): once volume is high enough that AE
+-- Every count is SUM(_sample_interval) rather than COUNT(): once volume is high enough that AE
 -- starts sampling, _sample_interval is the per-row weight (it is 1 while no sampling happens), so
 -- weighting keeps the totals honest. The same reason is why the medians use quantileWeighted.
 --
--- Column map (see worker.js):
---   index1  = install_id          blob1  = app_version    blob2  = interface (cli|gui)
---   blob3   = provider            blob4  = model          blob5  = arch
---   blob6   = os                  blob7  = os_release     blob8  = python_version
---   blob9   = output_language     blob10 = ui_language    blob11 = file_types (e.g. "cr3,jpg")
---   double1 = schema_version      double2 = batch_size    double3 = duration_seconds
+-- Column map (see worker.js). One dataset holds two event kinds, discriminated by blob12:
+-- 'run' rows (one per tagging run) and 'crash' rows (one per unhandled exception). Rows written
+-- by schema-v1 clients predate blob12 and have '' there (and empty/zero v2 columns), so:
+--   run rows   -> WHERE blob12 != 'crash'
+--   crash rows -> WHERE blob12 = 'crash'
+--   v2-only metrics (outcome counters, hardware) -> add AND double1 >= 2
+--
+--   index1  = install_id
+--   blob1   = app_version         blob2   = interface (cli|gui)  blob3   = provider
+--   blob4   = model               blob5   = arch                 blob6   = os
+--   blob7   = os_release          blob8   = python_version       blob9   = output_language
+--   blob10  = ui_language         blob11  = file_types           blob12  = event (run|crash)
+--   blob13  = cpu model           blob14  = gpu model            blob15  = exception_type
+--   blob16  = crash_location      blob17  = crash_frames
+--   double1 = schema_version      double2 = batch_size           double3 = duration_seconds
+--   double4 = success_count       double5 = failure_count        double6 = cache_hits
+--   double7 = retry_successes     double8 = workers              double9 = total_tokens
+--   double10 = inference_seconds  double11 = cpu_count           double12 = memory_gb
+--   double13 = dry_run (0|1)
 
 
 -- 1. Most-used models (histogram), last 30 days.
 SELECT blob4 AS model, SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash'
 GROUP BY model
 ORDER BY runs DESC;
 
@@ -28,34 +41,35 @@ ORDER BY runs DESC;
 -- 2. Typical batch size: the median number of photos per run.
 SELECT quantileWeighted(0.5)(double2, _sample_interval) AS median_batch_size
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY;
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash';
 
 
 -- 3. CLI vs GUI split.
 SELECT blob2 AS interface, SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash'
 GROUP BY interface
 ORDER BY runs DESC;
 
 
--- 4. Performance by CPU architecture: median run duration per arch.
+-- 4. Performance by CPU model: median run duration per chip.
 -- Restricted to interface='cli' because a CLI run's duration is the batch's wall time, while a GUI
 -- session's duration includes idle review time and is not comparable.
 SELECT
-  blob5 AS arch,
+  blob13 AS cpu,
   quantileWeighted(0.5)(double3, _sample_interval) AS median_seconds,
   SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob2 = 'cli'
-GROUP BY arch
+WHERE timestamp > NOW() - INTERVAL '30' DAY
+  AND blob12 != 'crash' AND blob2 = 'cli' AND blob13 != ''
+GROUP BY cpu
 ORDER BY runs DESC;
 
 
 -- 5. OS distribution.
 SELECT blob6 AS os, SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash'
 GROUP BY os
 ORDER BY runs DESC;
 
@@ -80,7 +94,7 @@ ORDER BY day;
 -- one row per format; the dashboard does that split client-side. This still shows RAW vs JPEG usage.
 SELECT blob11 AS file_types, SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob11 != ''
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND blob11 != ''
 GROUP BY file_types
 ORDER BY runs DESC;
 
@@ -88,6 +102,85 @@ ORDER BY runs DESC;
 -- 8. Metadata (output) language vs UI language.
 SELECT blob9 AS output_language, blob10 AS ui_language, SUM(_sample_interval) AS runs
 FROM photo_tagger_telemetry
-WHERE timestamp > NOW() - INTERVAL '30' DAY
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash'
 GROUP BY output_language, ui_language
 ORDER BY runs DESC;
+
+
+-- 9. GPU distribution (schema v2): which graphics hardware is out there?
+SELECT blob14 AS gpu, SUM(_sample_interval) AS runs, COUNT(DISTINCT index1) AS installs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND blob14 != ''
+GROUP BY gpu
+ORDER BY runs DESC;
+
+
+-- 10. CPU model distribution (schema v2).
+SELECT blob13 AS cpu, SUM(_sample_interval) AS runs, COUNT(DISTINCT index1) AS installs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND blob13 != ''
+GROUP BY cpu
+ORDER BY runs DESC;
+
+
+-- 11. RAM distribution (schema v2). memory_gb is already a whole number of gigabytes, so raw
+-- grouping clusters naturally (8, 16, 18, 24, 32, 36, 64, ...).
+SELECT double12 AS memory_gb, SUM(_sample_interval) AS runs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND double12 > 0
+GROUP BY memory_gb
+ORDER BY memory_gb;
+
+
+-- 12. Success and cache-hit rates (schema v2, real writes only: dry runs excluded). Divide
+-- client-side: ok / (ok + failed), and cache_hits / photos.
+SELECT
+  SUM(double4 * _sample_interval) AS ok,
+  SUM(double5 * _sample_interval) AS failed,
+  SUM(double6 * _sample_interval) AS cache_hits,
+  SUM(double2 * _sample_interval) AS photos
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY
+  AND blob12 != 'crash' AND double1 >= 2 AND double13 = 0;
+
+
+-- 13. Token appetite: median tokens per run, and total (schema v2).
+SELECT
+  quantileWeighted(0.5)(double9, _sample_interval) AS median_tokens_per_run,
+  SUM(double9 * _sample_interval) AS total_tokens
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 != 'crash' AND double9 > 0;
+
+
+-- 14a. Crash count and affected installs, last 30 days.
+SELECT SUM(_sample_interval) AS crashes, COUNT(DISTINCT index1) AS affected_installs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 = 'crash';
+
+-- 14b. Top crash signatures: what breaks, and where in the code.
+SELECT
+  blob15 AS exception_type,
+  blob16 AS crash_location,
+  blob1 AS app_version,
+  SUM(_sample_interval) AS crashes,
+  COUNT(DISTINCT index1) AS installs
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 = 'crash'
+GROUP BY exception_type, crash_location, app_version
+ORDER BY crashes DESC;
+
+-- 14c. Crashes per day, for a trend line.
+SELECT
+  toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day,
+  SUM(_sample_interval) AS crashes
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '90' DAY AND blob12 = 'crash'
+GROUP BY day
+ORDER BY day;
+
+-- 14d. Crashes by app version: is the newest release healthier?
+SELECT blob1 AS app_version, SUM(_sample_interval) AS crashes
+FROM photo_tagger_telemetry
+WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob12 = 'crash'
+GROUP BY app_version
+ORDER BY crashes DESC;

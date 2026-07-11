@@ -62,8 +62,11 @@ and active installs over time.
 ## Dashboard
 
 [`dashboard.py`](dashboard.py) is a [marimo](https://marimo.io) notebook that runs those queries and
-turns them into KPI tiles, a daily active-installs trend, and ranked bar charts (models, interface,
-OS, arch, and app/Python versions), plus a free-form SQL console. It reads the SQL API directly and
+turns them into sections: **adoption** (KPI tiles, daily active-installs trend, app/Python
+versions), **usage** (models, providers, CLI vs GUI, batch sizes, file formats, token appetite),
+**hardware & performance** (CPU/GPU models, RAM, core counts, OS, duration by architecture),
+**reliability & crashes** (success and cache-hit rates, crash trend, crashes by version, a crash
+signature table), **languages**, and a free-form SQL console. It reads the SQL API directly and
 never writes.
 
 It is a self-contained [PEP 723](https://peps.python.org/pep-0723/) script, so
@@ -79,5 +82,5 @@ uvx marimo run --sandbox telemetry/dashboard.py   # read-only app; use `marimo e
 ```
 
 If the variables are missing the dashboard opens to setup instructions instead of failing. A window
-control (last 7/30/90 days) scopes every chart, and each chart has a table view so no value is gated
-behind color or a hover.
+control (last 7/30/90 days) and an interface filter (all/CLI/GUI) scope every chart, and each chart
+has a table view so no value is gated behind color or a hover.
