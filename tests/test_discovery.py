@@ -61,6 +61,11 @@ def test_parse_extensions_drops_blanks_and_dots() -> None:
     assert parse_extensions("cr3,.jpg, , png") == {".cr3", ".jpg", ".png"}
 
 
+def test_parse_extensions_normalizes_input() -> None:
+    """Whitespace is trimmed, leading dots added, and the given casing preserved."""
+    assert parse_extensions("cr3, jpg ,PNG") == {".cr3", ".jpg", ".PNG"}
+
+
 def test_resolve_image_batch_exits_on_unknown_extension() -> None:
     """Empty / dotted-only extension strings exit before touching the filesystem."""
     with pytest.raises(DiscoveryError):
@@ -381,6 +386,30 @@ def test_make_skip_list_appender_is_thread_safe(tmp_path: Path) -> None:
     # No interleaved/partial lines, no duplicate entries, no missing entries.
     assert sorted(lines) == sorted(str(p) for p in paths)
     assert len(set(lines)) == image_count
+
+
+def test_resolve_image_files_deduplicates_and_preserves_explicit(tmp_path: Path) -> None:
+    """Explicit paths stay first and duplicates discovered via directories are filtered out."""
+    folder = tmp_path / "images"
+    folder.mkdir()
+
+    explicit = folder / "explicit.cr3"
+    explicit.write_text("data")
+    duplicate = folder / "shared.jpg"
+    duplicate.write_text("data")
+    extra = folder / "other.jpg"
+    extra.write_text("data")
+
+    result = resolve_image_files(
+        [explicit, folder],
+        ext_set={".cr3", ".jpg"},
+        recursive=False,
+    )
+
+    explicit_resolved = explicit.resolve()
+    assert result[0] == explicit_resolved
+    assert set(result) == {explicit_resolved, duplicate.resolve(), extra.resolve()}
+    assert result.count(duplicate.resolve()) == 1
 
 
 def test_resolve_image_files_recursive_walks_subdirectories(tmp_path: Path) -> None:

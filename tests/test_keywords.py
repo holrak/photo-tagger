@@ -1,8 +1,5 @@
 """Regression tests for keyword utilities and contextual prompt helpers."""
 
-from typing import TYPE_CHECKING
-
-from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.keywords import (
     _collect_cumulative_entries,
     _normalize_chain_parts,
@@ -14,10 +11,6 @@ from photo_tagger.keywords import (
 )
 from photo_tagger.metadata import build_contextual_prompt
 from photo_tagger.models import KeywordSet
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_parse_hierarchical_keyword_handles_flat_and_hierarchical() -> None:
@@ -190,35 +183,6 @@ def test_build_contextual_prompt_includes_metadata_and_truncates_keywords() -> N
     # Both city and country survive; the model gets the full place name.
     assert "- Location: Lisbon, Portugal" in prompt
     assert "- GPS: 38.7 N, 9.1 W" in prompt
-
-
-def test_parse_extensions_normalizes_input() -> None:
-    """Comma-separated extensions are normalized with leading dots preserved."""
-    assert parse_extensions("cr3, jpg ,PNG") == {".cr3", ".jpg", ".PNG"}
-
-
-def test_resolve_image_files_deduplicates_and_preserves_explicit(tmp_path: Path) -> None:
-    """Explicit paths stay first and duplicates discovered via directories are filtered out."""
-    folder = tmp_path / "images"
-    folder.mkdir()
-
-    explicit = folder / "explicit.cr3"
-    explicit.write_text("data")
-    duplicate = folder / "shared.jpg"
-    duplicate.write_text("data")
-    extra = folder / "other.jpg"
-    extra.write_text("data")
-
-    result = resolve_image_files(
-        [explicit, folder],
-        ext_set={".cr3", ".jpg"},
-        recursive=False,
-    )
-
-    explicit_resolved = explicit.resolve()
-    assert result[0] == explicit_resolved
-    assert set(result) == {explicit_resolved, duplicate.resolve(), extra.resolve()}
-    assert result.count(duplicate.resolve()) == 1
 
 
 def test_merge_keywords_with_all_empty_inputs() -> None:
