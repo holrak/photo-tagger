@@ -3,7 +3,7 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -75,6 +75,32 @@ def test_open_cache_degrades_on_open_failure(tmp_path: Path) -> None:
     blocker = tmp_path / "blocker"
     blocker.write_text("a file where the cache's parent dir should be")
     assert open_cache(blocker / "cache.sqlite3", namespace="m#x") is None
+
+
+def test_open_cache_closes_connection_when_setup_fails(tmp_path: Path) -> None:
+    """
+    A corrupt DB file degrades to no-cache AND closes the already-opened connection.
+
+    Regression test: the connection (and its file handle) used to leak for the life of the
+    process when the PRAGMA/schema setup raised after sqlite3.connect succeeded.
+    """
+    corrupt = tmp_path / "cache.sqlite3"
+    corrupt.write_bytes(b"this is not a sqlite database, it just lives at the cache path")
+
+    opened: list[MagicMock] = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(database: str, **kwargs: bool) -> MagicMock:
+        conn = real_connect(database, **kwargs)
+        wrapper = MagicMock(wraps=conn)
+        opened.append(wrapper)
+        return wrapper
+
+    with patch("photo_tagger.cache.sqlite3.connect", side_effect=tracking_connect):
+        assert open_cache(corrupt, namespace="m#x") is None
+
+    assert len(opened) == 1
+    opened[0].close.assert_called_once()
 
 
 def test_safe_cache_get_treats_errors_as_misses() -> None:

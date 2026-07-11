@@ -171,11 +171,17 @@ class InferenceCache:
         # in the per-cache lock below; we deliberately serialize all DB access.
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        # WAL keeps other processes (a concurrent CLI run, the GUI) from blocking behind this
-        # one's writes. Within this process the lock below serializes everything anyway.
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute(_SCHEMA)
-        self._conn.commit()
+        try:
+            # WAL keeps other processes (a concurrent CLI run, the GUI) from blocking behind this
+            # one's writes. Within this process the lock below serializes everything anyway.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute(_SCHEMA)
+            self._conn.commit()
+        except BaseException:
+            # open_cache degrades to "no cache" on failure; without this close the connection
+            # (and its file handle) would leak for the life of the process.
+            self._conn.close()
+            raise
         self._lock = threading.Lock()
         self._model = model_name
         self._path = db_path
