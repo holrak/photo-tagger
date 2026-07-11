@@ -2,6 +2,7 @@
 
 import contextlib
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -45,6 +46,12 @@ if TYPE_CHECKING:
     ProgressCallback = Callable[[Path, bool], None]
     OnComplete = Callable[["BatchTotals"], None]
     OnImageResult = Callable[["ImageOutcome"], None]
+
+
+# Pause between the first pass and the retry pass. First-pass failures often mean the model
+# server is overloaded or mid-restart; re-hitting it immediately retries into the same outage.
+# The test suite zeroes this via a conftest fixture.
+_RETRY_PASS_DELAY_SECONDS = 5.0
 
 
 class _InferenceScratch(TypedDict, total=False):
@@ -830,6 +837,9 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
             retry_successes = 0
             still_failing = pending
         else:
+            if pending and _RETRY_PASS_DELAY_SECONDS > 0:
+                logger.info("pausing_before_retry_pass", seconds=_RETRY_PASS_DELAY_SECONDS)
+                time.sleep(_RETRY_PASS_DELAY_SECONDS)
             retry_successes, still_failing, _ = _run_pass(
                 pending,
                 ctx,

@@ -271,6 +271,37 @@ def test_run_batch_retry_recovers_a_failure(tmp_path: Path) -> None:
     assert totals.retry_successes == 1
 
 
+def test_run_batch_pauses_before_the_retry_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    The retry pass waits instead of immediately re-hitting a struggling server.
+
+    No pause happens when the first pass was clean (nothing pending to retry).
+    """
+    monkeypatch.setattr("photo_tagger.pipeline._RETRY_PASS_DELAY_SECONDS", 5.0)
+    sleeps: list[float] = []
+    monkeypatch.setattr("photo_tagger.pipeline.time.sleep", sleeps.append)
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+
+    calls = {"n": 0}
+
+    def fail_once(*_a: Any, **_kw: Any) -> bool:  # noqa: ANN401
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    with patch("photo_tagger.pipeline.process_photo", side_effect=fail_once):
+        run_batch([image], agent=_FAKE_AGENT, options=ProcessingOptions())
+    assert sleeps == [5.0]
+
+    sleeps.clear()
+    with patch("photo_tagger.pipeline.process_photo", return_value=True):
+        run_batch([image], agent=_FAKE_AGENT, options=ProcessingOptions())
+    assert sleeps == []
+
+
 def test_run_batch_calls_on_success_for_each_completed_file(tmp_path: Path) -> None:
     """on_success fires for first-pass and retry-pass successes, never for failures."""
     success_first = tmp_path / "ok.cr3"

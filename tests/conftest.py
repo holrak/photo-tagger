@@ -58,6 +58,12 @@ def _isolate_telemetry_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     monkeypatch.setattr("photo_tagger.telemetry.hardware_info", lambda _path: HardwareInfo())
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero the pause before the retry pass so every run_batch test stays instant."""
+    monkeypatch.setattr("photo_tagger.pipeline._RETRY_PASS_DELAY_SECONDS", 0.0)
+
+
 @pytest.fixture
 def stub_jpeg_bytes() -> BinaryContent:
     """Return a tiny placeholder JPEG used to short-circuit image preparation in unit tests."""
