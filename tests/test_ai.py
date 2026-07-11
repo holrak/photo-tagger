@@ -2,6 +2,7 @@
 
 import dataclasses
 from http import HTTPStatus
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,7 +10,9 @@ import httpx
 import pytest
 
 from photo_tagger import ai as ai_module
+from photo_tagger.config import DEFAULT_USER_PROMPT
 from photo_tagger.errors import ProviderError
+from photo_tagger.models import GeneratedMetadata
 from photo_tagger.providers import get_backend
 
 
@@ -26,13 +29,19 @@ class _DummyResponse:
         return repr(self._payload)
 
 
-def _patch_listing(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
-    """Make every model-listing request return *payload* with a 200."""
+def _patch_listing(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+) -> list[tuple[str, dict[str, str]]]:
+    """Make every model-listing request return *payload* with a 200, recording (url, headers)."""
+    requests: list[tuple[str, dict[str, str]]] = []
 
     def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> _DummyResponse:
+        requests.append((url, headers))
         return _DummyResponse(HTTPStatus.OK, payload)
 
     monkeypatch.setattr(httpx, "get", fake_get)
+    return requests
 
 
 # ---------------------------------------------------------------------------
@@ -41,8 +50,8 @@ def _patch_listing(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> 
 
 
 def test_create_agent_ollama_validates_and_builds_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_agent('ollama') validates against /api/tags and returns an Agent."""
-    _patch_listing(monkeypatch, {"models": [{"name": "test-model"}]})
+    """create_agent('ollama') validates against Ollama's native /api/tags listing."""
+    requests = _patch_listing(monkeypatch, {"models": [{"name": "test-model"}]})
     agent = ai_module.create_agent(
         "ollama",
         "test-model",
@@ -51,11 +60,12 @@ def test_create_agent_ollama_validates_and_builds_agent(monkeypatch: pytest.Monk
         retries=2,
     )
     assert agent is not None
+    assert [url for url, _ in requests] == ["http://localhost:11434/api/tags"]
 
 
 def test_create_agent_lmstudio_validates_and_builds_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_agent('lmstudio') validates against /v1/models and wires OpenAIProvider."""
-    _patch_listing(monkeypatch, {"data": [{"id": "test-model"}]})
+    """create_agent('lmstudio') validates against the OpenAI-style /v1/models listing."""
+    requests = _patch_listing(monkeypatch, {"data": [{"id": "test-model"}]})
     agent = ai_module.create_agent(
         "lmstudio",
         "test-model",
@@ -64,6 +74,7 @@ def test_create_agent_lmstudio_validates_and_builds_agent(monkeypatch: pytest.Mo
         retries=1,
     )
     assert agent is not None
+    assert [url for url, _ in requests] == ["http://localhost:1234/v1/models"]
 
 
 def test_create_agent_system_prompt_follows_output_language(
@@ -93,8 +104,8 @@ def test_create_agent_system_prompt_follows_output_language(
 
 
 def test_create_agent_openai_validates_with_supplied_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """create_agent('openai') accepts an explicit key and validates the model id."""
-    _patch_listing(monkeypatch, {"data": [{"id": "gpt-4o-mini"}]})
+    """create_agent('openai') sends the supplied key as a bearer token to the listing."""
+    requests = _patch_listing(monkeypatch, {"data": [{"id": "gpt-4o-mini"}]})
     agent = ai_module.create_agent(
         "openai",
         "gpt-4o-mini",
@@ -103,6 +114,9 @@ def test_create_agent_openai_validates_with_supplied_key(monkeypatch: pytest.Mon
         retries=1,
     )
     assert agent is not None
+    url, headers = requests[0]
+    assert url == "https://api.openai.com/v1/models"
+    assert headers.get("Authorization") == "Bearer sk-test"
 
 
 def test_create_agent_openai_without_key_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,8 +143,9 @@ def test_create_agent_openai_without_key_fails_fast(monkeypatch: pytest.MonkeyPa
 
 
 def test_create_agent_uses_default_url_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When api_base_url is None, the backend's default URL is used."""
-    _patch_listing(monkeypatch, {"models": [{"name": "m"}]})
+    """When api_base_url is None, the backend's default URL is what gets validated against."""
+    default_url = get_backend("ollama").default_base_url
+    requests = _patch_listing(monkeypatch, {"models": [{"name": "m"}]})
     agent = ai_module.create_agent(
         "ollama",
         "m",
@@ -139,6 +154,134 @@ def test_create_agent_uses_default_url_when_none(monkeypatch: pytest.MonkeyPatch
         retries=0,
     )
     assert agent is not None
+    assert requests[0][0].startswith(default_url.removesuffix("/v1"))
+
+
+# ---------------------------------------------------------------------------
+# analyze_image_with_ai
+# ---------------------------------------------------------------------------
+
+
+# (input_tokens, output_tokens, total_tokens) the stub result reports.
+_STUB_USAGE = (100, 20, 120)
+
+
+def _stub_image() -> Any:  # noqa: ANN401
+    """Return a tiny BinaryContent payload matching analyze_image_with_ai's signature."""
+    from pydantic_ai import BinaryContent  # noqa: PLC0415
+
+    return BinaryContent(data=b"\xff\xd8stub", media_type="image/jpeg")
+
+
+class _StubAgent:
+    """Capture run_sync's inputs and return a canned pydantic-ai result shape."""
+
+    def __init__(self, output: Any) -> None:  # noqa: ANN401
+        self._output = output
+        self.calls: list[dict[str, Any]] = []
+
+    def run_sync(self, prompt_parts: list[Any], *, model_settings: Any, output_type: Any) -> Any:  # noqa: ANN401
+        self.calls.append(
+            {"parts": prompt_parts, "settings": model_settings, "output_type": output_type},
+        )
+        input_tokens, output_tokens, total_tokens = _STUB_USAGE
+        return SimpleNamespace(
+            output=self._output,
+            usage=SimpleNamespace(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+            ),
+        )
+
+
+def test_analyze_image_folds_hierarchies_and_dedupes_keywords() -> None:
+    """
+    The model's hierarchy chains join the keyword list, with case-insensitive repeats collapsed.
+
+    The rest of the pipeline (merging, writing, the GUI) only ever sees InferenceResult.keywords, so
+    dropping the fold here would silently lose every hierarchy the model produced.
+    """
+    output = GeneratedMetadata(
+        title="A Title",
+        description="A description.",
+        keywords=["Duck", "duck", "Sky"],
+        hierarchies=["Duck<Bird<Animal"],
+    )
+    agent = _StubAgent(output)
+
+    result = ai_module.analyze_image_with_ai(
+        image_bytes=_stub_image(),
+        agent=agent,  # type: ignore[arg-type]
+        user_prompt="Describe.",
+    )
+
+    assert result.keywords == ["Duck", "Sky", "Duck<Bird<Animal"]
+    assert (result.title, result.description) == ("A Title", "A description.")
+    assert (result.input_tokens, result.output_tokens, result.total_tokens) == _STUB_USAGE
+    assert result.seconds >= 0.0
+
+
+def test_analyze_image_forwards_sampling_settings_and_prompt() -> None:
+    """Every sampling knob reaches run_sync's ModelSettings; the image rides in the prompt."""
+    output = GeneratedMetadata(title="T", description="D", keywords=["K"])
+    agent = _StubAgent(output)
+
+    image = _stub_image()
+    ai_module.analyze_image_with_ai(
+        image_bytes=image,
+        agent=agent,  # type: ignore[arg-type]
+        user_prompt="Describe this photo.",
+        temperature=0.7,
+        max_tokens=333,
+        timeout_seconds=42.0,
+        frequency_penalty=1.5,
+    )
+
+    call = agent.calls[0]
+    assert call["parts"] == ["Describe this photo.", image]
+    forwarded = {
+        key: call["settings"][key]
+        for key in ("temperature", "max_tokens", "timeout", "frequency_penalty")
+    }
+    assert forwarded == {
+        "temperature": 0.7,
+        "max_tokens": 333,
+        "timeout": 42.0,
+        "frequency_penalty": 1.5,
+    }
+    assert call["output_type"] is GeneratedMetadata
+
+
+def test_analyze_image_falls_back_to_the_default_prompt() -> None:
+    """An empty user prompt falls back to DEFAULT_USER_PROMPT instead of sending nothing."""
+    agent = _StubAgent(GeneratedMetadata(title="T", description="D", keywords=[]))
+    ai_module.analyze_image_with_ai(image_bytes=_stub_image(), agent=agent, user_prompt="")  # type: ignore[arg-type]
+    assert agent.calls[0]["parts"][0] == DEFAULT_USER_PROMPT
+
+
+def test_analyze_image_survives_a_result_without_usage() -> None:
+    """A result object lacking .usage degrades to zero token counts, not a crash."""
+
+    class _NoUsageAgent(_StubAgent):
+        def run_sync(self, _prompt_parts: list[Any], **_kwargs: Any) -> Any:  # noqa: ANN401
+            class _Result:
+                output = self._output
+
+                @property
+                def usage(self) -> Any:  # noqa: ANN401
+                    msg = "no usage on this result"
+                    raise AttributeError(msg)
+
+            return _Result()
+
+    agent = _NoUsageAgent(GeneratedMetadata(title="T", description="D", keywords=[]))
+    result = ai_module.analyze_image_with_ai(
+        image_bytes=_stub_image(),
+        agent=agent,  # type: ignore[arg-type]
+        user_prompt="p",
+    )
+    assert (result.input_tokens, result.output_tokens, result.total_tokens) == (0, 0, 0)
 
 
 # ---------------------------------------------------------------------------
