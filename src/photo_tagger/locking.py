@@ -56,12 +56,14 @@ class FileLock(AbstractContextManager["FileLock"]):
         except Timeout as exc:
             msg = f"lock file {self._path} is held by another process"
             raise LockHeldError(msg) from exc
-        # Write our PID so a human inspecting the lock file knows who owns it.
+        # Write our PID so a human inspecting the lock file knows who owns it. Purely
+        # informational, so a failure must not abort the run: on Windows, filelock holds a
+        # byte-range lock on the file and a second write handle raises PermissionError, and on
+        # any platform a full disk would otherwise kill a run that could proceed fine.
         try:
             self._path.write_text(f"{os.getpid()}\n", encoding="utf-8")
-        except OSError:
-            self._lock.release()
-            raise
+        except OSError as exc:
+            logger.warning("lock_pid_write_failed", file=str(self._path), error=str(exc))
         logger.debug("lock_acquired", file=str(self._path), pid=os.getpid())
         return self
 

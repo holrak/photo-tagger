@@ -89,11 +89,16 @@ def test_file_lock_is_reentrant_after_release(tmp_path: Path) -> None:
             time.sleep(0.001)
 
 
-def test_file_lock_releases_on_pid_write_failure(tmp_path: Path) -> None:
-    """If writing the PID file fails after acquiring, the lock is released."""
+def test_file_lock_survives_pid_write_failure(tmp_path: Path) -> None:
+    """
+    The PID note is informational: a write failure must not abort the acquisition.
+
+    Regression test: the lock used to release and re-raise, which aborted runs on a full disk and
+    made locking unusable on Windows, where filelock's byte-range lock makes a second write handle
+    raise PermissionError on every acquisition.
+    """
     lock_path = tmp_path / "photo-tagger.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock = FileLock(lock_path)
     original_write = lock_path.__class__.write_text
 
     def _exploding_write(self: Path, *args: object, **kwargs: object) -> None:
@@ -102,10 +107,10 @@ def test_file_lock_releases_on_pid_write_failure(tmp_path: Path) -> None:
 
     lock_path.__class__.write_text = _exploding_write  # type: ignore[assignment]
     try:
-        with pytest.raises(OSError, match="disk full"):
-            lock.__enter__()
+        with FileLock(lock_path):
+            pass  # Acquisition succeeds despite the failed PID write.
     finally:
         lock_path.__class__.write_text = original_write  # type: ignore[assignment]
-    # The lock must have been released, so re-acquiring should succeed.
+    # The lock was released cleanly on exit, so re-acquiring succeeds.
     with FileLock(lock_path):
         pass
