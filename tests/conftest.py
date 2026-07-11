@@ -52,6 +52,10 @@ def _isolate_telemetry_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     # Also clear the exiftool override so a developer's exported path can't sway metadata tests.
     monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: None)
+    # Never shell out to real hardware probes (sysctl, lspci, nvidia-smi) from the suite.
+    from photo_tagger.hardware import HardwareInfo  # noqa: PLC0415 - keep conftest import light.
+
+    monkeypatch.setattr("photo_tagger.telemetry.hardware_info", lambda _path: HardwareInfo())
 
 
 @pytest.fixture

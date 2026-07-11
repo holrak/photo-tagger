@@ -3010,8 +3010,9 @@ class MainWindow(QMainWindow):
         box.setText(_("Photo Tagger sends anonymous usage stats to guide development."))
         box.setInformativeText(
             _(
-                "Collected: model name, batch size, OS, CPU architecture, timing.\n"
-                "Never: photos, file paths, filenames, tags, or personal data.\n\n"
+                "Collected: model name, batch size, OS, CPU/GPU model, RAM size, timing, and "
+                "anonymous crash reports (error type and code location only).\n"
+                "Never: photos, file paths, filenames, tags, error messages, or personal data.\n\n"
                 "You can turn this off now, or anytime from Settings > Send Anonymous Telemetry.",
             ),
         )
@@ -3041,6 +3042,7 @@ class MainWindow(QMainWindow):
                 output_language=self._output_language,
                 ui_language=i18n.current_language(),
                 file_types=telemetry.file_types_summary(Path(key) for key in self._session_tagged),
+                success_count=len(self._session_tagged),
             ),
             enabled=self._telemetry_enabled,
             block=True,
@@ -3182,7 +3184,30 @@ def launch(argv: list[str] | None = None) -> int:
         translations_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
         if qt_translator.load(QLocale(language), "qtbase", "_", translations_dir):
             app.installTranslator(qt_translator)
-    window = MainWindow()
-    window.show()
-    window.maybe_show_telemetry_notice()
-    return app.exec()
+
+    def _gui_telemetry_enabled() -> bool:
+        # The window's live toggle is authoritative once it exists; before that, fall back to the
+        # persisted GUI preference or the config default (emit_crash enforces the env opt-outs).
+        pref = telemetry.read_gui_pref()
+        return load_defaults().telemetry.enabled if pref is None else pref
+
+    # Qt swallows exceptions raised inside slots (they reach sys.excepthook and the loop keeps
+    # running), so an unhandled slot crash never propagates out of app.exec(). Chain a hook that
+    # fires an anonymous crash beacon (type + in-app code location, never the message) first.
+    previous_hook = sys.excepthook
+
+    def _crash_hook(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
+        telemetry.emit_crash(exc, interface="gui", enabled=_gui_telemetry_enabled(), block=False)
+        previous_hook(exc_type, exc, tb)  # type: ignore[arg-type]
+
+    sys.excepthook = _crash_hook
+
+    try:
+        window = MainWindow()
+        window.show()
+        window.maybe_show_telemetry_notice()
+        return app.exec()
+    except Exception as exc:
+        # A crash outside the event loop (startup, teardown) kills the process; flush the beacon.
+        telemetry.emit_crash(exc, interface="gui", enabled=_gui_telemetry_enabled(), block=True)
+        raise

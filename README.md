@@ -331,21 +331,28 @@ source and spec live in [`packaging/`](packaging/)). Two things to know:
 ## Telemetry
 
 photo-tagger sends a single anonymous beacon at the end of each run so development can be guided by
-how the tool is actually used (which models and platforms are common, typical batch sizes). It is
+how the tool is actually used (which models, platforms, and hardware are common, typical batch
+sizes), and one when the app crashes so breakage is visible without waiting for bug reports. It is
 **opt-out**: on by default, with a one-time notice on the first run, and easy to disable.
 
 **What is collected**, and nothing else:
 
 - app version and interface (`cli` or `gui`)
 - provider and model name
-- batch size (photo count) and run duration
+- batch size (photo count), run duration, and outcome counts (successes, failures, cache hits, retry
+  recoveries, worker count, token totals, model time, dry-run flag)
 - CPU architecture, OS, OS release, and Python version
+- CPU and GPU model names (for example "Apple M3 Pro" or "NVIDIA GeForce RTX 4070"), logical core
+  count, and RAM size in whole gigabytes: generic values shared by millions of machines
+- on a crash: the exception *type* and its code location inside photo-tagger
+  (`module:function:line`), never the error message (messages can embed paths)
 - a random install id (a UUID generated once, **not** derived from any hardware identifier)
 
 **What is never collected:** file paths, filenames, photo contents, generated tags/titles/
-descriptions, prompts, API keys, IP addresses, or anything else that identifies you. The exact,
-closed payload is the [`build_payload`](src/photo_tagger/telemetry.py) function; there is nothing
-else to leak.
+descriptions, prompts, API keys, IP addresses, error messages, or anything else that identifies you.
+The exact, closed payloads are the
+[`build_payload` and `build_crash_payload`](src/photo_tagger/telemetry.py) functions; there is
+nothing else to leak.
 
 **Where it goes:** our own Cloudflare Worker at `telemetry.tagger.photo`. No third-party analytics
 service is involved, and the collector's full source (and the queries run against it) lives in

@@ -960,6 +960,53 @@ def test_cli_config_overrides_translates_field_names_to_option_names() -> None:
     }
 
 
+def test_main_reports_unhandled_crashes_and_re_raises(tmp_path: Path) -> None:
+    """
+    A crash escaping the CLI fires one anonymous crash beacon and still surfaces the traceback.
+
+    SystemExit (clean error handling) must never be reported as a crash.
+    """
+    image = _make_jpeg(tmp_path / "img.cr3")
+    crashes: list[dict[str, Any]] = []
+
+    def fake_emit_crash(exc: BaseException, **kwargs: Any) -> None:  # noqa: ANN401
+        crashes.append({"exc": exc, **kwargs})
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "run_batch", side_effect=RuntimeError("boom")),
+        patch.object(telemetry, "emit_crash", side_effect=fake_emit_crash),
+        patch("sys.argv", ["photo-tagger", "--input", str(image)]),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        main_module.main()
+
+    assert len(crashes) == 1
+    assert isinstance(crashes[0]["exc"], RuntimeError)
+    assert crashes[0]["interface"] == "cli"
+
+
+def test_main_does_not_report_clean_exits_as_crashes() -> None:
+    """SystemExit from normal error handling passes through without a crash beacon."""
+    crashes: list[object] = []
+    with (
+        patch.object(telemetry, "emit_crash", side_effect=lambda *a, **_k: crashes.append(a)),
+        patch.object(main_module, "app", side_effect=SystemExit(1)),
+        pytest.raises(SystemExit),
+    ):
+        main_module.main()
+    assert crashes == []
+
+
+def test_crash_telemetry_enabled_honors_argv_flag() -> None:
+    """A --no-telemetry anywhere on the command line disables the crash beacon too."""
+    with patch("sys.argv", ["photo-tagger", "-i", "x", "--no-telemetry"]):
+        assert main_module._crash_telemetry_enabled() is False  # noqa: SLF001
+    with patch("sys.argv", ["photo-tagger", "-i", "x"]):
+        assert main_module._crash_telemetry_enabled() is True  # noqa: SLF001
+
+
 def test_suite_is_isolated_from_developer_config() -> None:
     """
     Conftest points PHOTO_TAGGER_CONFIG at an empty file, so defaults are the built-ins.

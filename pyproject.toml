@@ -75,7 +75,9 @@ Repository = "https://github.com/jbsilva/photo-tagger"
 Issues = "https://github.com/jbsilva/photo-tagger/issues"
 
 [project.scripts]
-photo-tagger = "photo_tagger.main:app"
+# main() wraps the cyclopts app so an unhandled crash fires an anonymous crash beacon (when
+# telemetry is enabled) before the traceback surfaces.
+photo-tagger = "photo_tagger.main:main"
 
 [project.gui-scripts]
 # A windowed entry point for the desktop app: on Windows it launches without a console window,

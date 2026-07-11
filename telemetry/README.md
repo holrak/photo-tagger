@@ -19,10 +19,20 @@ What the client sends, when, and how to turn it off is documented in the
 
 ## What it stores
 
-One data point per run, holding only the fields in
-[`build_payload`](../src/photo_tagger/telemetry.py): app version, interface (cli/gui), provider,
-model, output language, UI language, file types (extensions only, e.g. `cr3,jpg`), CPU arch, OS, OS
-release, Python version, batch size, run duration, and a random install id.
+One data point per event, in one shared column layout (see the map in [`queries.sql`](queries.sql)):
+
+- **`run`** (end of a tagging run): the fields in
+  [`build_payload`](../src/photo_tagger/telemetry.py): app version, interface (cli/gui), provider,
+  model, output language, UI language, file types (extensions only, e.g. `cr3,jpg`), CPU arch, OS,
+  OS release, Python version, CPU/GPU model, core count, RAM in GB, batch size, run duration,
+  outcome counts (successes, failures, cache hits, retry recoveries, workers, tokens, model time,
+  dry-run flag), and a random install id.
+- **`crash`** (an unhandled exception): the same platform/hardware facts plus the exception *type*
+  and its code location inside photo-tagger (`module:function:line`). Never the error message, which
+  could embed paths.
+
+Older clients still send schema v1; the Worker accepts both, and v1 rows simply have empty values in
+the newer columns.
 
 It does **not** store IP addresses, set cookies, or read anything back; the endpoint is write-only
 and replies `204 No Content`. Strings are length-clamped so a malformed client cannot bloat a point.

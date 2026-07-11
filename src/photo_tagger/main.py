@@ -48,7 +48,7 @@ from photo_tagger.cli_options import (
     to_processing_options,
 )
 from photo_tagger.config import DEFAULT_USER_PROMPT
-from photo_tagger.config_file import configured_exiftool_path
+from photo_tagger.config_file import configured_exiftool_path, load_config
 from photo_tagger.csv_report import CsvReportWriter, ReportRow
 from photo_tagger.diagnostics import render_report, run_checks
 from photo_tagger.discovery import (
@@ -733,6 +733,14 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
                 output_language=inference.output_language,
                 ui_language=i18n.current_language(),
                 file_types=telemetry.file_types_summary(image_files),
+                success_count=totals.success,
+                failure_count=len(totals.failed_files),
+                cache_hits=totals.cache_hits,
+                retry_successes=totals.retry_successes,
+                workers=totals.workers,
+                total_tokens=totals.total_tokens,
+                inference_seconds=totals.inference_seconds,
+                dry_run=totals.dry_run,
             ),
             enabled=telemetry_config.enabled,
             block=True,
@@ -763,5 +771,36 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
             csv_writer.close()
 
 
+def _crash_telemetry_enabled() -> bool:
+    """
+    Best-effort telemetry opt-out resolution for the crash path.
+
+    A crash may happen before (or during) CLI parsing, so the parsed --no-telemetry flag is not
+    available; scan argv for it directly and read the config file's [telemetry] table. The
+    environment opt-outs are enforced inside emit_crash itself.
+    """
+    if "--no-telemetry" in sys.argv[1:]:
+        return False
+    table = load_config().get("telemetry", {})
+    return bool(table.get("enabled", True)) if isinstance(table, dict) else True
+
+
+def main() -> None:
+    """
+    Console entry point: run the CLI, reporting an unhandled crash before re-raising.
+
+    Expected exits (SystemExit from clean error handling, Ctrl-C) pass through untouched; anything
+    else is a genuine crash, so an anonymous beacon (exception type and in-app code location only,
+    never the message) is sent before the traceback surfaces as usual.
+    """
+    try:
+        app()
+    except SystemExit, KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        telemetry.emit_crash(exc, interface="cli", enabled=_crash_telemetry_enabled(), block=True)
+        raise
+
+
 if __name__ == "__main__":  # pragma: no cover - module entry point, not exercised by tests
-    app()
+    main()

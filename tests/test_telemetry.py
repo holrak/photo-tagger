@@ -14,20 +14,27 @@ import httpx
 import pytest
 
 from photo_tagger import __version__, telemetry
+from photo_tagger.hardware import HardwareInfo
 from photo_tagger.telemetry import RunInfo
+
+
+_FAKE_HARDWARE = HardwareInfo(cpu="Apple M3 Pro", gpu="Apple M3 Pro", cpu_count=12, memory_gb=36)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
-    Point the state directory at a tmp location and clear the opt-out env vars.
+    Point the state directory at a tmp location, stub hardware, and clear the opt-out env vars.
 
     Without this a developer's real ``~/.local/state/photo-tagger`` (or a ``DO_NOT_TRACK`` in their
-    shell) would leak into the tests and make the opt-out assertions flaky.
+    shell) would leak into the tests and make the opt-out assertions flaky; the hardware stub keeps
+    payload tests from shelling out to real probes.
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("PHOTO_TAGGER_NO_TELEMETRY", raising=False)
     monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.setattr(telemetry, "hardware_info", lambda _path: _FAKE_HARDWARE)
+    monkeypatch.setattr(telemetry, "_crash_beacons_sent", 0)
 
 
 def _sample_run() -> RunInfo:
@@ -122,6 +129,21 @@ def test_first_run_notice_shows_once() -> None:
     assert telemetry.first_run_notice() is None
 
 
+def test_first_run_notice_returns_when_disclosure_version_changes(tmp_path: Path) -> None:
+    """
+    A marker from an older disclosure version does not suppress the updated notice.
+
+    v1 installs wrote an empty marker; v2 added hardware and crash reports to the disclosure, and
+    those users must see the expanded text once.
+    """
+    marker = tmp_path / "state" / "photo-tagger" / "telemetry-notice-shown"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")  # what a v1 install left behind
+    assert telemetry.first_run_notice() == telemetry.FIRST_RUN_NOTICE
+    assert telemetry.first_run_notice() is None
+    assert marker.read_text(encoding="utf-8").strip() == str(telemetry.NOTICE_VERSION)
+
+
 def test_first_run_notice_still_shows_when_marker_unwritable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -167,10 +189,22 @@ def test_gui_pref_write_degrades_when_unwritable(
 # --- payload contents (the privacy guarantee) --------------------------------------------------
 
 
-_EXPECTED_PAYLOAD_KEYS = {
+_PLATFORM_KEYS = {
     "schema_version",
     "install_id",
     "app_version",
+    "arch",
+    "os",
+    "os_release",
+    "python_version",
+    "cpu",
+    "gpu",
+    "cpu_count",
+    "memory_gb",
+}
+
+_EXPECTED_PAYLOAD_KEYS = _PLATFORM_KEYS | {
+    "event",
     "interface",
     "provider",
     "model",
@@ -179,10 +213,22 @@ _EXPECTED_PAYLOAD_KEYS = {
     "output_language",
     "ui_language",
     "file_types",
-    "arch",
-    "os",
-    "os_release",
-    "python_version",
+    "success_count",
+    "failure_count",
+    "cache_hits",
+    "retry_successes",
+    "workers",
+    "total_tokens",
+    "inference_seconds",
+    "dry_run",
+}
+
+_EXPECTED_CRASH_KEYS = _PLATFORM_KEYS | {
+    "event",
+    "interface",
+    "exception_type",
+    "crash_location",
+    "crash_frames",
 }
 
 
@@ -190,6 +236,7 @@ def test_build_payload_has_exactly_the_allowlisted_keys() -> None:
     """The beacon body is a closed set: no field can sneak in unnoticed."""
     payload = telemetry.build_payload(_sample_run())
     assert set(payload) == _EXPECTED_PAYLOAD_KEYS
+    assert payload["event"] == "run"
 
 
 def test_build_payload_carries_run_and_version(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,6 +272,41 @@ def test_build_payload_carries_language_and_file_types() -> None:
     assert payload["file_types"] == "cr3,jpg"
 
 
+def test_build_payload_carries_hardware_and_outcome_fields() -> None:
+    """Hardware facts and per-run outcome counters land in the beacon body."""
+    run = RunInfo(
+        interface="cli",
+        provider="lmstudio",
+        model="m",
+        batch_size=10,
+        duration_seconds=60.0,
+        output_language="English",
+        ui_language="en",
+        file_types="cr3",
+        success_count=9,
+        failure_count=1,
+        cache_hits=3,
+        retry_successes=2,
+        workers=4,
+        total_tokens=12345,
+        inference_seconds=41.5,
+        dry_run=True,
+    )
+    payload = telemetry.build_payload(run)
+    assert payload["cpu"] == "Apple M3 Pro"
+    assert payload["gpu"] == "Apple M3 Pro"
+    assert payload["cpu_count"] == 12  # noqa: PLR2004 - the stubbed hardware fixture
+    assert payload["memory_gb"] == 36  # noqa: PLR2004 - the stubbed hardware fixture
+    assert payload["success_count"] == 9  # noqa: PLR2004 - the sample run's count
+    assert payload["failure_count"] == 1
+    assert payload["cache_hits"] == 3  # noqa: PLR2004 - the sample run's count
+    assert payload["retry_successes"] == 2  # noqa: PLR2004 - the sample run's count
+    assert payload["workers"] == 4  # noqa: PLR2004 - the sample run's count
+    assert payload["total_tokens"] == 12345  # noqa: PLR2004 - the sample run's count
+    assert payload["inference_seconds"] == 41.5  # noqa: PLR2004 - the sample run's value
+    assert payload["dry_run"] == 1
+
+
 def test_file_types_summary_is_sorted_lowercased_and_deduplicated() -> None:
     """Extensions collapse to a sorted, lowercased, dot-stripped, comma-joined set."""
     paths = [Path("/photos/a.CR3"), Path("/photos/b.jpg"), Path("/photos/c.cr3")]
@@ -241,6 +323,86 @@ def test_file_types_summary_handles_empty_and_no_suffix() -> None:
     """No paths, or paths without a suffix, yield an empty string rather than a stray comma."""
     assert telemetry.file_types_summary([]) == ""
     assert telemetry.file_types_summary([Path("/photos/README")]) == ""
+
+
+# --- crash reporting ---------------------------------------------------------------------------
+
+
+def _package_exception() -> BaseException:
+    """Raise (and catch) an error whose traceback passes through a real photo_tagger module."""
+    from photo_tagger.keywords import parse_hierarchical_keyword  # noqa: PLC0415 - test-local
+
+    try:
+        # Deliberate misuse so a real traceback through a photo_tagger module exists.
+        parse_hierarchical_keyword(None)  # type: ignore[arg-type]
+    except AttributeError as exc:
+        return exc
+    msg = "expected parse_hierarchical_keyword(None) to raise"  # pragma: no cover
+    raise AssertionError(msg)  # pragma: no cover
+
+
+def test_crash_summary_reports_type_and_in_package_location() -> None:
+    """The summary names the exception class and the deepest photo_tagger frame."""
+    name, location, frames = telemetry.crash_summary(_package_exception())
+    assert name == "AttributeError"
+    assert location.startswith("keywords:parse_hierarchical_keyword:")
+    assert location in frames
+
+
+def test_crash_summary_skips_frames_outside_the_package() -> None:
+    """Test-file (and stdlib) frames never appear; only photo_tagger code coordinates do."""
+    _, _, frames = telemetry.crash_summary(_package_exception())
+    assert "test_telemetry" not in frames
+
+
+def test_crash_summary_never_carries_the_message() -> None:
+    """
+    The exception message is dropped by construction.
+
+    Messages routinely embed file paths ("could not open /Users/x/IMG.CR3"), so no part of the
+    summary may contain it.
+    """
+    try:
+        msg = "/Users/someone/secret/IMG_0001.CR3 could not be read"
+        raise RuntimeError(msg)  # noqa: TRY301 - the test needs a real traceback.
+    except RuntimeError as exc:
+        summary = telemetry.crash_summary(exc)
+    assert all("/Users/" not in part and "IMG_0001" not in part for part in summary)
+    # Raised in this test file, outside the package: no code coordinates at all.
+    assert summary == ("RuntimeError", "", "")
+
+
+def test_build_crash_payload_has_exactly_the_allowlisted_keys() -> None:
+    """The crash beacon is a closed set too, with the crash event marker."""
+    payload = telemetry.build_crash_payload(_package_exception(), interface="cli")
+    assert set(payload) == _EXPECTED_CRASH_KEYS
+    assert payload["event"] == "crash"
+    assert payload["exception_type"] == "AttributeError"
+
+
+def test_emit_crash_posts_when_enabled_and_respects_optout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An enabled crash beacon POSTs; the config opt-out short-circuits before any network."""
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(httpx, "post", lambda _url, *, json, timeout: posted.append(json))  # noqa: ARG005 - httpx.post signature
+
+    assert telemetry.emit_crash(_package_exception(), interface="cli", enabled=False) is None
+    assert posted == []
+
+    thread = telemetry.emit_crash(_package_exception(), interface="cli", enabled=True)
+    assert thread is not None
+    assert posted[0]["event"] == "crash"
+
+
+def test_emit_crash_is_capped_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A crash loop cannot spam the collector: beacons stop after the per-process cap."""
+    posted: list[object] = []
+    monkeypatch.setattr(httpx, "post", lambda *_a, **k: posted.append(k))
+    exc = _package_exception()
+    sent = [telemetry.emit_crash(exc, interface="gui", enabled=True) for _ in range(5)]
+    assert sum(thread is not None for thread in sent) == 3  # noqa: PLR2004 - the cap
+    assert len(posted) == 3  # noqa: PLR2004 - the cap
 
 
 # --- emit (sending) ----------------------------------------------------------------------------
