@@ -86,10 +86,13 @@ def resolve_image_files(
         else:
             logger.warning("input_not_file_or_dir", path=str(path))
 
+    # Explicit files were resolved above and directory entries come from an already-resolved
+    # root, so the string itself is a stable dedup key; re-resolving here would re-stat every
+    # file (and, unguarded, let a flaky network mount raise where line 77 would not).
     combined: list[Path] = []
     seen: set[str] = set()
     for f in chain(files_explicit, files_from_dirs):
-        key = str(f.resolve()) if f.exists() else str(f)
+        key = str(f)
         if key not in seen:
             combined.append(f)
             seen.add(key)
