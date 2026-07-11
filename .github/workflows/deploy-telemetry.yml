@@ -1,0 +1,37 @@
+name: deploy telemetry worker
+
+# Keeps the deployed collector in lockstep with the repo: the schema-2 rollout was delayed once
+# because the Worker had to be deployed by hand and the running copy still rejected v2 beacons.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "telemetry/worker.js"
+      - "telemetry/wrangler.toml"
+      - ".github/workflows/deploy-telemetry.yml"
+
+  # Allows manual trigger from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Serialize deploys; a rapid pair of pushes must not race each other.
+    concurrency:
+      group: deploy-telemetry
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: telemetry
