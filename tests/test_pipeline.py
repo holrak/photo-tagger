@@ -1,6 +1,7 @@
 """Tests for the photo processing pipeline using lightweight stubs."""
 
 import contextlib
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
@@ -19,6 +20,7 @@ from photo_tagger.pipeline import (
     _emit_outcome,
     _InferenceScratch,
     _notify_success,
+    _resolve_inference,
     _UsageAccumulator,
     execute_process,
     process_photo,
@@ -386,6 +388,116 @@ def test_run_batch_concurrent_calls_on_success_per_image(tmp_path: Path) -> None
         )
 
     assert sorted(p.name for p in notified) == sorted(p.name for p in files)
+
+
+class _DictCache:
+    """A dict-backed stand-in for InferenceCache used by the stampede tests."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, InferenceResult] = {}
+
+    def get(self, key: str) -> InferenceResult | None:
+        return self.store.get(key)
+
+    def put(self, key: str, result: InferenceResult) -> None:
+        self.store[key] = result
+
+
+def test_resolve_inference_coordinates_duplicate_content(tmp_path: Path) -> None:
+    """
+    Concurrent misses on the same content key share one model call.
+
+    Regression test: two workers with identical pixels (burst duplicates, one image in two
+    folders) used to both miss the cache and each pay a full inference; only the last put
+    mattered. The first worker now leads, the second waits and replays the cache.
+    """
+    calls = {"n": 0}
+    leader_started = threading.Event()
+    release_leader = threading.Event()
+
+    def slow_analyze(**_kwargs: Any) -> InferenceResult:  # noqa: ANN401
+        calls["n"] += 1
+        leader_started.set()
+        release_leader.wait(timeout=5.0)
+        return InferenceResult(title="T", description="D", keywords=["K"])
+
+    ctx = _ctx(cache=_DictCache())
+    with (
+        patch("photo_tagger.pipeline.analyze_image_with_ai", side_effect=slow_analyze),
+        patch("photo_tagger.pipeline.prepare_image_for_agent", return_value=b"jpeg"),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        leader = pool.submit(
+            _resolve_inference,
+            tmp_path / "a.cr3",
+            ctx,
+            contextual_prompt="p",
+            content_key="same-pixels",
+        )
+        assert leader_started.wait(timeout=5.0)
+        follower = pool.submit(
+            _resolve_inference,
+            tmp_path / "b.cr3",
+            ctx,
+            contextual_prompt="p",
+            content_key="same-pixels",
+        )
+        release_leader.set()
+        leader_result, leader_from_cache = leader.result(timeout=10.0)
+        follower_result, follower_from_cache = follower.result(timeout=10.0)
+
+    assert calls["n"] == 1  # one model call for two photos
+    assert leader_from_cache is False
+    assert follower_from_cache is True
+    assert follower_result.title == leader_result.title == "T"
+    assert ctx.usage.cache_hits == 1
+    assert ctx.inflight == {}  # the coordination entry was cleaned up
+
+
+def test_resolve_inference_follower_falls_back_when_leader_fails(tmp_path: Path) -> None:
+    """A waiting follower pays its own model call when the leader's inference raises."""
+    calls = {"n": 0}
+    leader_started = threading.Event()
+    release_leader = threading.Event()
+
+    def flaky_analyze(**_kwargs: Any) -> InferenceResult:  # noqa: ANN401
+        calls["n"] += 1
+        if calls["n"] == 1:
+            leader_started.set()
+            release_leader.wait(timeout=5.0)
+            msg = "model exploded"
+            raise RuntimeError(msg)
+        return InferenceResult(title="Recovered", description="D", keywords=[])
+
+    ctx = _ctx(cache=_DictCache())
+    with (
+        patch("photo_tagger.pipeline.analyze_image_with_ai", side_effect=flaky_analyze),
+        patch("photo_tagger.pipeline.prepare_image_for_agent", return_value=b"jpeg"),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        leader = pool.submit(
+            _resolve_inference,
+            tmp_path / "a.cr3",
+            ctx,
+            contextual_prompt="p",
+            content_key="same-pixels",
+        )
+        assert leader_started.wait(timeout=5.0)
+        follower = pool.submit(
+            _resolve_inference,
+            tmp_path / "b.cr3",
+            ctx,
+            contextual_prompt="p",
+            content_key="same-pixels",
+        )
+        release_leader.set()
+        assert isinstance(leader.exception(timeout=10.0), RuntimeError)
+        follower_result, follower_from_cache = follower.result(timeout=10.0)
+
+    assert calls["n"] == 2  # noqa: PLR2004 - leader failed, follower paid its own call
+    assert follower_from_cache is False
+    assert follower_result.title == "Recovered"
+    assert ctx.inflight == {}
 
 
 def test_run_batch_progress_callback_fires_per_image(tmp_path: Path) -> None:

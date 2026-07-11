@@ -162,6 +162,47 @@ class _BatchContext:
     on_success: OnSuccess | None = None
     on_image_result: OnImageResult | None = None
     progress: ProgressCallback | None = None
+    # In-flight inference coordination for the concurrent path: content key -> the Event the
+    # first worker (the leader) will set once its result is cached. Followers with the same
+    # pixels wait on it and replay the cache instead of paying a duplicate model call.
+    inflight: dict[str, threading.Event] = field(default_factory=dict)
+    inflight_lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def _run_model(image_path: Path, ctx: _BatchContext, *, contextual_prompt: str) -> InferenceResult:
+    """Prepare the JPEG bytes, call the model, and fold the usage into the batch totals."""
+    jpeg_bytes = prepare_image_for_agent(
+        image_path,
+        jpg_quality=ctx.options.jpeg_quality,
+        max_size=ctx.options.jpeg_dimensions,
+    )
+    inference = analyze_image_with_ai(
+        image_bytes=jpeg_bytes,
+        agent=ctx.agent,
+        user_prompt=contextual_prompt,
+        temperature=ctx.options.temperature,
+        max_tokens=ctx.options.max_tokens,
+        timeout_seconds=ctx.options.timeout_seconds,
+        frequency_penalty=ctx.options.frequency_penalty,
+    )
+    ctx.usage.add(inference)
+    return inference
+
+
+def _cache_replay(
+    ctx: _BatchContext,
+    content_key: str,
+    *,
+    file_name: str,
+) -> InferenceResult | None:
+    """Return the cached result for *content_key* (counting the hit), or None on miss."""
+    if ctx.cache is None:
+        return None
+    cached = safe_cache_get(ctx.cache, content_key, file_name=file_name)
+    if cached is not None:
+        logger.info("cache_hit", file=file_name)
+        ctx.usage.add_cache_hit()
+    return cached
 
 
 def _resolve_inference(
@@ -178,36 +219,47 @@ def _resolve_inference(
     under the same namespace. On miss, prepares the JPEG bytes, calls the model, and writes the
     result back to the cache.
 
+    Concurrent misses on the *same* content key (burst duplicates, one image in two folders) are
+    coordinated: the first worker becomes the leader and runs the model; the others wait for it
+    and replay the cache, so identical pixels never pay twice. If the leader fails (or cannot
+    cache its result), the waiters fall back to their own model call.
+
     Cache I/O failures are logged at warning level but never raised: a broken SQLite file or full
     disk degrades the run to "no cache" without aborting photos that the model would otherwise
     process successfully.
     """
-    cache = ctx.cache
-    if cache is not None and content_key is not None:
-        cached = safe_cache_get(cache, content_key, file_name=image_path.name)
-        if cached is not None:
-            logger.info("cache_hit", file=image_path.name)
-            ctx.usage.add_cache_hit()
-            return cached, True
+    if ctx.cache is None or content_key is None:
+        return _run_model(image_path, ctx, contextual_prompt=contextual_prompt), False
 
-    jpeg_bytes = prepare_image_for_agent(
-        image_path,
-        jpg_quality=ctx.options.jpeg_quality,
-        max_size=ctx.options.jpeg_dimensions,
-    )
-    inference = analyze_image_with_ai(
-        image_bytes=jpeg_bytes,
-        agent=ctx.agent,
-        user_prompt=contextual_prompt,
-        temperature=ctx.options.temperature,
-        max_tokens=ctx.options.max_tokens,
-        timeout_seconds=ctx.options.timeout_seconds,
-        frequency_penalty=ctx.options.frequency_penalty,
-    )
-    ctx.usage.add(inference)
-    if cache is not None and content_key is not None:
-        safe_cache_put(cache, content_key, inference, file_name=image_path.name)
-    return inference, False
+    cached = _cache_replay(ctx, content_key, file_name=image_path.name)
+    if cached is not None:
+        return cached, True
+
+    with ctx.inflight_lock:
+        leader_event = ctx.inflight.get(content_key)
+        if leader_event is None:
+            ctx.inflight[content_key] = threading.Event()
+
+    if leader_event is not None:
+        # Another worker is already inferring these pixels; wait (bounded by its model timeout
+        # plus slack for image preparation) and replay its cached result.
+        leader_event.wait(timeout=ctx.options.timeout_seconds + 30.0)
+        cached = _cache_replay(ctx, content_key, file_name=image_path.name)
+        if cached is not None:
+            return cached, True
+        # The leader failed or could not cache; pay our own call rather than give up.
+        return _run_model(image_path, ctx, contextual_prompt=contextual_prompt), False
+
+    try:
+        inference = _run_model(image_path, ctx, contextual_prompt=contextual_prompt)
+        safe_cache_put(ctx.cache, content_key, inference, file_name=image_path.name)
+        return inference, False
+    finally:
+        # Wake the waiters whether we succeeded or raised; they re-check the cache either way.
+        with ctx.inflight_lock:
+            our_event = ctx.inflight.pop(content_key, None)
+        if our_event is not None:
+            our_event.set()
 
 
 def _record_scratch(
