@@ -20,7 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Windows is here because it has bitten before: file locking and exiftool path handling
+        # both shipped Windows-only bugs that no ubuntu/macos leg could catch, while conda-forge
+        # ships a Windows package. Tests needing a real exiftool binary skip when it is absent.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
