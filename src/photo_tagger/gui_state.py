@@ -657,6 +657,48 @@ def fields_written(title: str | None, description: str | None, keywords: Keyword
     return written
 
 
+# How the folder thumbnail grid orders its photos. These mirror the tree's sortable columns so the
+# two views agree on what "by type" or "by status" means, and SORT_NAME is the default.
+SORT_NAME = "name"
+SORT_TYPE = "type"
+SORT_STATUS = "status"
+SORT_TAGGED = "tagged"
+
+
+def photo_sort_key(item: PhotoItem, criterion: str) -> tuple[str, str, str]:
+    """
+    Build the sort key for one photo under a grid sort *criterion*.
+
+    Mirrors the tree's column sorts: Type sorts by the extension label, Status by lifecycle rank
+    (not the raw word, which would put "failed" before "ready"), and Tagged by the compressed
+    letters. Every key carries the filename then the full path as tiebreaks, so photos that tie on
+    the primary field keep a stable, readable order (two files can share a name in a recursive
+    folder). All branches return same-shape string tuples so any one criterion sorts a whole list.
+    """
+    name = item.path.name.casefold()
+    full = str(item.path).casefold()
+    if criterion == SORT_TYPE:
+        primary = file_type_label(item.path)
+    elif criterion == SORT_STATUS:
+        # Zero-padded so the numeric rank sorts as a string alongside the other criteria's keys.
+        primary = f"{status_sort_rank(item.status):03d}"
+    elif criterion == SORT_TAGGED:
+        primary = tagged_summary(item.known_fields or set()).casefold()
+    else:
+        primary = name
+    return (primary, name, full)
+
+
+def sort_photos(items: Iterable[PhotoItem], criterion: str, *, descending: bool) -> list[PhotoItem]:
+    """
+    Order *items* by *criterion*, reversed end to end when *descending*.
+
+    Descending flips the tiebreaks too (names run Z to A within a group), matching how the tree
+    reverses its whole comparison for a descending header click.
+    """
+    return sorted(items, key=lambda item: photo_sort_key(item, criterion), reverse=descending)
+
+
 # Badge names for the folder grid's thumbnail overlays, in the order they are drawn.
 BADGE_FAILED = "failed"
 BADGE_SAVED = "saved"

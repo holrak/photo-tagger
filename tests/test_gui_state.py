@@ -20,6 +20,10 @@ from photo_tagger.gui_state import (
     READY,
     REMOVED,
     SAVED,
+    SORT_NAME,
+    SORT_STATUS,
+    SORT_TAGGED,
+    SORT_TYPE,
     STATUS_SORT_ORDER,
     UNCHANGED,
     WORKING,
@@ -52,9 +56,11 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    photo_sort_key,
     rank_vision_models,
     reveal_command,
     reveal_label,
+    sort_photos,
     status_sort_rank,
     status_summary,
     tagged_legend,
@@ -609,6 +615,58 @@ def test_status_sort_rank_unknown_status_sorts_last() -> None:
     """An unrecognized status ranks after every known one rather than raising."""
     assert status_sort_rank("bogus") == len(STATUS_SORT_ORDER)
     assert status_sort_rank("bogus") > status_sort_rank(FAILED)
+
+
+def test_sort_photos_by_name_flips_with_direction() -> None:
+    """Sorting by name is case-insensitive ascending, and descending reverses it end to end."""
+    items = [PhotoItem(path=Path(f"/d/{n}")) for n in ("c.jpg", "A.jpg", "b.jpg")]
+    assert [i.path.name for i in sort_photos(items, SORT_NAME, descending=False)] == [
+        "A.jpg",
+        "b.jpg",
+        "c.jpg",
+    ]
+    assert [i.path.name for i in sort_photos(items, SORT_NAME, descending=True)] == [
+        "c.jpg",
+        "b.jpg",
+        "A.jpg",
+    ]
+
+
+def test_sort_photos_by_status_uses_lifecycle_rank() -> None:
+    """Status sorts by lifecycle rank (pending < ready < failed), not the alphabetical label."""
+    a = PhotoItem(path=Path("/d/a.jpg"), status=FAILED)
+    b = PhotoItem(path=Path("/d/b.jpg"), status=PENDING)
+    c = PhotoItem(path=Path("/d/c.jpg"), status=READY)
+    order = sort_photos([a, b, c], SORT_STATUS, descending=False)
+    assert [i.path.name for i in order] == ["b.jpg", "c.jpg", "a.jpg"]
+
+
+def test_sort_photos_by_type_then_name() -> None:
+    """Type sorts by extension label, with the filename breaking ties within one type."""
+    items = [
+        PhotoItem(path=Path("/d/b.png")),
+        PhotoItem(path=Path("/d/a.png")),
+        PhotoItem(path=Path("/d/c.jpg")),
+    ]
+    order = sort_photos(items, SORT_TYPE, descending=False)
+    assert [i.path.name for i in order] == ["c.jpg", "a.png", "b.png"]
+
+
+def test_sort_photos_by_tagged_puts_untagged_first() -> None:
+    """Tagged sorts by the compressed letters, so the '-' of an untagged photo sorts first."""
+    tagged = PhotoItem(path=Path("/d/a.jpg"), known_fields={FIELD_TITLE, FIELD_KEYWORDS})
+    untagged = PhotoItem(path=Path("/d/b.jpg"), known_fields=set())
+    order = sort_photos([tagged, untagged], SORT_TAGGED, descending=False)
+    assert [i.path.name for i in order] == ["b.jpg", "a.jpg"]
+
+
+def test_photo_sort_key_is_uniformly_shaped_across_criteria() -> None:
+    """Every criterion yields a same-shape string tuple, so one criterion sorts a whole list."""
+    item = PhotoItem(path=Path("/d/a.jpg"), status=READY, known_fields={FIELD_TITLE})
+    for criterion in (SORT_NAME, SORT_TYPE, SORT_STATUS, SORT_TAGGED):
+        key = photo_sort_key(item, criterion)
+        assert len(key) == 3  # noqa: PLR2004 - primary, name, full-path tiebreaks
+        assert all(isinstance(part, str) for part in key)
 
 
 def test_status_summary_counts_states() -> None:

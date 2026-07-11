@@ -129,6 +129,10 @@ from photo_tagger.gui_state import (
     READY,
     REMOVED,
     SAVED,
+    SORT_NAME,
+    SORT_STATUS,
+    SORT_TAGGED,
+    SORT_TYPE,
     WORKING,
     FolderNode,
     GuiConfigValues,
@@ -159,6 +163,7 @@ from photo_tagger.gui_state import (
     rank_vision_models,
     reveal_command,
     reveal_label,
+    sort_photos,
     status_sort_rank,
     status_summary,
     tagged_legend,
@@ -318,6 +323,11 @@ QPushButton#menubutton { padding-right: 28px; }
 QTreeWidget::item { padding: 2px; }
 QToolButton { border: none; background: transparent; padding: 4px; font-weight: 600; }
 QToolButton:hover { color: #6366f1; }
+QToolButton#sortdir {
+    border: 1px solid rgba(130, 130, 140, 60%); border-radius: 6px; padding: 4px 10px;
+}
+QToolButton#sortdir:hover { background: rgba(130, 130, 140, 26%); }
+QToolButton#sortdir:checked { background: rgba(99, 102, 241, 22%); border-color: #6366f1; }
 QToolButton#add, QToolButton#split {
     padding: 6px 26px 6px 12px; border-radius: 6px; font-weight: 400;
     border: 1px solid rgba(130, 130, 140, 60%);
@@ -687,6 +697,11 @@ class MainWindow(QMainWindow):
         self._preview_cache: dict[str, QPixmap] = {}
         self._thumb_cache: dict[str, QPixmap] = {}
         self._grid_items: dict[str, QListWidgetItem] = {}
+        # The folder whose grid is showing, plus its sort choice, so the sort controls can rebuild
+        # it in place. The choice persists across folders for the session; it does not go to disk.
+        self._grid_folder: Path | None = None
+        self._grid_sort = SORT_NAME
+        self._grid_sort_desc = False
         self._current: PhotoItem | None = None
         self._thread: QThread | None = None
         self._worker: GenerateWorker | None = None
@@ -1514,7 +1529,13 @@ class MainWindow(QMainWindow):
         box.addStretch(1)
         return page
 
-    def _build_grid(self) -> QListWidget:
+    def _build_grid(self) -> QWidget:
+        """Build the folder grid page: a sort toolbar above the thumbnail list."""
+        page = QWidget()
+        box = QVBoxLayout(page)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addLayout(self._build_grid_toolbar())
+
         grid = QListWidget()
         grid.setViewMode(QListView.ViewMode.IconMode)
         grid.setResizeMode(QListView.ResizeMode.Adjust)
@@ -1531,7 +1552,63 @@ class MainWindow(QMainWindow):
         grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         grid.customContextMenuRequested.connect(self._on_grid_context_menu)
         self._grid = grid
-        return grid
+        box.addWidget(grid, stretch=1)
+        return page
+
+    def _build_grid_toolbar(self) -> QHBoxLayout:
+        """
+        Sort controls for the folder grid: a field picker plus an ascending/descending toggle.
+
+        Mirrors the tree's clickable column headers, which the grid has no room for. The signals are
+        wired only after both widgets are populated so the setup fires no spurious re-sort.
+        """
+        row = QHBoxLayout()
+        row.addWidget(QLabel(_("Sort by")))
+        self._grid_sort_combo = QComboBox()
+        for label, criterion in (
+            (_("Name"), SORT_NAME),
+            (_("Type"), SORT_TYPE),
+            (_("Status"), SORT_STATUS),
+            (_("Tagged"), SORT_TAGGED),
+        ):
+            self._grid_sort_combo.addItem(label, criterion)
+        self._grid_sort_combo.setToolTip(
+            _("Order the thumbnails by name, file type, status, or existing metadata."),
+        )
+        row.addWidget(self._grid_sort_combo)
+
+        self._grid_sort_dir = QToolButton()
+        self._grid_sort_dir.setObjectName("sortdir")
+        self._grid_sort_dir.setCheckable(True)
+        self._grid_sort_dir.setText("↑")
+        self._grid_sort_dir.setToolTip(_("Ascending. Click to sort descending."))
+        row.addWidget(self._grid_sort_dir)
+        row.addStretch(1)
+
+        self._grid_sort_combo.currentIndexChanged.connect(self._on_grid_sort_changed)
+        self._grid_sort_dir.toggled.connect(self._on_grid_sort_dir_toggled)
+        return row
+
+    def _on_grid_sort_changed(self) -> None:
+        """Re-sort the visible grid when the sort field changes."""
+        self._grid_sort = self._grid_sort_combo.currentData()
+        self._resort_grid()
+
+    def _on_grid_sort_dir_toggled(self, descending: bool) -> None:  # noqa: FBT001 - Qt toggled slot
+        """Flip the grid between ascending and descending, updating the toggle's arrow."""
+        self._grid_sort_desc = descending
+        self._grid_sort_dir.setText("↓" if descending else "↑")
+        self._grid_sort_dir.setToolTip(
+            _("Descending. Click to sort ascending.")
+            if descending
+            else _("Ascending. Click to sort descending."),
+        )
+        self._resort_grid()
+
+    def _resort_grid(self) -> None:
+        """Rebuild the current folder grid in the chosen order; cached thumbnails are reused."""
+        if self._grid_folder is not None and self._right.currentIndex() == _PAGE_GRID:
+            self._show_grid(self._grid_folder)
 
     def _build_detail_panel(self) -> QWidget:
         content = QWidget()
@@ -1959,6 +2036,7 @@ class MainWindow(QMainWindow):
         self._thumb_cache.clear()
         self._grid.clear()
         self._grid_items = {}
+        self._grid_folder = None
         self._current = None
         self._rebuild_tree()
         self._show_empty()
@@ -2168,26 +2246,32 @@ class MainWindow(QMainWindow):
 
     def _show_grid(self, folder: Path) -> None:
         self._stop_thumbs()
+        self._grid_folder = folder
         self._grid.clear()
         self._grid_items = {}
         under = paths_under([item.path for item in self._items.values()], folder)
+        items = sort_photos(
+            [self._items[str(path)] for path in under],
+            self._grid_sort,
+            descending=self._grid_sort_desc,
+        )
         pending: list[Path] = []
         self._syncing = True
-        for path in under:
-            key = str(path)
-            grid_item = QListWidgetItem(path.name)
+        for item in items:
+            key = str(item.path)
+            grid_item = QListWidgetItem(item.path.name)
             grid_item.setData(_PATH_ROLE, key)
             grid_item.setFlags(grid_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             self._grid.addItem(grid_item)
             self._grid_items[key] = grid_item
-            self._update_grid_item(self._items[key], grid_item)
+            self._update_grid_item(item, grid_item)
             if key not in self._thumb_cache:
-                pending.append(path)
+                pending.append(item.path)
         self._syncing = False
         self._right.setCurrentIndex(_PAGE_GRID)
         self._status.setText(
-            ngettext("{n} photo in {folder}.", "{n} photos in {folder}.", len(under)).format(
-                n=len(under),
+            ngettext("{n} photo in {folder}.", "{n} photos in {folder}.", len(items)).format(
+                n=len(items),
                 folder=folder.name or folder,
             ),
         )

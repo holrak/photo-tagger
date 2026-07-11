@@ -1215,6 +1215,88 @@ def test_on_thumb_ready_sets_icon_and_caches(
     assert str(a) in window._thumb_cache  # noqa: SLF001
 
 
+def _grid_order(window: gui.MainWindow) -> list[str]:
+    """Return the thumbnail filenames in the grid, in display order."""
+    return [window._grid.item(i).text() for i in range(window._grid.count())]  # noqa: SLF001
+
+
+def test_grid_sorts_by_name_by_default(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A freshly shown grid orders thumbnails by name, not the order they were added."""
+    files = {name: _jpeg(tmp_path / f"{name}.jpg") for name in ("c", "a", "b")}
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, files)
+
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    assert _grid_order(window) == ["a.jpg", "b.jpg", "c.jpg"]
+
+
+def test_grid_sort_direction_toggle_reverses_order(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flipping the direction toggle re-sorts the visible grid from A-Z to Z-A in place."""
+    files = {name: _jpeg(tmp_path / f"{name}.jpg") for name in ("c", "a", "b")}
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, files)
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    window._grid_sort_dir.setChecked(True)  # noqa: SLF001 - ascending -> descending
+
+    assert _grid_order(window) == ["c.jpg", "b.jpg", "a.jpg"]
+
+
+def test_grid_sort_by_status_uses_lifecycle_rank(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Choosing the Status sort orders thumbnails by lifecycle, mirroring the tree's Status sort."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    c = _jpeg(tmp_path / "c.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": b, "c": c})
+    window._items[str(a)].status = FAILED  # noqa: SLF001
+    window._items[str(b)].status = PENDING  # noqa: SLF001
+    window._items[str(c)].status = READY  # noqa: SLF001
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - folder -> grid
+
+    combo = window._grid_sort_combo  # noqa: SLF001
+    combo.setCurrentIndex(combo.findData(gui.SORT_STATUS))
+
+    # Ascending lifecycle: pending(b) < ready(c) < failed(a), not the alphabetical file order.
+    assert _grid_order(window) == ["b.jpg", "c.jpg", "a.jpg"]
+
+
+def test_grid_sort_survives_navigating_between_folders(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chosen sort persists as the user moves between folders within a session."""
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    _jpeg(tmp_path / "one" / "b.jpg")
+    _jpeg(tmp_path / "one" / "a.jpg")
+    _jpeg(tmp_path / "two" / "d.jpg")
+    _jpeg(tmp_path / "two" / "c.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    window._extensions.setText("jpg")  # noqa: SLF001
+    window._add_inputs([tmp_path])  # noqa: SLF001
+    _select(window, window._tree.topLevelItem(0).child(0))  # noqa: SLF001 - first subfolder
+    window._grid_sort_dir.setChecked(True)  # noqa: SLF001 - descending
+
+    _select(window, window._tree.topLevelItem(0).child(1))  # noqa: SLF001 - second subfolder
+
+    assert _grid_order(window) == ["d.jpg", "c.jpg"]
+
+
 # ---------------------------------------------------------------------------
 # Generation worker
 # ---------------------------------------------------------------------------

@@ -152,6 +152,7 @@ sonarcloud
 sonarlint
 SonarQube
 sonarqube
+sortdir
 stdouts
 stubjpeg
 subcontrol
