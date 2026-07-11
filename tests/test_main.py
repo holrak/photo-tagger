@@ -697,6 +697,25 @@ def test_atomic_write_text_cleans_up_on_write_failure(tmp_path: Path) -> None:
     assert leftovers == []
 
 
+def test_atomic_write_text_cleans_up_when_rename_fails(tmp_path: Path) -> None:
+    """
+    A failure after the temp file was fully written (the rename) also removes it.
+
+    Unlike the fdopen failure above, the descriptor is already closed here, so this exercises the
+    branch that skips the extra close before unlinking.
+    """
+    target = tmp_path / "output.json"
+
+    with (
+        patch("photo_tagger.main.Path.replace", side_effect=OSError("read-only filesystem")),
+        pytest.raises(OSError, match="read-only"),
+    ):
+        main_module._atomic_write_text(target, "content")  # noqa: SLF001
+
+    assert not target.exists()
+    assert list(tmp_path.glob(f".{target.name}.*")) == []
+
+
 # ---------------------------------------------------------------------------
 # doctor command
 # ---------------------------------------------------------------------------
