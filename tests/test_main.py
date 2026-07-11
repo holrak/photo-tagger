@@ -10,9 +10,10 @@ tests.
 import contextlib
 import io
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -57,6 +58,7 @@ def _patches(captured: dict[str, Any]) -> Any:  # noqa: ANN401 - context manager
         captured["workers"] = kwargs.get("workers")
         captured["on_image_result"] = kwargs.get("on_image_result")
         captured["cache"] = kwargs.get("cache")
+        captured["progress"] = kwargs.get("progress")
         return None
 
     return (
@@ -243,16 +245,38 @@ def test_ndjson_emitter_writes_one_line_per_outcome(tmp_path: Path) -> None:
     assert second["from_cache"] is True
 
 
+class _ChunkedSink:
+    """
+    A stream whose write lands character by character, yielding the GIL between characters.
+
+    io.StringIO.write of a whole line is atomic under the GIL, so a test against it can never
+    interleave and would keep passing even with the emitter's lock deleted. This sink models a
+    buffered real stdout, where an unlocked concurrent write genuinely shreds lines.
+    """
+
+    def __init__(self) -> None:
+        self.chunks: list[str] = []
+
+    def write(self, s: str) -> int:
+        for char in s:
+            self.chunks.append(char)
+            time.sleep(0)  # invite the scheduler to interleave another writer
+        return len(s)
+
+    def flush(self) -> None:
+        """Match the _TextSink protocol; nothing to do."""
+
+
 def test_ndjson_emitter_is_thread_safe(tmp_path: Path) -> None:
-    """Concurrent emitters never interleave a partial line."""
-    buf = io.StringIO()
-    emitter = main_module._NDJSONEmitter(buf)  # noqa: SLF001
+    """Concurrent emitters never interleave a partial line, even on a non-atomic sink."""
+    sink = _ChunkedSink()
+    emitter = main_module._NDJSONEmitter(sink)  # noqa: SLF001
     paths = [tmp_path / f"img{i:03d}.cr3" for i in range(60)]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda p: emitter(_outcome(p)), paths))
 
-    lines = buf.getvalue().splitlines()
+    lines = "".join(sink.chunks).splitlines()
     # Each line parses cleanly: proof that nothing interleaved.
     decoded = [json.loads(line) for line in lines]
     assert sorted(d["file"] for d in decoded) == sorted(str(p) for p in paths)
@@ -422,6 +446,62 @@ def test_cli_newer_than_filters_input_batch(tmp_path: Path) -> None:
     assert "image_files" not in captured
 
 
+def test_cli_older_than_filters_input_batch(tmp_path: Path) -> None:
+    """
+    --older-than parses the timestamp and drops files newer than the bound.
+
+    The mirror of the --newer-than test: without it, swapping the two keyword arguments handed
+    to apply_date_filter (or dropping older_than entirely) passed the whole suite.
+    """
+    import os  # noqa: PLC0415 - test-local import.
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415 - test-local import.
+
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+    boundary = datetime(2024, 1, 1, tzinfo=UTC)
+    new_ts = (boundary + timedelta(days=10)).timestamp()
+    os.utime(image, (new_ts, new_ts))
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--older-than", "2024-01-01"])
+
+    # The lone file is newer than the bound so run_batch should never be invoked.
+    assert "image_files" not in captured
+
+
+def test_cli_date_window_applies_both_bounds(tmp_path: Path) -> None:
+    """--newer-than and --older-than combine into a window; only the inside file survives."""
+    import os  # noqa: PLC0415 - test-local import.
+    from datetime import UTC, datetime  # noqa: PLC0415 - test-local import.
+
+    before = _make_jpeg(tmp_path / "before.cr3")
+    inside = _make_jpeg(tmp_path / "inside.cr3")
+    after = _make_jpeg(tmp_path / "after.cr3")
+    for path, when in (
+        (before, datetime(2023, 6, 1, tzinfo=UTC)),
+        (inside, datetime(2024, 6, 1, tzinfo=UTC)),
+        (after, datetime(2025, 6, 1, tzinfo=UTC)),
+    ):
+        os.utime(path, (when.timestamp(), when.timestamp()))
+
+    captured: dict[str, Any] = {}
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(
+            [
+                "--input",
+                str(tmp_path),
+                "--newer-than",
+                "2024-01-01T00:00:00+00:00",
+                "--older-than",
+                "2025-01-01T00:00:00+00:00",
+            ],
+        )
+
+    assert [p.name for p in captured["image_files"]] == [inside.name]
+
+
 def test_cli_rejects_malformed_newer_than(tmp_path: Path) -> None:
     """--newer-than with a non-ISO string exits before scheduling work."""
     image = _make_jpeg(tmp_path / "img.cr3")
@@ -489,13 +569,70 @@ def test_cli_cache_file_opened_is_passed_and_closed(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.sqlite3"
     captured: dict[str, Any] = {}
 
+    # Spy on the opened cache so the close is actually asserted: cache_path.exists() alone
+    # holds even if the finally block stops closing (a real handle leak on Windows).
+    from photo_tagger.cache import open_cache  # noqa: PLC0415 - test-local import.
+
+    spies: list[MagicMock] = []
+
+    def spying_open_cache(path: Path, *, namespace: str) -> MagicMock:
+        spy = MagicMock(wraps=open_cache(path, namespace=namespace))
+        spies.append(spy)
+        return spy
+
     setup, create_agent, run_batch = _patches(captured)
-    with setup, create_agent, run_batch:
+    with (
+        setup,
+        create_agent,
+        run_batch,
+        patch.object(main_module, "open_cache", spying_open_cache),
+    ):
         _run_app(["--input", str(image), "--cache-file", str(cache_path)])
 
-    # The cache opened (reached run_batch) and the finally closed it without error.
-    assert captured["cache"] is not None
     assert cache_path.exists()
+    assert captured["cache"] is spies[0]  # the opened cache reached run_batch
+    spies[0].close.assert_called_once()  # and the finally closed it
+
+
+def test_cli_csv_writer_is_closed_after_the_batch(tmp_path: Path) -> None:
+    """The finally block closes the CSV writer, so the report handle never leaks."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    csv_path = tmp_path / "report.csv"
+    captured: dict[str, Any] = {}
+
+    from photo_tagger.csv_report import CsvReportWriter  # noqa: PLC0415 - test-local import.
+
+    spies: list[MagicMock] = []
+
+    def spying_writer(path: Path) -> MagicMock:
+        spy = MagicMock(wraps=CsvReportWriter(path))
+        spies.append(spy)
+        return spy
+
+    setup, create_agent, run_batch = _patches(captured)
+    with (
+        setup,
+        create_agent,
+        run_batch,
+        patch.object(main_module, "CsvReportWriter", spying_writer),
+    ):
+        _run_app(["--input", str(image), "--csv-file", str(csv_path)])
+
+    assert csv_path.exists()
+    spies[0].close.assert_called_once()
+
+
+def test_cli_no_progress_disables_the_bar(tmp_path: Path) -> None:
+    """--no-progress reaches run_batch as progress=None (batch_progress yields no callback)."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--no-progress"])
+
+    assert "progress" in captured
+    assert captured["progress"] is None
 
 
 def test_cli_lock_file_blocks_second_run(tmp_path: Path) -> None:
@@ -742,6 +879,42 @@ def test_doctor_exits_one_when_a_check_fails() -> None:
     ):
         main_module.doctor(provider="lmstudio", model="m", url=None, api_key=None)
     assert exc_info.value.code == 1
+
+
+def test_doctor_honors_the_config_file_through_the_app(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Invoking the real subcommand picks up config-file defaults, as its docstring promises.
+
+    The other doctor tests call the function directly with kwargs, which can never catch a
+    ConfigFileSource regression specific to subcommands (say, config keys doctor has no flag for
+    suddenly erroring, or the [provider] table not reaching --model).
+    """
+    from photo_tagger.diagnostics import CheckResult  # noqa: PLC0415 - test-local import.
+
+    _point_config_at(
+        tmp_path,
+        monkeypatch,
+        '[provider]\nmodel_name = "configured-model"\n\n[inference]\nmax_tokens = 500\n',
+    )
+    received: dict[str, Any] = {}
+
+    def fake_run_checks(provider: str, model: str, **kwargs: Any) -> list[Any]:  # noqa: ANN401
+        received["provider"] = provider
+        received["model"] = model
+        received.update(kwargs)
+        return [CheckResult("ExifTool", ok=True, detail="ok")]
+
+    with (
+        patch.object(main_module, "run_checks", side_effect=fake_run_checks),
+        contextlib.suppress(SystemExit),
+    ):
+        main_module.app(["doctor"])
+
+    assert received["model"] == "configured-model"
+    assert received["provider"] == "lmstudio"  # untouched fields keep their built-in defaults
 
 
 # ---------------------------------------------------------------------------
