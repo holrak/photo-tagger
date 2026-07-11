@@ -59,6 +59,23 @@ def _isolate_telemetry_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 
 @pytest.fixture(autouse=True)
+def _no_stray_http_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Fail fast when a test reaches the network without patching it first.
+
+    The provider/diagnostics code GETs http://localhost:1234/v1 and friends by default, so a test
+    that forgets its local httpx.get patch passes on a dev machine running LM Studio and hangs or
+    flakes in CI. Tests that need a GET re-patch locally, mirroring the httpx.post stub above.
+    """
+
+    def _refuse(*_args: object, **_kwargs: object) -> None:
+        msg = "test attempted a real httpx.get; patch httpx.get (or the caller) locally"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr("httpx.get", _refuse)
+
+
+@pytest.fixture(autouse=True)
 def _no_retry_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     """Zero the pause before the retry pass so every run_batch test stays instant."""
     monkeypatch.setattr("photo_tagger.pipeline._RETRY_PASS_DELAY_SECONDS", 0.0)
