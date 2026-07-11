@@ -735,7 +735,7 @@ def test_gui_reports_missing_pyside6(capsys: pytest.CaptureFixture[str]) -> None
 
     def raise_import_error(_name: str) -> object:
         msg = "No module named 'PySide6'"
-        raise ImportError(msg)
+        raise ImportError(msg, name="PySide6")
 
     with (
         patch("photo_tagger.main.importlib.import_module", raise_import_error),
@@ -744,6 +744,26 @@ def test_gui_reports_missing_pyside6(capsys: pytest.CaptureFixture[str]) -> None
         main_module.gui()
     assert exc_info.value.code == 1
     assert "photo-tagger[gui]" in capsys.readouterr().err
+
+
+def test_gui_propagates_non_qt_import_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    """
+    An ImportError from inside the gui module chain is not "PySide6 missing".
+
+    Regression test: a broken transitive dependency used to be reported with the pip install
+    hint, sending the user to reinstall an extra that was never the problem.
+    """
+
+    def raise_import_error(_name: str) -> object:
+        msg = "cannot import name 'Broken' from 'somewhere.else'"
+        raise ImportError(msg, name="somewhere.else")
+
+    with (
+        patch("photo_tagger.main.importlib.import_module", raise_import_error),
+        pytest.raises(ImportError, match=r"somewhere\.else"),
+    ):
+        main_module.gui()
+    assert "photo-tagger[gui]" not in capsys.readouterr().err
 
 
 def test_gui_launches_when_available() -> None:

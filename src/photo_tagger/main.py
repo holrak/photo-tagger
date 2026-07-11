@@ -154,6 +154,12 @@ def gui() -> None:
     try:
         gui_module = importlib.import_module("photo_tagger.gui")
     except ImportError as exc:
+        # Only a genuinely missing Qt module earns the install hint. Anything else (a broken
+        # shiboken build, an import error inside our own gui code) must surface as itself, or the
+        # hint sends the user reinstalling an extra that is not the problem.
+        missing = (exc.name or "").split(".")[0]
+        if missing not in ("PySide6", "shiboken6"):
+            raise
         sys.stderr.write(
             "The desktop GUI needs PySide6, which is not installed.\n"
             "Install the optional extra with:\n"
