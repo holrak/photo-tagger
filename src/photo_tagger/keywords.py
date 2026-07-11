@@ -80,15 +80,36 @@ def dedupe_keywords(keywords: Iterable[str]) -> list[str]:
     return out
 
 
+def _capitalize_segment(segment: str) -> str:
+    """
+    Title-case *segment* only when it is fully lowercase.
+
+    Mixed or upper case is deliberate (``NYC``, ``iPhone``) and must survive untouched;
+    ``str.title()`` would corrupt it (``Nyc``) and also capitalizes after apostrophes
+    (``Bird'S Nest``), so lowercase segments capitalize per whitespace-separated word instead.
+
+    Examples:
+        >>> _capitalize_segment("bird's nest")
+        "Bird's Nest"
+        >>> _capitalize_segment("NYC")
+        'NYC'
+    """
+    if segment != segment.lower():
+        return segment
+    return " ".join(word.capitalize() for word in segment.split())
+
+
 def _normalize_chain_parts(parts: Iterable[str]) -> list[str]:
     """
-    Return Title Case chain segments, skipping blanks.
+    Return capitalized chain segments, skipping blanks.
 
     Examples:
         >>> _normalize_chain_parts([" duck ", "Bird", ""])
         ['Duck', 'Bird']
     """
-    return [segment.strip().title() for segment in parts if segment and segment.strip()]
+    return [
+        _capitalize_segment(segment.strip()) for segment in parts if segment and segment.strip()
+    ]
 
 
 def _register_chain(registry: dict[str, list[str]], chain: list[str]) -> None:

@@ -90,9 +90,20 @@ def test_process_new_keywords_skips_empty_and_duplicate_subjects() -> None:
 
 
 def test_normalize_chain_parts_title_cases_and_omits_blanks() -> None:
-    """Whitespace and empty segments are ignored while remaining entries become Title Case."""
+    """Whitespace and empty segments are ignored while lowercase entries are capitalized."""
     result = _normalize_chain_parts([" duck ", "", "sea-lion", "bird"])
-    assert result == ["Duck", "Sea-Lion", "Bird"]
+    assert result == ["Duck", "Sea-lion", "Bird"]
+
+
+def test_normalize_chain_parts_preserves_deliberate_casing() -> None:
+    """
+    Acronyms and mixed-case names survive; apostrophes do not trigger mid-word uppercase.
+
+    Regression test: ``str.title()`` used to rewrite NYC as Nyc and bird's nest as Bird'S Nest in
+    the keywords written to files.
+    """
+    result = _normalize_chain_parts(["NYC", "iPhone", "bird's nest", "McDonald's"])
+    assert result == ["NYC", "iPhone", "Bird's Nest", "McDonald's"]
 
 
 def test_process_new_keywords_updates_subjects_and_registry() -> None:
