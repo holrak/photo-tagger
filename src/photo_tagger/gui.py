@@ -39,6 +39,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QThread,
+    QTimer,
     QTranslator,
     QUrl,
     Signal,
@@ -114,7 +115,7 @@ from photo_tagger.config_file import find_config_file, load_config, user_config_
 from photo_tagger.csv_report import write_report
 from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
-from photo_tagger.errors import DiscoveryError, PhotoTaggerError, ProviderError
+from photo_tagger.errors import DiscoveryError, ProviderError
 from photo_tagger.gui_state import (
     ADDED,
     BADGE_FAILED,
@@ -491,7 +492,11 @@ class GenerateWorker(QObject):
                 retries=_GENERATE_RETRIES,
                 output_language=self._output_language,
             )
-        except PhotoTaggerError as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Not just PhotoTaggerError: an exception escaping this slot on the worker thread
+            # means `finished` never fires, so the window stays in the "running" state (buttons
+            # disabled, photos stuck at "working...") for the rest of the session.
+            logger.exception("gui_agent_construction_failed", error=str(exc))
             for path in self._paths:
                 self.file_failed.emit(str(path), str(exc))
             self.finished.emit()
@@ -1441,14 +1446,23 @@ class MainWindow(QMainWindow):
         """Mirror a thumbnail checkbox change onto the photo and its tree row."""
         if self._syncing:
             return
-        # Remember that this was a checkbox click so the itemClicked that follows the same
-        # mouse release does not also open the photo.
-        self._grid_check_toggled = True
         key = grid_item.data(_PATH_ROLE)
         item = self._items.get(key)
         if item is None:
             return
-        item.selected = grid_item.checkState() == Qt.CheckState.Checked
+        checked = grid_item.checkState() == Qt.CheckState.Checked
+        if checked == item.selected:
+            # Icon and tooltip updates also emit itemChanged; only a real check-state change
+            # counts as a toggle.
+            return
+        # Remember that this was a checkbox click so the itemClicked that follows the same
+        # mouse release does not also open the photo. The itemClicked (when there is one)
+        # arrives within the same event dispatch, so clear the flag once the loop settles;
+        # otherwise a keyboard (space key) toggle would leave it stale and swallow the user's
+        # next real click on a thumbnail.
+        self._grid_check_toggled = True
+        QTimer.singleShot(0, self._clear_grid_check_toggled)
+        item.selected = checked
         self._syncing = True
         leaf = self._leaf_for(Path(key))
         if leaf is not None:
@@ -1459,6 +1473,10 @@ class MainWindow(QMainWindow):
                 parent = parent.parent()
         self._syncing = False
         self._update_status()
+
+    def _clear_grid_check_toggled(self) -> None:
+        """Reset the checkbox-click marker once the current event dispatch has finished."""
+        self._grid_check_toggled = False
 
     def _sync_grid_checks(self) -> None:
         """Repaint every visible thumbnail checkbox from the model (callers hold _syncing)."""
@@ -2075,15 +2093,24 @@ class MainWindow(QMainWindow):
         self._remove_items(removed)
 
     def _remove_items(self, keys: list[str]) -> None:
-        """Drop the photos behind *keys* from the list and refresh the tree."""
+        """Drop the photos behind *keys* from the list and refresh the tree and grid."""
         if not keys:
             return
         for key in keys:
             self._items.pop(key, None)
             self._preview_cache.pop(key, None)
+            self._thumb_cache.pop(key, None)
             if self._current is not None and str(self._current.path) == key:
                 self._show_empty()
         self._rebuild_tree()
+        # A visible grid still holds the removed thumbnails: dead items whose clicks and
+        # checkboxes map to nothing. Rebuild it, or close it when its folder emptied out.
+        if self._grid_folder is not None and self._right.currentIndex() == _PAGE_GRID:
+            if paths_under(self._item_paths(), self._grid_folder):
+                self._show_grid(self._grid_folder)
+            else:
+                self._grid_folder = None
+                self._show_empty()
         self._update_status()
 
     def _clear(self) -> None:
@@ -2218,7 +2245,25 @@ class MainWindow(QMainWindow):
             self._add_folder_node(self._tree, node)
         self._tree.setSortingEnabled(True)
         self._sync_grid_checks()
+        # clear() above dropped the selection (_on_current_changed ignores it while _syncing,
+        # so the right-hand pane kept whatever was open). Restore the highlight so bulk actions
+        # (dragging photos in, Check All, Uncheck Already Tagged) do not kick the user out of
+        # the photo or folder they are reviewing.
+        if self._current is not None:
+            self._select_tree_entry(str(self._current.path), is_dir=False)
+        elif self._grid_folder is not None and self._right.currentIndex() == _PAGE_GRID:
+            self._select_tree_entry(str(self._grid_folder), is_dir=True)
         self._syncing = False
+
+    def _select_tree_entry(self, path: str, *, is_dir: bool) -> None:
+        """Re-highlight the tree row for *path* (callers hold ``_syncing``)."""
+        iterator = QTreeWidgetItemIterator(self._tree)
+        while iterator.value():
+            entry = iterator.value()
+            if bool(entry.data(0, _IS_DIR_ROLE)) == is_dir and entry.data(0, _PATH_ROLE) == path:
+                self._tree.setCurrentItem(entry)
+                return
+            iterator += 1
 
     def _add_folder_node(self, parent: object, node: FolderNode) -> None:
         folder_item = _SortableTreeItem(parent, [node.label, ""])
@@ -2282,6 +2327,10 @@ class MainWindow(QMainWindow):
             folder_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _on_current_changed(self, current: QTreeWidgetItem | None, _previous: object) -> None:
+        if self._syncing:
+            # A programmatic rebuild (tree.clear() emits currentItemChanged(None)) is not the
+            # user navigating; reacting would blank the pane they are working in.
+            return
         # Keep the open photo's in-progress edits (title, description, keywords, hint) when the
         # user browses away; they are restored when it is opened again. Without this, hinting
         # several photos before one Generate Selected would be impossible: every navigation
@@ -2353,18 +2402,24 @@ class MainWindow(QMainWindow):
 
     def _update_grid_item(self, item: PhotoItem, grid_item: QListWidgetItem) -> None:
         """Refresh a grid thumbnail: image (or placeholder), state badges, and checkbox."""
+        # Hold _syncing across the whole refresh: setIcon and setToolTip emit itemChanged just
+        # like setCheckState, and an unguarded emission flips _grid_check_toggled, which then
+        # swallows the user's next real click on a thumbnail (plus an O(n) tree walk per
+        # streamed-in thumbnail).
         was_syncing = self._syncing
         self._syncing = True
-        grid_item.setCheckState(_checked(item.selected))
-        self._syncing = was_syncing
-        key = str(item.path)
-        base = self._thumb_cache.get(key, self._placeholder_pixmap)
-        badges = thumb_badges(item, has_sidecar=item.path.with_suffix(".xmp").exists())
-        grid_item.setIcon(QIcon(_badged_pixmap(base, badges)))
-        notes = [_(_BADGE_TEXT[name]) for name in badges]
-        if item.status == FAILED and item.error:
-            notes.append(item.error)
-        grid_item.setToolTip("\n".join([item.path.name, *notes]))
+        try:
+            grid_item.setCheckState(_checked(item.selected))
+            key = str(item.path)
+            base = self._thumb_cache.get(key, self._placeholder_pixmap)
+            badges = thumb_badges(item, has_sidecar=item.path.with_suffix(".xmp").exists())
+            grid_item.setIcon(QIcon(_badged_pixmap(base, badges)))
+            notes = [_(_BADGE_TEXT[name]) for name in badges]
+            if item.status == FAILED and item.error:
+                notes.append(item.error)
+            grid_item.setToolTip("\n".join([item.path.name, *notes]))
+        finally:
+            self._syncing = was_syncing
 
     def _on_thumb_activated(self, item: QListWidgetItem) -> None:
         if self._grid_check_toggled:
