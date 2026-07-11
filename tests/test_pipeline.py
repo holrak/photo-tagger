@@ -422,23 +422,30 @@ def test_run_batch_concurrent_calls_on_success_per_image(tmp_path: Path) -> None
     assert sorted(p.name for p in notified) == sorted(p.name for p in files)
 
 
-def test_classify_failure_buckets_common_exceptions() -> None:
+def _exception_like(name: str, module: str = "builtins") -> BaseException:
+    """Build an exception instance whose class name/module mirror a real SDK's."""
+    cls = cast("type[Exception]", type(name, (Exception,), {"__module__": module}))
+    return cls()
+
+
+@pytest.mark.parametrize(
+    ("exc", "bucket"),
+    [
+        (TimeoutError(), "timeout"),
+        (_exception_like("ReadTimeout", "httpx"), "timeout"),
+        (_exception_like("ConnectError", "httpx"), "connection"),
+        (_exception_like("UnexpectedModelBehavior", "pydantic_ai"), "model-validation"),
+        (_exception_like("ValidationError", "pydantic"), "model-validation"),
+        (_exception_like("HTTPStatusError", "httpx"), "model-api"),
+        (_exception_like("LibRawFileUnsupportedError", "rawpy._rawpy"), "image-read"),
+        (_exception_like("UnidentifiedImageError", "PIL"), "image-read"),
+        (RuntimeError("anything"), "other"),
+    ],
+    ids=lambda value: value if isinstance(value, str) else type(value).__name__,
+)
+def test_classify_failure_buckets_common_exceptions(exc: BaseException, bucket: str) -> None:
     """Exception classes map to the coarse buckets by name/module, never by message."""
-
-    class ReadTimeout(Exception): ...  # noqa: N818 - mirrors httpx's real class name
-
-    class ConnectError(Exception): ...
-
-    class UnexpectedModelBehavior(Exception): ...  # noqa: N818 - mirrors pydantic-ai's name
-
-    class HTTPStatusError(Exception): ...
-
-    assert classify_failure(TimeoutError()) == "timeout"
-    assert classify_failure(ReadTimeout()) == "timeout"
-    assert classify_failure(ConnectError()) == "connection"
-    assert classify_failure(UnexpectedModelBehavior()) == "model-validation"
-    assert classify_failure(HTTPStatusError()) == "model-api"
-    assert classify_failure(RuntimeError("anything")) == "other"
+    assert classify_failure(exc) == bucket
 
 
 def test_run_batch_reports_failure_kinds_in_totals(tmp_path: Path) -> None:
@@ -473,9 +480,18 @@ class _DictCache:
 
     def __init__(self) -> None:
         self.store: dict[str, InferenceResult] = {}
+        # Set on the second miss: the follower has checked the cache and is heading for the
+        # in-flight coordination, which pins the interleaving the tests mean to exercise.
+        self.follower_missed = threading.Event()
+        self._misses = 0
 
     def get(self, key: str) -> InferenceResult | None:
-        return self.store.get(key)
+        result = self.store.get(key)
+        if result is None:
+            self._misses += 1
+            if self._misses >= 2:  # noqa: PLR2004 - the second miss is the follower's
+                self.follower_missed.set()
+        return result
 
     def put(self, key: str, result: InferenceResult) -> None:
         self.store[key] = result
@@ -487,7 +503,9 @@ def test_resolve_inference_coordinates_duplicate_content(tmp_path: Path) -> None
 
     Regression test: two workers with identical pixels (burst duplicates, one image in two
     folders) used to both miss the cache and each pay a full inference; only the last put
-    mattered. The first worker now leads, the second waits and replays the cache.
+    mattered. The first worker now leads, the second waits and replays the cache. The leader is
+    held until the follower has demonstrably missed the cache, so this exercises the real
+    wait-then-replay path rather than a lucky plain cache hit.
     """
     calls = {"n": 0}
     leader_started = threading.Event()
@@ -499,7 +517,8 @@ def test_resolve_inference_coordinates_duplicate_content(tmp_path: Path) -> None
         release_leader.wait(timeout=5.0)
         return InferenceResult(title="T", description="D", keywords=["K"])
 
-    ctx = _ctx(cache=_DictCache())
+    cache = _DictCache()
+    ctx = _ctx(cache=cache)
     with (
         patch("photo_tagger.pipeline.analyze_image_with_ai", side_effect=slow_analyze),
         patch("photo_tagger.pipeline.prepare_image_for_agent", return_value=b"jpeg"),
@@ -520,6 +539,9 @@ def test_resolve_inference_coordinates_duplicate_content(tmp_path: Path) -> None
             contextual_prompt="p",
             content_key="same-pixels",
         )
+        # Only release the leader once the follower is provably past its cache miss (and thus
+        # waiting on the in-flight event, not racing toward a plain hit).
+        assert cache.follower_missed.wait(timeout=5.0)
         release_leader.set()
         leader_result, leader_from_cache = leader.result(timeout=10.0)
         follower_result, follower_from_cache = follower.result(timeout=10.0)
@@ -1040,26 +1062,35 @@ def test_run_batch_concurrent_interrupt_during_submission(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.usefixtures("patched_pipeline")
-def test_process_photo_trims_keywords_when_max_new_keywords_set(tmp_path: Path) -> None:
-    """max_new_keywords caps the AI-returned keyword list before merging."""
+@pytest.mark.parametrize(
+    ("cap", "expected_subjects"),
+    [
+        (1, ["Alpha"]),  # below the count: excess dropped
+        (3, ["Alpha", "Beta", "Gamma"]),  # exactly at the count: nothing trimmed
+        (5, ["Alpha", "Beta", "Gamma"]),  # above the count: nothing trimmed
+        (None, ["Alpha", "Beta", "Gamma"]),  # no cap configured
+    ],
+)
+def test_process_photo_caps_ai_keywords_before_merging(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+    cap: int | None,
+    expected_subjects: list[str],
+) -> None:
+    """max_new_keywords trims the AI keyword list (and only it) before merging, order kept."""
     image = tmp_path / "img.cr3"
     image.write_text("x")
-    options = ProcessingOptions(max_new_keywords=1)
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["Alpha", "Beta", "Gamma"],
+    )
 
-    with patch(
-        "photo_tagger.pipeline.analyze_image_with_ai",
-        return_value=InferenceResult(
-            title="T",
-            description="D",
-            keywords=["Alpha", "Beta", "Gamma"],
-            input_tokens=0,
-            output_tokens=0,
-            total_tokens=0,
-            seconds=0.0,
-        ),
-    ):
-        assert process_photo(image, _ctx(options=options)) is True
+    options = ProcessingOptions(max_new_keywords=cap)
+    assert process_photo(image, _ctx(options=options)) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == expected_subjects
 
 
 def test_process_photo_discards_existing_keywords_when_preserve_false(
@@ -1316,55 +1347,5 @@ def test_run_batch_concurrent_progress_callback_fires_per_image(tmp_path: Path) 
     assert sorted(received) == sorted((f.name, True) for f in files)
 
 
-def test_process_photo_trims_to_max_new_keywords(
-    tmp_path: Path,
-    patched_pipeline: dict[str, Any],
-) -> None:
-    """max_new_keywords caps the AI keyword list before merging with existing tags."""
-    image = tmp_path / "img.cr3"
-    image.write_text("x")
-
-    options = ProcessingOptions(max_new_keywords=2)
-    assert process_photo(image, _ctx(options=options)) is True
-
-    write_call = patched_pipeline["write"].call_args
-    keywords = write_call.args[1]
-    # The stubbed AI returns ["Beach", "Sunset"] (2 items), which is at the cap.
-    # Nothing is trimmed at 2, but the path is still exercised.
-    assert len(keywords.subject) <= 2  # noqa: PLR2004 - matches the cap
-
-
-def test_process_photo_trims_when_exceeding_max_new_keywords(
-    tmp_path: Path,
-) -> None:
-    """When AI returns more keywords than the cap, the excess is dropped before merge."""
-    image = tmp_path / "img.cr3"
-    image.write_text("x")
-    many_keywords = [f"kw-{i}" for i in range(10)]
-
-    with (
-        patch(
-            "photo_tagger.pipeline.prepare_image_for_agent",
-            return_value=BinaryContent(data=b"\xff\xd8stub", media_type="image/jpeg"),
-        ),
-        patch("photo_tagger.pipeline.read_image_context", return_value=ImageContext()),
-        patch(
-            "photo_tagger.pipeline.analyze_image_with_ai",
-            return_value=InferenceResult(
-                title="Title",
-                description="Description.",
-                keywords=many_keywords,
-            ),
-        ),
-        patch("photo_tagger.pipeline.write_metadata", return_value=True) as write,
-    ):
-        options = ProcessingOptions(max_new_keywords=3)
-        assert process_photo(image, _ctx(options=options)) is True
-
-        write_call = write.call_args
-        keywords = write_call.args[1]
-        # Only the first 3 AI keywords survive the cap, then merge happens.
-        assert "Kw-0" in keywords.subject
-        assert "Kw-2" in keywords.subject
-        # The 4th keyword (index 3) should NOT be present.
-        assert "Kw-3" not in keywords.subject
+# The keyword-cap behavior is covered by the parametrized
+# test_process_photo_caps_ai_keywords_before_merging above (below/at/above the count, and None).
