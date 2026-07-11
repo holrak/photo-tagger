@@ -62,7 +62,14 @@ _GPS_TAG = "Composite:GPSPosition"
 # Existing title/description tags, in read priority order (first non-empty wins). The GUI
 # surfaces these so a user can see and edit what is already on the photo before saving.
 _TITLE_TAGS: tuple[str, ...] = (TAG_XMP_TITLE, TAG_IPTC_OBJECT_NAME)
-_DESCRIPTION_TAGS: tuple[str, ...] = (TAG_XMP_DESCRIPTION, TAG_EXIF_IMAGE_DESCRIPTION)
+# "XMP:ImageDescription" is the family-0 spelling of XMP-tiff:ImageDescription, the mirror
+# write_metadata itself produces, so our own sidecars (and other tools' tiff namespace
+# descriptions) count on re-read.
+_DESCRIPTION_TAGS: tuple[str, ...] = (
+    TAG_XMP_DESCRIPTION,
+    "XMP:ImageDescription",
+    TAG_EXIF_IMAGE_DESCRIPTION,
+)
 
 # Any of these tags being non-empty marks an image as already tagged. Covers the cases
 # where another tool (Lightroom, exiftool by hand, a previous photo-tagger run) wrote
@@ -632,7 +639,10 @@ def _build_write_payload(
         payload[TAG_XMP_WEIGHTED_FLAT_SUBJECT] = weighted
     if description:
         payload["XMP-dc:Description"] = description
-        payload["XMP-exif:ImageDescription"] = description
+        # ImageDescription lives in the XMP *tiff* namespace (exiftool rejects XMP-exif for it,
+        # silently: a warning plus exit 0). exiftool maps it back to IFD0 ImageDescription when a
+        # sidecar is folded into the image.
+        payload["XMP-tiff:ImageDescription"] = description
     if title:
         payload["XMP-dc:Title"] = title
         payload[TAG_IPTC_OBJECT_NAME] = title

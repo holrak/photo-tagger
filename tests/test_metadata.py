@@ -178,7 +178,7 @@ def test_build_write_payload_produces_lightroom_compatible_keys() -> None:
     assert payload["XMP-lr:HierarchicalSubject"] == ["Animal|Bird"]
     assert payload["XMP:WeightedFlatSubject"] == ["Beach"]
     assert payload["XMP-dc:Description"] == "A short desc."
-    assert payload["XMP-exif:ImageDescription"] == "A short desc."
+    assert payload["XMP-tiff:ImageDescription"] == "A short desc."
     assert payload["XMP-dc:Title"] == "A title"
     assert payload["IPTC:ObjectName"] == "A title"
 

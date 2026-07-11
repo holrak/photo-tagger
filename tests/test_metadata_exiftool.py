@@ -94,6 +94,31 @@ def test_read_image_context_handles_missing_file(tmp_path: Path) -> None:
     assert out.existing_keywords == KeywordSet()
 
 
+def test_description_mirror_round_trips_as_image_description(tmp_path: Path) -> None:
+    """
+    The ImageDescription mirror is actually written, not silently rejected.
+
+    Regression test: the payload used XMP-exif:ImageDescription, which exiftool refuses with a
+    warning but exit code 0, so the mirror never reached the file and write_metadata still
+    reported success.
+    """
+    from exiftool import ExifToolHelper  # type: ignore[attr-defined]  # noqa: PLC0415
+
+    img = _write_jpeg(tmp_path / "img.jpg")
+    ok = write_metadata(
+        img,
+        KeywordSet(subject=["X"]),
+        description="A mirrored description.",
+        backup=False,
+        use_sidecar=False,
+    )
+    assert ok is True
+
+    with ExifToolHelper() as et:  # type: ignore[no-untyped-call]
+        blocks = et.get_tags(files=[str(img)], tags=["XMP:ImageDescription"])
+    assert blocks[0].get("XMP:ImageDescription") == "A mirrored description."
+
+
 def test_read_caption_round_trip(tmp_path: Path) -> None:
     """A written title and description are read back by read_caption."""
     img = _write_jpeg(tmp_path / "img.jpg")
