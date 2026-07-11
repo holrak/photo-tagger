@@ -77,6 +77,41 @@ def test_open_cache_degrades_on_open_failure(tmp_path: Path) -> None:
     assert open_cache(blocker / "cache.sqlite3", namespace="m#x") is None
 
 
+def test_cache_prunes_stale_rows_on_open(tmp_path: Path) -> None:
+    """
+    Rows older than the retention window are deleted when the cache opens; fresh ones stay.
+
+    Every settings change writes to a fresh namespace and orphans the old rows, so without this the
+    cache file only ever grows.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415 - test-local
+
+    from photo_tagger.cache import CACHE_RETENTION_DAYS, InferenceCache  # noqa: PLC0415
+
+    db = tmp_path / "cache.sqlite3"
+    with InferenceCache(db, model_name="m#x") as cache:
+        cache.put("fresh", InferenceResult(title="T", description="D", keywords=[]))
+        stale_stamp = (datetime.now(tz=UTC) - timedelta(days=CACHE_RETENTION_DAYS + 1)).isoformat()
+        cache._conn.execute(  # noqa: SLF001 - plant an old row directly
+            "UPDATE inference SET created_at = ? WHERE image_hash = 'fresh'",
+            (stale_stamp,),
+        )
+        cache._conn.execute(  # noqa: SLF001
+            "INSERT INTO inference SELECT 'stale', model, title, description, keywords_json,"
+            " input_tokens, output_tokens, total_tokens, seconds, created_at"
+            " FROM inference WHERE image_hash = 'fresh'",
+        )
+        cache._conn.execute(  # noqa: SLF001 - restore the fresh row's stamp
+            "UPDATE inference SET created_at = ? WHERE image_hash = 'fresh'",
+            (datetime.now(tz=UTC).isoformat(),),
+        )
+        cache._conn.commit()  # noqa: SLF001
+
+    with InferenceCache(db, model_name="m#x") as reopened:
+        assert reopened.get("stale") is None
+        assert reopened.get("fresh") is not None
+
+
 def test_open_cache_closes_connection_when_setup_fails(tmp_path: Path) -> None:
     """
     A corrupt DB file degrades to no-cache AND closes the already-opened connection.

@@ -16,7 +16,7 @@ import json
 import sqlite3
 import threading
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Self
 
 from loguru import logger
@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 
 _HASH_DIGEST_BYTES = 16  # 128-bit BLAKE2b; collisions are not a realistic concern here.
 _CONFIG_DIGEST_BYTES = 8  # short fingerprint, plenty for distinguishing configs.
+
+# Entries untouched for this long are deleted when the cache opens. Every settings change writes
+# to a fresh namespace and orphans the old rows, so without pruning the file only ever grows.
+CACHE_RETENTION_DAYS = 180
 
 
 def hash_image_file(path: Path) -> str:
@@ -182,10 +186,32 @@ class InferenceCache:
             # (and its file handle) would leak for the life of the process.
             self._conn.close()
             raise
+        self._prune_stale_rows()
         self._lock = threading.Lock()
         self._model = model_name
         self._path = db_path
         logger.debug("inference_cache_opened", file=str(db_path), model=model_name)
+
+    def _prune_stale_rows(self) -> None:
+        """
+        Delete entries older than :data:`CACHE_RETENTION_DAYS`, best-effort.
+
+        ``created_at`` holds same-format UTC ISO-8601 strings, so a lexicographic comparison is a
+        chronological one. A prune failure (a lock held by a concurrent run) must not disable
+        caching, so it only logs.
+        """
+        cutoff = (datetime.now(tz=UTC) - timedelta(days=CACHE_RETENTION_DAYS)).isoformat()
+        try:
+            with self._conn:  # implicit transaction; commits on success
+                pruned = self._conn.execute(
+                    "DELETE FROM inference WHERE created_at < ?",
+                    (cutoff,),
+                ).rowcount
+        except sqlite3.Error as exc:
+            logger.warning("inference_cache_prune_failed", error=str(exc))
+            return
+        if pruned > 0:
+            logger.info("inference_cache_pruned", rows=pruned, retention_days=CACHE_RETENTION_DAYS)
 
     def get(self, image_hash: str) -> InferenceResult | None:
         """Return the cached InferenceResult for *image_hash*, or None on miss."""
