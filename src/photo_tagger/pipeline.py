@@ -529,20 +529,23 @@ def _run_pass_concurrent(
     indexed = list(enumerate(image_files, start=1))
 
     pool = ThreadPoolExecutor(max_workers=workers)
+    # Submission happens inside the KeyboardInterrupt-handling try below: a Ctrl-C while futures
+    # are still being queued must take the same cancel-and-drain path as one during the loop,
+    # not fall through to the blocking shutdown(wait=True).
+    future_to_image: dict[Future[bool], Path] = {}
+    consumed: set[Future[bool]] = set()
     try:
-        future_to_image = {
-            pool.submit(
-                execute_process,
-                image_file,
-                ctx,
-                index=f"{idx}/{total}",
-                retry=retry,
-                et=None,
-            ): image_file
-            for idx, image_file in indexed
-        }
-        consumed: set[Future[bool]] = set()
         try:
+            for idx, image_file in indexed:
+                future = pool.submit(
+                    execute_process,
+                    image_file,
+                    ctx,
+                    index=f"{idx}/{total}",
+                    retry=retry,
+                    et=None,
+                )
+                future_to_image[future] = image_file
             for future in as_completed(future_to_image):
                 consumed.add(future)
                 image_file = future_to_image[future]
@@ -576,12 +579,16 @@ def _run_pass_concurrent(
                 remaining,
                 on_success=ctx.on_success,
             )
+            # Images the interrupt caught before submission are pending too.
+            submitted = set(future_to_image.values())
+            never_submitted = [img for _, img in indexed if img not in submitted]
             successes += drained_ok
             failed.extend(drained_failed)
             failed.extend(cancelled)
+            failed.extend(never_submitted)
             logger.warning(
                 "batch_interrupted_by_user",
-                pending=len(cancelled),
+                pending=len(cancelled) + len(never_submitted),
                 drained=drained_ok + len(drained_failed),
             )
     finally:

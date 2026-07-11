@@ -1,7 +1,7 @@
 """Tests for the photo processing pipeline using lightweight stubs."""
 
 import contextlib
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
@@ -800,6 +800,49 @@ def test_run_batch_concurrent_handles_keyboard_interrupt(tmp_path: Path) -> None
     # depends on scheduling, but we must see at least one failure and on_complete
     # must have fired so the summary file is written.
     assert len(totals.failed_files) >= 1
+
+
+def test_run_batch_concurrent_interrupt_during_submission(tmp_path: Path) -> None:
+    """
+    Ctrl-C while futures are still being queued takes the cancel-and-drain path.
+
+    Regression test: submission used to sit outside the KeyboardInterrupt handler, so an early
+    Ctrl-C fell through to the blocking shutdown(wait=True) and the batch ground on to the end
+    with no summary accounting.
+    """
+    files = [tmp_path / f"img{i}.cr3" for i in range(4)]
+    for f in files:
+        f.write_text("x")
+    interrupt_after = 2
+
+    class InterruptingPool(ThreadPoolExecutor):
+        submissions = 0
+
+        def submit(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+            type(self).submissions += 1
+            if type(self).submissions > interrupt_after:
+                raise KeyboardInterrupt
+            return super().submit(*args, **kwargs)
+
+    received_totals: list[Any] = []
+    with (
+        patch("photo_tagger.pipeline.ThreadPoolExecutor", InterruptingPool),
+        patch("photo_tagger.pipeline.process_photo", return_value=True),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            on_complete=received_totals.append,
+            workers=2,
+        )
+
+    totals = received_totals[0]
+    # The two submitted photos settle during the drain; the two never-submitted ones must be
+    # reported as failed so a --skip-from rerun picks them up.
+    assert totals.success == interrupt_after
+    assert len(totals.failed_files) == len(files) - interrupt_after
 
 
 # ---------------------------------------------------------------------------
