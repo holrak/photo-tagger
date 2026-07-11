@@ -1,7 +1,9 @@
 """Read and write XMP/IPTC metadata via pyexiftool."""
 
 import contextlib
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from exiftool import ExifToolHelper  # type: ignore[attr-defined]
@@ -11,7 +13,6 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
-    from pathlib import Path
 
 from photo_tagger.config import (
     CAMERA_TAGS,
@@ -216,15 +217,61 @@ def _block_has_indicator(blocks: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _build_target_index(paths: list[Path]) -> tuple[list[str], dict[str, Path]]:
-    """Flatten every image's metadata targets and map each target back to its image."""
+def _build_target_index(paths: list[Path]) -> tuple[list[str], dict[Path, Path]]:
+    """
+    Flatten every image's metadata targets and map each target back to its image.
+
+    The map is keyed by ``Path``, not the string sent to exiftool: exiftool echoes ``SourceFile``
+    with forward slashes, so string keys would miss every entry on Windows, where ``str(Path)`` uses
+    backslashes. Path equality normalizes the separator.
+    """
     all_targets: list[str] = []
-    target_to_image: dict[str, Path] = {}
+    target_to_image: dict[Path, Path] = {}
     for image_path in paths:
         for target in metadata_targets(image_path):
             all_targets.append(target)
-            target_to_image[target] = image_path
+            target_to_image[Path(target)] = image_path
     return all_targets, target_to_image
+
+
+def _image_for_block(block: dict[str, Any], target_to_image: dict[Path, Path]) -> Path | None:
+    """Map one exiftool result block back to its source image via the target index."""
+    source_file = block.get("SourceFile")
+    if not source_file:
+        return None
+    return target_to_image.get(Path(str(source_file)))
+
+
+def _batched_get_tags(
+    et: ExifToolHelper | None,
+    *,
+    files: list[str],
+    tags: list[str],
+) -> list[dict[str, Any]]:
+    """
+    Run one ``get_tags`` over *files*, salvaging the payload when a single file is unreadable.
+
+    exiftool exits non-zero when any file in the batch has a format error, and pyexiftool then
+    raises even though the JSON for every file (including the healthy ones) is already on stdout.
+    Without the salvage, one corrupt or zero-byte photo would wipe out the whole folder's read and
+    every image would report "no metadata". Re-raises when there is nothing to salvage.
+    """
+    with managed_helper(et) as helper:
+        try:
+            blocks: list[dict[str, Any]] = helper.get_tags(files=files, tags=tags)
+        except ExifToolExecuteError as exc:
+            try:
+                blocks = json.loads(exc.stdout or "")
+            except ValueError:
+                raise exc from None
+            if not isinstance(blocks, list):
+                raise
+            logger.warning(
+                "exiftool_batch_partial_failure",
+                files=len(files),
+                error=str(exc.stderr).strip(),
+            )
+        return blocks
 
 
 def find_tagged_images(
@@ -250,15 +297,13 @@ def find_tagged_images(
 
     tagged: set[Path] = set()
     try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=all_targets, tags=list(_TAGGED_INDICATOR_TAGS))
+        blocks = _batched_get_tags(et, files=all_targets, tags=list(_TAGGED_INDICATOR_TAGS))
     except _EXIFTOOL_ERRORS as exc:
         logger.exception("failed_to_open_exiftool_for_tagged_check", error=str(exc))
         return set()
 
     for block in blocks:
-        source_file = block.get("SourceFile", "")
-        image_path = target_to_image.get(str(source_file))
+        image_path = _image_for_block(block, target_to_image)
         if image_path is not None and _block_has_indicator([block]):
             tagged.add(image_path)
 
@@ -276,10 +321,12 @@ def find_field_presence(
     Report which of title/description/keywords each image already carries.
 
     Returns a mapping from every input path to the set of present field names (:data:`FIELD_TITLE`,
-    :data:`FIELD_DESCRIPTION`, :data:`FIELD_KEYWORDS`); an empty set means none are set. A field
-    counts as present when any of its tags is populated on the image *or* its XMP sidecar, so
-    presence accumulates across both. Like :func:`find_tagged_images`, this is one batched exiftool
-    call rather than one per image.
+    :data:`FIELD_DESCRIPTION`, :data:`FIELD_KEYWORDS`); an empty set means the photo was scanned and
+    carries none. When exiftool cannot be run at all the result is an *empty dict*, so callers (the
+    GUI's Tagged column) can tell "could not read" from "read and found nothing" instead of wrongly
+    reporting every photo as untagged. A field counts as present when any of its tags is populated
+    on the image *or* its XMP sidecar, so presence accumulates across both. Like
+    :func:`find_tagged_images`, this is one batched exiftool call rather than one per image.
 
     This is the per-field counterpart the GUI uses to deselect, say, photos that already have a
     title and description while leaving keyword-only photos selected.
@@ -295,14 +342,13 @@ def find_field_presence(
 
     all_tags = sorted({tag for tags in _FIELD_PRESENCE_TAGS.values() for tag in tags})
     try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=all_targets, tags=all_tags)
+        blocks = _batched_get_tags(et, files=all_targets, tags=all_tags)
     except _EXIFTOOL_ERRORS as exc:
         logger.exception("failed_to_open_exiftool_for_field_presence", error=str(exc))
-        return presence
+        return {}
 
     for block in blocks:
-        image_path = target_to_image.get(str(block.get("SourceFile", "")))
+        image_path = _image_for_block(block, target_to_image)
         if image_path is None:
             continue
         for field_name, tags in _FIELD_PRESENCE_TAGS.items():

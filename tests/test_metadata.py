@@ -1,9 +1,11 @@
 """Tests for metadata helpers that don't need a real exiftool binary."""
 
+import json
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+from exiftool.exceptions import ExifToolExecuteError
 
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
@@ -322,7 +324,13 @@ def test_find_field_presence_empty_input_skips_exiftool() -> None:
 
 
 def test_find_field_presence_degrades_on_exiftool_error(tmp_path: Path) -> None:
-    """An exiftool failure yields empty sets for every path rather than raising."""
+    """
+    An exiftool failure yields an empty dict rather than raising.
+
+    Regression test: the failure path used to return empty sets for every path, which callers
+    read as "scanned, nothing found" and the GUI then wrongly showed every photo as untagged.
+    An empty dict means "could not read", leaving the per-photo state unknown.
+    """
     img = tmp_path / "a.cr3"
     img.write_text("x")
     helper = _fake_helper()
@@ -331,7 +339,77 @@ def test_find_field_presence_degrades_on_exiftool_error(tmp_path: Path) -> None:
         patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
         patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
     ):
-        assert find_field_presence([img]) == {img: set()}
+        assert find_field_presence([img]) == {}
+
+
+def _raise_execute_error_with_payload(blocks: list[dict[str, object]]) -> ExifToolExecuteError:
+    """Build the error pyexiftool raises when exiftool exits 1 but still produced JSON."""
+    return ExifToolExecuteError(1, json.dumps(blocks), "Error: File format error - bad.jpg\n", [])
+
+
+def test_find_tagged_images_salvages_batch_with_one_bad_file(tmp_path: Path) -> None:
+    """
+    One corrupt file in the batch must not wipe out the whole folder's tagged check.
+
+    Regression test: exiftool exits 1 when any file has a format error, pyexiftool raises, and
+    the old code returned set() so every already-tagged photo was reported untagged (and re-run).
+    The JSON for the healthy files is still on the error's stdout; use it.
+    """
+    good = tmp_path / "good.cr3"
+    bad = tmp_path / "bad.cr3"
+    for path in (good, bad):
+        path.write_text("x")
+
+    helper = _fake_helper()
+    helper.get_tags.side_effect = _raise_execute_error_with_payload(
+        [
+            {"SourceFile": str(good), "XMP:Subject": ["Beach"]},
+            {"SourceFile": str(bad)},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        assert find_tagged_images([good, bad]) == {good}
+
+
+def test_find_field_presence_salvages_batch_with_one_bad_file(tmp_path: Path) -> None:
+    """The field-presence scan also survives a single corrupt file in the batch."""
+    good = tmp_path / "good.cr3"
+    bad = tmp_path / "bad.cr3"
+    for path in (good, bad):
+        path.write_text("x")
+
+    helper = _fake_helper()
+    helper.get_tags.side_effect = _raise_execute_error_with_payload(
+        [
+            {"SourceFile": str(good), "XMP:Title": "T"},
+            {"SourceFile": str(bad)},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        presence = find_field_presence([good, bad])
+
+    assert presence[good] == {FIELD_TITLE}
+    assert presence[bad] == set()
+
+
+def test_batched_get_tags_falls_back_when_nothing_to_salvage(tmp_path: Path) -> None:
+    """An execute error with no JSON payload still degrades via the callers' guard."""
+    img = tmp_path / "a.cr3"
+    img.write_text("x")
+    helper = _fake_helper()
+    helper.get_tags.side_effect = ExifToolExecuteError(1, "", "exiftool blew up", [])
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        assert find_tagged_images([img]) == set()
+        assert find_field_presence([img]) == {}
 
 
 def test_find_field_presence_skips_paths_with_no_targets(tmp_path: Path) -> None:
