@@ -122,7 +122,9 @@ class CsvReportWriter:
         """Open *path* for writing (creating parent dirs) and emit the header row."""
         path.parent.mkdir(parents=True, exist_ok=True)
         # newline="" per the csv module docs, so the writer controls line endings itself.
-        self._fh = path.open("w", encoding="utf-8", newline="")
+        # utf-8-sig: without the BOM, double-clicking the file in Excel decodes it as legacy
+        # ANSI and mangles any non-ASCII title or keyword. Python's csv readers strip the BOM.
+        self._fh = path.open("w", encoding="utf-8-sig", newline="")
         self._writer = csv.DictWriter(self._fh, fieldnames=CSV_FIELDNAMES)
         self._writer.writeheader()
         self._fh.flush()
@@ -150,7 +152,8 @@ def write_report(path: Path, rows: Iterable[ReportRow]) -> None:
     """
     materialized = list(rows)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as fh:
+    # utf-8-sig for Excel; see CsvReportWriter.
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_FIELDNAMES)
         writer.writeheader()
         for row in materialized:

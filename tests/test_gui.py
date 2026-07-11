@@ -818,7 +818,7 @@ def test_export_csv_writes_report(
     _patch_save_dialog(monkeypatch, target)
     window._export_csv()  # noqa: SLF001
 
-    with target.open(encoding="utf-8", newline="") as fh:
+    with target.open(encoding="utf-8-sig", newline="") as fh:
         rows = list(csv_module.DictReader(fh))
     assert len(rows) == 1
     assert rows[0]["filename"] == "a.jpg"

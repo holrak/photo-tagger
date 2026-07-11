@@ -13,10 +13,30 @@ from photo_tagger.csv_report import (
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     """Return ``(header, rows)`` parsed back from a CSV file."""
-    with path.open(encoding="utf-8", newline="") as fh:
+    # utf-8-sig strips the Excel-compatibility BOM the writers emit (and is a no-op without one).
+    with path.open(encoding="utf-8-sig", newline="") as fh:
         reader = csv.DictReader(fh)
         rows = list(reader)
     return list(reader.fieldnames or []), rows
+
+
+def test_report_starts_with_excel_bom(tmp_path: Path) -> None:
+    """
+    Both writers emit a UTF-8 BOM so Excel decodes non-ASCII content correctly.
+
+    Without it, double-clicking the export in Excel reads legacy ANSI and garbles any accented title
+    or keyword.
+    """
+    streamed = tmp_path / "streamed.csv"
+    writer = CsvReportWriter(streamed)
+    writer.close()
+    assert streamed.read_bytes().startswith(b"\xef\xbb\xbf")
+
+    exported = tmp_path / "exported.csv"
+    write_report(exported, [ReportRow(filename="café.jpg")])
+    assert exported.read_bytes().startswith(b"\xef\xbb\xbf")
+    _, rows = _read_csv(exported)
+    assert rows[0]["filename"] == "café.jpg"
 
 
 def test_fieldnames_match_as_dict_keys() -> None:

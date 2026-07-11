@@ -361,7 +361,7 @@ def test_cli_csv_file_writes_streamed_report(tmp_path: Path) -> None:
     ):
         _run_app(["--input", str(image), "--csv-file", str(csv_path)])
 
-    with csv_path.open(encoding="utf-8", newline="") as fh:
+    with csv_path.open(encoding="utf-8-sig", newline="") as fh:
         rows = list(csv_module.DictReader(fh))
     assert len(rows) == 1
     assert rows[0]["filename"] == "img.cr3"
