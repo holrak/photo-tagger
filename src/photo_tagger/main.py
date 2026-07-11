@@ -367,9 +367,15 @@ def _atomic_write_text(target: Path, text: str) -> None:
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1  # fdopen owns the descriptor now and closes it with the with-block.
             fh.write(text)
         tmp_path.replace(target)
     except BaseException:
+        if fd != -1:
+            # fdopen itself failed, so the raw descriptor is still open. Close it before the
+            # unlink: Windows refuses to delete a file that still has an open handle.
+            with contextlib.suppress(OSError):
+                os.close(fd)
         tmp_path.unlink(missing_ok=True)
         raise
 

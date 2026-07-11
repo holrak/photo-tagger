@@ -26,6 +26,11 @@ def test_file_lock_acquires_and_releases(tmp_path: Path) -> None:
         assert held is not None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="filelock holds a byte-range lock on Windows; the PID note is best-effort and the "
+    "locked region cannot be read back while held",
+)
 def test_file_lock_writes_owning_pid(tmp_path: Path) -> None:
     """The lock file content is the holder's PID so humans can see who owns it."""
     lock_path = tmp_path / "photo-tagger.lock"
@@ -34,6 +39,10 @@ def test_file_lock_writes_owning_pid(tmp_path: Path) -> None:
     assert contents == str(os.getpid())
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="0o600 is a POSIX permission concept; Windows ACLs do not map onto it",
+)
 def test_file_lock_creates_file_owner_only(tmp_path: Path) -> None:
     """The lock file is created with 0o600 so only the owner can read/write it."""
     lock_path = tmp_path / "photo-tagger.lock"

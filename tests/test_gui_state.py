@@ -245,7 +245,8 @@ def test_build_tree_groups_files_under_their_folder() -> None:
     forest = build_tree([Path("/photos/a.jpg"), Path("/photos/b.jpg")])
     assert len(forest) == 1
     assert forest[0].path == Path("/photos")
-    assert forest[0].label == "/photos"
+    # str(Path(...)) rather than a literal: Windows renders the same path with backslashes.
+    assert forest[0].label == str(Path("/photos"))
     assert forest[0].files == [Path("/photos/a.jpg"), Path("/photos/b.jpg")]
     assert forest[0].folders == []
 
@@ -255,7 +256,7 @@ def test_build_tree_nests_subfolders_under_parent() -> None:
     forest = build_tree([Path("/p/a.jpg"), Path("/p/sub/b.jpg")])
     assert len(forest) == 1
     top = forest[0]
-    assert top.label == "/p"
+    assert top.label == str(Path("/p"))
     assert top.files == [Path("/p/a.jpg")]
     assert [f.label for f in top.folders] == ["sub"]
     assert top.folders[0].files == [Path("/p/sub/b.jpg")]
@@ -265,7 +266,7 @@ def test_build_tree_collapses_single_child_chains() -> None:
     """A chain of single, file-less folders collapses into one labelled node."""
     forest = build_tree([Path("/p/x/y/b.jpg")])
     assert len(forest) == 1
-    assert forest[0].label == "/p/x/y"
+    assert forest[0].label == str(Path("/p/x/y"))
     assert forest[0].files == [Path("/p/x/y/b.jpg")]
 
 
@@ -273,14 +274,14 @@ def test_build_tree_keeps_a_branching_single_root_together() -> None:
     """A folder whose subfolders each hold files stays one top node with both children."""
     forest = build_tree([Path("/p/a/x.jpg"), Path("/p/b/y.jpg")])
     assert len(forest) == 1
-    assert forest[0].label == "/p"
+    assert forest[0].label == str(Path("/p"))
     assert sorted(f.label for f in forest[0].folders) == ["a", "b"]
 
 
 def test_build_tree_splits_disjoint_roots() -> None:
     """Files under unrelated roots become separate top-level nodes (no '/' wrapper)."""
     forest = build_tree([Path("/r1/x.jpg"), Path("/r2/y.jpg")])
-    assert sorted(node.label for node in forest) == ["/r1", "/r2"]
+    assert sorted(node.label for node in forest) == [str(Path("/r1")), str(Path("/r2"))]
 
 
 def test_build_tree_empty() -> None:
