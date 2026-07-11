@@ -313,7 +313,7 @@ def apply_skip_tagged(
 
 def make_skip_list_appender(skip_file: Path | None) -> Callable[[Path], None] | None:
     """
-    Build a callback that appends a filename to *skip_file* on each successful process.
+    Build a callback that appends a file's full path to *skip_file* on each successful process.
 
     Existing entries are preserved; duplicates are not appended a second time. The file is created
     if it does not exist yet, so the same path can also be passed to ``--skip-from`` on later runs
@@ -351,22 +351,28 @@ def make_skip_list_appender(skip_file: Path | None) -> Callable[[Path], None] | 
     lock = threading.Lock()
 
     def append(image_path: Path) -> None:
-        name = image_path.name
+        # Record the full path, not the bare name: duplicate camera filenames across folders
+        # (A/IMG_0001.CR3, B/IMG_0001.CR3) are the norm, and a name-only entry would make a
+        # resumed recursive run silently skip photos that were never processed.
+        # skip_list_matches accepts both forms, so older name-only files keep working.
+        entry = str(image_path)
         with lock:
-            if name in seen:
+            # The name check keeps files written by older versions (bare names) from being
+            # re-appended as paths.
+            if entry in seen or image_path.name in seen:
                 return
             try:
                 with skip_file.open("a", encoding="utf-8") as handle:
-                    handle.write(name + "\n")
+                    handle.write(entry + "\n")
             except OSError as exc:
                 logger.warning(
                     "append_skip_file_write_failed",
                     file=str(skip_file),
-                    entry=name,
+                    entry=entry,
                     error=str(exc),
                 )
                 return
-            seen.add(name)
-        logger.debug("appended_to_skip_file", file=str(skip_file), entry=name)
+            seen.add(entry)
+        logger.debug("appended_to_skip_file", file=str(skip_file), entry=entry)
 
     return append

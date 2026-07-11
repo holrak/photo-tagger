@@ -553,8 +553,8 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
         to avoid backups.
 
     Skipping:
-    - --skip-from FILE: skip filenames listed in FILE (one per line).
-    - --append-to-skip-file FILE: append each successfully processed filename to FILE so a
+    - --skip-from FILE: skip files listed in FILE (one name or path per line).
+    - --append-to-skip-file FILE: append each successfully processed file's path to FILE so a
         later run with --skip-from FILE resumes where this one stopped.
     - --skip-tagged: skip files that already have keywords, a description, or a title in
         the image or its XMP sidecar.

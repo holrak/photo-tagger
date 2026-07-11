@@ -95,7 +95,7 @@ def test_cli_creates_appender_when_append_to_skip_file_provided(tmp_path: Path) 
 
     # The callback writes a single line per call. Exercise it once to be sure.
     captured["on_success"](image)
-    assert skip_file.read_text(encoding="utf-8").splitlines() == [image.name]
+    assert skip_file.read_text(encoding="utf-8").splitlines() == [str(image)]
 
 
 def test_cli_skip_tagged_filters_before_pipeline(tmp_path: Path) -> None:

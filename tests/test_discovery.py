@@ -240,40 +240,45 @@ def test_make_skip_list_appender_returns_none_for_no_path() -> None:
 
 
 def test_make_skip_list_appender_creates_and_appends(tmp_path: Path) -> None:
-    """A non-existent skip file is created and gets one line per success."""
+    """
+    A non-existent skip file is created and gets one full path per success.
+
+    Full paths, not bare names: duplicate camera filenames across folders would otherwise make a
+    resumed recursive run silently skip photos that were never processed.
+    """
     skip_file = tmp_path / "processed.txt"
     appender = make_skip_list_appender(skip_file)
     assert appender is not None
     appender(tmp_path / "IMG_0001.CR3")
     appender(tmp_path / "IMG_0002.CR3")
     assert skip_file.read_text(encoding="utf-8").splitlines() == [
-        "IMG_0001.CR3",
-        "IMG_0002.CR3",
+        str(tmp_path / "IMG_0001.CR3"),
+        str(tmp_path / "IMG_0002.CR3"),
     ]
 
 
 def test_make_skip_list_appender_skips_existing_entries(tmp_path: Path) -> None:
-    """Filenames already in the file (from earlier runs) are not appended a second time."""
+    """Entries already in the file (paths, or bare names from older versions) are not re-added."""
     skip_file = tmp_path / "processed.txt"
     skip_file.write_text("IMG_0001.CR3\n# user note\n\n")
     appender = make_skip_list_appender(skip_file)
     assert appender is not None
-    appender(tmp_path / "IMG_0001.CR3")  # already there, should not duplicate
+    appender(tmp_path / "IMG_0001.CR3")  # named by an old-format entry, should not duplicate
     appender(tmp_path / "IMG_0002.CR3")
     lines = skip_file.read_text(encoding="utf-8").splitlines()
-    assert lines.count("IMG_0001.CR3") == 1
-    assert "IMG_0002.CR3" in lines
+    assert sum("IMG_0001.CR3" in line for line in lines) == 1
+    assert str(tmp_path / "IMG_0002.CR3") in lines
 
 
 def test_make_skip_list_appender_does_not_repeat_within_a_run(tmp_path: Path) -> None:
-    """Repeated calls with the same name in one run only append it once."""
+    """Repeated calls with the same photo in one run only append it once."""
     skip_file = tmp_path / "processed.txt"
     appender = make_skip_list_appender(skip_file)
     assert appender is not None
     target = tmp_path / "IMG_0001.CR3"
     appender(target)
     appender(target)
-    assert skip_file.read_text(encoding="utf-8").splitlines() == ["IMG_0001.CR3"]
+    assert skip_file.read_text(encoding="utf-8").splitlines() == [str(target)]
 
 
 def _set_mtime(path: Path, when: datetime) -> None:
@@ -356,8 +361,8 @@ def test_make_skip_list_appender_is_thread_safe(tmp_path: Path) -> None:
         list(pool.map(appender, schedule))
 
     lines = skip_file.read_text(encoding="utf-8").splitlines()
-    # No interleaved/partial lines, no duplicate names, no missing names.
-    assert sorted(lines) == sorted(p.name for p in paths)
+    # No interleaved/partial lines, no duplicate entries, no missing entries.
+    assert sorted(lines) == sorted(str(p) for p in paths)
     assert len(set(lines)) == image_count
 
 

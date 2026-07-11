@@ -334,7 +334,7 @@ class ArtifactConfig:
             name=("--append-to-skip-file",),
             validator=validators.Path(file_okay=True, dir_okay=False),
             help=(
-                "Append the name of each successfully-processed file to this path. "
+                "Append the path of each successfully-processed file to this file. "
                 "Created if it does not exist. Pass the same path to --skip-from on later "
                 "runs to resume work without redoing finished photos"
             ),
