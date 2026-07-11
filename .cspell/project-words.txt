@@ -34,6 +34,7 @@ dedup
 dedupe
 dedups
 delenv
+Descrição
 distpath
 docformatter
 docstrings
@@ -103,14 +104,17 @@ Menlo
 minicpm
 mkdocs
 mofile
+mojibake
 moondream
 msgctxt
 msgids
 mtimes
+München
 mypy
 nixpkgs
 noconfirm
 noheader
+noite
 NOSONAR
 numprocesses
 nvidia
@@ -120,6 +124,7 @@ OLLAMA
 pacman
 palavras
 parentless
+Pássaro
 pinentry
 pipx
 pixmap

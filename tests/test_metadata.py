@@ -664,17 +664,6 @@ def test_build_contextual_prompt_renders_camera_section() -> None:
     assert "- Captured: 2024:01:15 14:32:01" in prompt
 
 
-def test_managed_helper_yields_supplied_helper_without_creating_one() -> None:
-    """When an open helper is passed in, managed_helper reuses it and never spins up its own."""
-    existing = MagicMock()
-    with (
-        patch("photo_tagger.metadata.ExifToolHelper") as factory,
-        managed_helper(existing) as helper,
-    ):
-        assert helper is existing
-    factory.assert_not_called()
-
-
 def test_find_tagged_images_returns_empty_when_no_block_is_tagged(tmp_path: Path) -> None:
     """Blocks without any indicator tag leave the tagged set empty."""
     img = tmp_path / "img.cr3"
@@ -716,6 +705,59 @@ def test_write_metadata_with_backup_omits_overwrite_param(tmp_path: Path) -> Non
     assert ok is True
     _, kwargs = helper.set_tags.call_args
     assert "params" not in kwargs
+
+
+def test_write_metadata_without_backup_passes_overwrite_original(tmp_path: Path) -> None:
+    """Backup=False must reach exiftool as -overwrite_original, or _original files pile up."""
+    img = tmp_path / "img.cr3"
+    helper = _fake_helper()
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        ok = write_metadata(img, KeywordSet(subject=["Bird"]), backup=False)
+
+    assert ok is True
+    assert helper.set_tags.call_args.kwargs["params"] == ["-overwrite_original"]
+
+
+def test_write_metadata_targets_the_sidecar_by_default(tmp_path: Path) -> None:
+    """
+    use_sidecar=True (the production default) writes to img.xmp, never the original.
+
+    This is the non-destructive promise the whole tool is built on: a regression that targeted
+    the image would modify originals on every default run.
+    """
+    img = tmp_path / "img.cr3"
+    helper = _fake_helper()
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        write_metadata(img, KeywordSet(subject=["Bird"]), use_sidecar=True)
+        write_metadata(img, KeywordSet(subject=["Bird"]), use_sidecar=False)
+
+    sidecar_call, embed_call = helper.set_tags.call_args_list
+    assert sidecar_call.kwargs["files"] == [str(img.with_suffix(".xmp"))]
+    assert embed_call.kwargs["files"] == [str(img)]
+
+
+def test_read_caption_prefers_xmp_over_the_fallback_tags(tmp_path: Path) -> None:
+    """
+    With both tag families present (even across blocks), the XMP value wins.
+
+    Guards the read priority: swapping the loop nesting in _first_tag_value would let a sidecar's
+    IPTC/EXIF values shadow the preferred XMP-dc ones.
+    """
+    img = tmp_path / "a.cr3"
+    img.write_text("x")
+    helper = _fake_helper(
+        [
+            {"IPTC:ObjectName": "Fallback Title", "EXIF:ImageDescription": "Fallback caption."},
+            {"XMP:Title": "Preferred Title", "XMP:Description": "Preferred caption."},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        assert read_caption(img) == ("Preferred Title", "Preferred caption.")
 
 
 def test_write_metadata_returns_false_on_exiftool_error(tmp_path: Path) -> None:

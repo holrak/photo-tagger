@@ -74,6 +74,58 @@ def test_write_and_read_round_trip_subject_and_hierarchy(tmp_path: Path) -> None
     assert "Animal|Bird" in keywords.hierarchical
 
 
+def test_sidecar_write_and_read_round_trip(tmp_path: Path) -> None:
+    """
+    The default (non-destructive) mode writes a sidecar and reads back through it.
+
+    The embedded-mode round-trips elsewhere never touch this path, yet it is what every default run
+    uses; the original file must remain byte-identical.
+    """
+    img = _write_jpeg(tmp_path / "img.jpg")
+    original_bytes = img.read_bytes()
+
+    ok = write_metadata(
+        img,
+        KeywordSet(subject=["Beach"], hierarchical=["Animal|Bird"]),
+        title="Sidecar Title",
+        description="Sidecar description.",
+        backup=False,
+        use_sidecar=True,
+    )
+    assert ok is True
+    assert (tmp_path / "img.xmp").is_file()
+    assert img.read_bytes() == original_bytes  # the original was never modified
+
+    keywords = read_image_context(img).existing_keywords
+    assert "Beach" in keywords.subject
+    assert "Animal|Bird" in keywords.hierarchical
+    assert read_caption(img) == ("Sidecar Title", "Sidecar description.")
+
+
+def test_unicode_metadata_round_trips_unmangled(tmp_path: Path) -> None:
+    """
+    Accented keywords, titles, and descriptions survive a write/read cycle exactly.
+
+    Encoding regressions here are classic silent corruption (UTF-8 text re-read through a Latin-1
+    IPTC path turns every accent into mojibake) that ASCII-only fixtures never catch.
+    """
+    img = _write_jpeg(tmp_path / "img.jpg")
+    ok = write_metadata(
+        img,
+        KeywordSet(subject=["Pássaro", "München"]),
+        title="Café à noite",
+        description="Descrição do pôr do sol.",
+        backup=False,
+        use_sidecar=False,
+    )
+    assert ok is True
+
+    keywords = read_image_context(img).existing_keywords
+    # Exact equality: a garbled IPTC mirror would surface as an extra, mangled entry.
+    assert keywords.subject == ["Pássaro", "München"]
+    assert read_caption(img) == ("Café à noite", "Descrição do pôr do sol.")
+
+
 def test_write_metadata_returns_false_for_empty_payload(tmp_path: Path) -> None:
     """Nothing to write -> early False, no exiftool call."""
     img = _write_jpeg(tmp_path / "img.jpg")
