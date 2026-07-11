@@ -154,6 +154,7 @@ from photo_tagger.gui_state import (
     ensure_path_dirs,
     expand_inputs,
     fields_written,
+    file_dialog_name_filters,
     file_type_label,
     filter_photos,
     format_existing_keywords,
@@ -2033,7 +2034,8 @@ class MainWindow(QMainWindow):
     # --- adding, removing, listing photos --------------------------------------------------
 
     def _choose_files(self) -> None:
-        files, _filter = QFileDialog.getOpenFileNames(self, _("Add Photos"))
+        filters = file_dialog_name_filters(self._extensions.text().strip())
+        files, _filter = QFileDialog.getOpenFileNames(self, _("Add Photos"), "", ";;".join(filters))
         if files:
             self._add_inputs([Path(f) for f in files])
 

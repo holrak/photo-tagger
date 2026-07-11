@@ -590,6 +590,42 @@ def file_type_label(path: Path) -> str:
     return f"{suffix}+xmp" if path.with_suffix(".xmp").exists() else suffix
 
 
+# Image formats the picker always offers as hints, regardless of the user's configured file types.
+# Format names are proper nouns, so they are not translated.
+KNOWN_IMAGE_FORMATS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("JPEG", ("jpg", "jpeg")),
+    ("PNG", ("png",)),
+    ("Camera Raw", ("arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "rw2")),
+    ("HEIF", ("heic", "heif")),
+    ("TIFF", ("tif", "tiff")),
+    ("WebP", ("webp",)),
+)
+
+
+def _glob_patterns(extensions_without_dot: Iterable[str]) -> str:
+    return " ".join(f"*.{ext}" for ext in extensions_without_dot)
+
+
+def file_dialog_name_filters(extensions: str) -> list[str]:
+    """
+    Build Qt open-dialog name filters for the Add Photos picker.
+
+    The first entry (the dialog's default) covers the user's configured file types, so the picker
+    highlights what the pipeline will actually accept. The known image formats follow as hints,
+    Photoshop-style, and an "All files" escape hatch keeps unusual formats openable.
+    """
+    filters: list[str] = []
+    configured = sorted({ext.lstrip(".").lower() for ext in parse_extensions(extensions)})
+    if configured:
+        label = _("Your file types ({patterns})")
+        filters.append(label.format(patterns=_glob_patterns(configured)))
+    known = sorted({ext for _name, exts in KNOWN_IMAGE_FORMATS for ext in exts})
+    filters.append(_("All known image formats ({patterns})").format(patterns=_glob_patterns(known)))
+    filters.extend(f"{name} ({_glob_patterns(exts)})" for name, exts in KNOWN_IMAGE_FORMATS)
+    filters.append(_("All files (*)"))
+    return filters
+
+
 # The Tagged indicator's letter and display label per field, in display order. The letters go
 # through the catalog under this msgctxt, so a language whose field names start with other letters
 # can remap them; the tooltips below spell out whatever letters are active, so they stay clear

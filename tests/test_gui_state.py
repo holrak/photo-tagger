@@ -48,6 +48,7 @@ from photo_tagger.gui_state import (
     ensure_path_dirs,
     expand_inputs,
     fields_written,
+    file_dialog_name_filters,
     file_type_label,
     filter_photos,
     format_existing_keywords,
@@ -378,6 +379,24 @@ def test_file_type_label_flags_sidecars(tmp_path: Path) -> None:
     assert file_type_label(photo) == "cr3"
     (tmp_path / "IMG_0001.xmp").write_text("<x/>", encoding="utf-8")
     assert file_type_label(photo) == "cr3+xmp"
+
+
+def test_file_dialog_name_filters_puts_configured_types_first() -> None:
+    """The default filter is the user's configured types, sorted, deduped, and lowercased."""
+    filters = file_dialog_name_filters("jpg, cr3 ,JPG")
+    assert filters[0] == "Your file types (*.cr3 *.jpg)"
+    assert filters[1].startswith("All known image formats (*.arw ")
+    assert "JPEG (*.jpg *.jpeg)" in filters
+    assert "Camera Raw (*.arw *.cr2 *.cr3 *.dng *.nef *.orf *.raf *.rw2)" in filters
+    assert filters[-1] == "All files (*)"
+
+
+def test_file_dialog_name_filters_without_configured_types_still_offers_known_formats() -> None:
+    """With no parseable extensions, the known-format hints and 'All files' remain."""
+    filters = file_dialog_name_filters("  ,, ")
+    assert filters[0].startswith("All known image formats (")
+    assert "PNG (*.png)" in filters
+    assert filters[-1] == "All files (*)"
 
 
 def test_tagged_summary_letters_and_empty_marker() -> None:
