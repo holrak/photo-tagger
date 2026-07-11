@@ -9,16 +9,25 @@ Sonar's S107 parameter-count rule without burying the option metadata inside ``m
 Splitting this out of ``main`` keeps the CLI *schema* (what flags exist, their help, their defaults)
 separate from the orchestration logic that consumes it.
 
-A TOML config file, if found, overrides the built-in defaults so flags the user does not pass on the
-command line pick up persisted values instead. CLI flags always win because cyclopts applies them
-after these defaults.
+A TOML config file, if found, supplies values for flags the user does not pass on the command line.
+It is fed through cyclopts' own config layer (:class:`ConfigFileSource`) rather than baked into the
+default instances, because cyclopts builds a *fresh* group instance whenever any flag from that
+group appears on the command line; baked-in defaults would silently drop the config values of every
+sibling field in that group. The hook gives true per-field precedence: CLI flag > config file >
+built-in default. It also means config values pass through the same conversion and validation as
+flags, so a mistyped value fails with a clean CLI error instead of a traceback later.
+
+``load_defaults`` still resolves the config into concrete instances for callers that never parse a
+command line (the GUI).
 """
 
+import typing
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, get_args
 
-from cyclopts import Parameter, validators
+from cyclopts import App, ArgumentCollection, Parameter, validators
+from cyclopts.config import Dict as _CycloptsDictConfig
 
 from photo_tagger.config import (
     DEFAULT_DIMENSIONS,
@@ -32,7 +41,7 @@ from photo_tagger.config import (
     DEFAULT_TIMEOUT_SECONDS,
     LogLevel,
 )
-from photo_tagger.config_file import apply_overrides, load_config
+from photo_tagger.config_file import apply_overrides, find_config_file, load_config
 from photo_tagger.pipeline import ProcessingOptions
 
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
@@ -415,6 +424,97 @@ class TelemetryConfig:
     ] = True
 
 
+# Built-in defaults for the top-level (non-grouped) flags, shared by `main` and `load_defaults`.
+DEFAULT_EXTENSIONS = "cr3,jpg"
+DEFAULT_WORKERS = 1
+DEFAULT_RECURSIVE = False
+
+
+# The config-file tables and the option group each one feeds. Also drives the translation of
+# config field names into CLI option names inside `ConfigFileSource`.
+_CONFIG_TABLES: dict[str, type] = {
+    "provider": ProviderConfig,
+    "output": OutputConfig,
+    "inference": InferenceConfig,
+    "log": LogConfig,
+    "display": DisplayConfig,
+    "artifacts": ArtifactConfig,
+    "filter": FilterConfig,
+    "telemetry": TelemetryConfig,
+}
+
+# Top-level config keys that are plain flags on `tag` (their config key equals the CLI name).
+# `exiftool_path` is deliberately absent: it has no flag and is bridged into the environment.
+_TOP_LEVEL_KEYS = ("extensions", "workers", "recursive")
+
+
+def _cli_option_names(cls: type) -> dict[str, str]:
+    """Map each of *cls*'s field names to its primary long CLI option, without the dashes."""
+    names: dict[str, str] = {}
+    for field_name, hint in typing.get_type_hints(cls, include_extras=True).items():
+        for meta in get_args(hint)[1:]:
+            if not isinstance(meta, Parameter):
+                continue
+            declared = (meta.name,) if isinstance(meta.name, str) else (meta.name or ())
+            if long_name := next((n for n in declared if n.startswith("--")), None):
+                names[field_name] = long_name.removeprefix("--")
+            break
+    return names
+
+
+def cli_config_overrides(file_config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Flatten the nested TOML *file_config* into a dict keyed by CLI option names.
+
+    Config files use dataclass field names (``[provider] model_name = ...``) while cyclopts matches
+    config keys against the declared option names (``--model``), so each known field is translated.
+    Unknown keys are dropped, keeping older versions tolerant of forward-compatible entries.
+    """
+    flat: dict[str, Any] = {}
+    for table, cls in _CONFIG_TABLES.items():
+        entries = file_config.get(table)
+        if not isinstance(entries, dict):
+            continue
+        names = _cli_option_names(cls)
+        for key, value in entries.items():
+            if (option := names.get(key)) is not None:
+                flat[option] = value
+    for key in _TOP_LEVEL_KEYS:
+        if key in file_config:
+            flat[key] = file_config[key]
+    return flat
+
+
+class ConfigFileSource:
+    """
+    Cyclopts config hook that fills flags the user did not pass from the TOML config file.
+
+    Cyclopts constructs a fresh option-group instance whenever any flag from that group appears on
+    the command line, so config values baked into the *default instances* would be dropped for the
+    group's other fields. Routing the file through cyclopts' config layer instead yields per-field
+    precedence: CLI flag > config file > built-in default.
+
+    The file is re-read on every invocation, so tests (and long-lived processes) observe changes to
+    ``$PHOTO_TAGGER_CONFIG`` without re-importing ``main``.
+    """
+
+    def __call__(self, app: App, commands: tuple[str, ...], arguments: ArgumentCollection) -> None:
+        """Feed the flattened config to cyclopts for any argument without CLI tokens."""
+        overrides = cli_config_overrides(load_config())
+        if not overrides:
+            return
+        source = find_config_file()
+        delegate = _CycloptsDictConfig(
+            data=overrides,
+            # The keys are global option names, not per-command tables, and commands that lack a
+            # given flag (gui, doctor) must ignore it rather than error.
+            use_commands_as_keys=False,
+            allow_unknown=True,
+            source=str(source) if source is not None else "config",
+        )
+        delegate(app, commands, arguments)
+
+
 def to_processing_options(output: OutputConfig, inference: InferenceConfig) -> ProcessingOptions:
     """Combine the CLI's output + inference groups into the pipeline's options dataclass."""
     return ProcessingOptions(
@@ -457,8 +557,8 @@ def load_defaults(config: dict[str, Any] | None = None) -> Defaults:
     """
     Build the default option groups, layering any TOML config over the built-ins.
 
-    Hoisting this out of ``main`` keeps the function-default expressions on the ``tag`` entry point
-    simple name lookups, which satisfies ruff's B008 (no function call in a default argument).
+    The CLI resolves its config through :class:`ConfigFileSource` at parse time instead; this is for
+    callers that never parse a command line, such as the GUI.
     """
     file_config = load_config() if config is None else config
     return Defaults(
@@ -470,8 +570,8 @@ def load_defaults(config: dict[str, Any] | None = None) -> Defaults:
         artifacts=apply_overrides(ArtifactConfig(), file_config.get("artifacts", {})),
         filter=apply_overrides(FilterConfig(), file_config.get("filter", {})),
         telemetry=apply_overrides(TelemetryConfig(), file_config.get("telemetry", {})),
-        extensions=file_config.get("extensions", "cr3,jpg"),
-        workers=file_config.get("workers", 1),
-        recursive=file_config.get("recursive", False),
+        extensions=file_config.get("extensions", DEFAULT_EXTENSIONS),
+        workers=file_config.get("workers", DEFAULT_WORKERS),
+        recursive=file_config.get("recursive", DEFAULT_RECURSIVE),
         exiftool_path=file_config.get("exiftool_path"),
     )

@@ -33,7 +33,11 @@ from photo_tagger import __version__, i18n, telemetry
 from photo_tagger.ai import create_agent
 from photo_tagger.cache import build_cache_namespace, open_cache
 from photo_tagger.cli_options import (
+    DEFAULT_EXTENSIONS,
+    DEFAULT_RECURSIVE,
+    DEFAULT_WORKERS,
     ArtifactConfig,
+    ConfigFileSource,
     DisplayConfig,
     FilterConfig,
     InferenceConfig,
@@ -41,10 +45,10 @@ from photo_tagger.cli_options import (
     OutputConfig,
     ProviderConfig,
     TelemetryConfig,
-    load_defaults,
     to_processing_options,
 )
 from photo_tagger.config import DEFAULT_USER_PROMPT
+from photo_tagger.config_file import configured_exiftool_path
 from photo_tagger.csv_report import CsvReportWriter, ReportRow
 from photo_tagger.diagnostics import render_report, run_checks
 from photo_tagger.discovery import (
@@ -70,25 +74,25 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-app = App(name="photo-tagger", version=__version__)
+# Any TOML config is layered onto flags the user does not pass by the ConfigFileSource hook at
+# parse time, giving per-field precedence (CLI flag > config file > built-in). The hook re-reads
+# the file per invocation, so nothing config-dependent is captured at import.
+app = App(name="photo-tagger", version=__version__, config=ConfigFileSource())
 
 
-# The fully-resolved default option groups (built-ins layered with any TOML config). Hoisted to
-# module scope so the function-default expressions on `tag` are simple name lookups, which keeps
-# ruff's B008 (no function call in a default argument) satisfied.
-_DEFAULTS = load_defaults()
-_DEFAULT_PROVIDER = _DEFAULTS.provider
-_DEFAULT_OUTPUT = _DEFAULTS.output
-_DEFAULT_INFERENCE = _DEFAULTS.inference
-_DEFAULT_LOG = _DEFAULTS.log
-_DEFAULT_DISPLAY = _DEFAULTS.display
-_DEFAULT_ARTIFACTS = _DEFAULTS.artifacts
-_DEFAULT_FILTER = _DEFAULTS.filter
-_DEFAULT_TELEMETRY = _DEFAULTS.telemetry
-_DEFAULT_EXTENSIONS = _DEFAULTS.extensions
-_DEFAULT_WORKERS = _DEFAULTS.workers
-_DEFAULT_RECURSIVE = _DEFAULTS.recursive
-_DEFAULT_EXIFTOOL_PATH = _DEFAULTS.exiftool_path
+# Built-in default option groups, hoisted to module scope so the function-default expressions on
+# `tag` are simple name lookups, which keeps ruff's B008 (no function call in a default argument)
+# satisfied. Do NOT fold the config file into these instances: cyclopts rebuilds a group from its
+# class defaults whenever any of the group's flags is passed, which would drop the config values
+# of every sibling field in that group.
+_DEFAULT_PROVIDER = ProviderConfig()
+_DEFAULT_OUTPUT = OutputConfig()
+_DEFAULT_INFERENCE = InferenceConfig()
+_DEFAULT_LOG = LogConfig()
+_DEFAULT_DISPLAY = DisplayConfig()
+_DEFAULT_ARTIFACTS = ArtifactConfig()
+_DEFAULT_FILTER = FilterConfig()
+_DEFAULT_TELEMETRY = TelemetryConfig()
 
 
 def _apply_exiftool_path(path: str | None) -> None:
@@ -128,7 +132,7 @@ def doctor(
     # Silence loguru so only the checklist reaches the terminal; failures are
     # captured in the report itself, not the logs.
     logger.remove()
-    _apply_exiftool_path(_DEFAULT_EXIFTOOL_PATH)
+    _apply_exiftool_path(configured_exiftool_path())
     results = run_checks(provider, model, api_base_url=url, api_key=api_key)
     if not render_report(results):
         raise SystemExit(1)
@@ -494,14 +498,14 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
             name=("--ext", "--extensions"),
             help="Comma-separated image file extensions to process (case insensitive)",
         ),
-    ] = _DEFAULT_EXTENSIONS,
+    ] = DEFAULT_EXTENSIONS,
     recursive: Annotated[
         bool,
         Parameter(
             name=("--recursive", "-r"),
             help="Process files in subdirectories recursively",
         ),
-    ] = _DEFAULT_RECURSIVE,
+    ] = DEFAULT_RECURSIVE,
     workers: Annotated[
         int,
         Parameter(
@@ -512,7 +516,7 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
                 "parallel will not help"
             ),
         ),
-    ] = _DEFAULT_WORKERS,
+    ] = DEFAULT_WORKERS,
     filter_: Annotated[FilterConfig, Parameter(name="*")] = _DEFAULT_FILTER,
     display: Annotated[DisplayConfig, Parameter(name="*")] = _DEFAULT_DISPLAY,
     artifacts: Annotated[ArtifactConfig, Parameter(name="*")] = _DEFAULT_ARTIFACTS,
@@ -583,7 +587,7 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
         console_log_level=log.console_log_level,
         log_folder=log.log_folder,
     )
-    _apply_exiftool_path(_DEFAULT_EXIFTOOL_PATH)
+    _apply_exiftool_path(configured_exiftool_path())
 
     with contextlib.ExitStack() as stack:
         if artifacts.lock_file is not None:

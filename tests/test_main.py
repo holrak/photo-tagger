@@ -843,6 +843,103 @@ def test_cli_telemetry_notice_shown_only_on_first_run(
     assert "anonymous usage stats" not in second_run_err
 
 
+def _point_config_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    """Write *text* to a TOML file and point PHOTO_TAGGER_CONFIG at it for this test."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("PHOTO_TAGGER_CONFIG", str(cfg))
+
+
+def test_config_file_fills_flags_the_user_did_not_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Config values reach the pipeline when the corresponding flags are absent."""
+    _point_config_at(
+        tmp_path,
+        monkeypatch,
+        "workers = 2\n\n[inference]\nmax_tokens = 500\n\n[output]\nbackup_xmp = false\n",
+    )
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image)])
+
+    assert captured["options"].max_tokens == 500  # noqa: PLR2004
+    assert captured["options"].backup_xmp is False
+    assert captured["workers"] == 2  # noqa: PLR2004
+
+
+def test_config_file_survives_sibling_cli_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Passing one flag from a group must not reset the group's other fields to built-ins.
+
+    Regression test: config defaults used to be baked into the default group instances, and
+    cyclopts rebuilds a group from class defaults whenever any of its flags is passed, silently
+    dropping the config values of every sibling field.
+    """
+    _point_config_at(tmp_path, monkeypatch, "[inference]\nmax_tokens = 500\n")
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--temperature", "0.9"])
+
+    assert captured["options"].temperature == 0.9  # noqa: PLR2004
+    assert captured["options"].max_tokens == 500  # noqa: PLR2004
+
+
+def test_cli_flag_overrides_config_file_for_the_same_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit flag beats the config file for that field."""
+    _point_config_at(tmp_path, monkeypatch, "[inference]\nmax_tokens = 500\n")
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--max-tokens", "800"])
+
+    assert captured["options"].max_tokens == 800  # noqa: PLR2004
+
+
+def test_cli_config_overrides_translates_field_names_to_option_names() -> None:
+    """Renamed fields map to their CLI spelling; unknown keys and tables are dropped."""
+    from photo_tagger.cli_options import cli_config_overrides  # noqa: PLC0415
+
+    flat = cli_config_overrides(
+        {
+            "provider": {"model_name": "my-vlm", "api_base_url": "http://h:1/v1", "nope": 1},
+            "output": {"use_sidecar": False},
+            "telemetry": {"enabled": False},
+            "display": {"progress_bar": False, "json_output": True},
+            "workers": 4,
+            "recursive": True,
+            "exiftool_path": "/x/exiftool",
+            "future_table": {"key": "value"},
+        },
+    )
+
+    assert flat == {
+        "model": "my-vlm",
+        "url": "http://h:1/v1",
+        "write-sidecar": False,
+        "telemetry": False,
+        "progress": False,
+        "json": True,
+        "workers": 4,
+        "recursive": True,
+    }
+
+
 def test_suite_is_isolated_from_developer_config() -> None:
     """
     Conftest points PHOTO_TAGGER_CONFIG at an empty file, so defaults are the built-ins.

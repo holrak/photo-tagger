@@ -1,10 +1,10 @@
 """
 TOML-based configuration file loader.
 
-Searches for a config file in standard locations and returns a flat dict of overrides that the CLI
-module applies to its default dataclass instances before cyclopts parses the command line. CLI flags
-always take precedence over the config file because they replace the defaults after they have been
-set.
+Searches for a config file in standard locations and returns its contents as a nested dict. The CLI
+feeds it through cyclopts' config layer (``cli_options.ConfigFileSource``) so flags the user does
+not pass pick up config values, while the GUI folds it into concrete defaults via
+``cli_options.load_defaults``.
 
 Search order (first match wins):
 1. ``$PHOTO_TAGGER_CONFIG`` environment variable (explicit path)
@@ -74,6 +74,12 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
         )
     logger.debug("config_file_loaded", path=str(path))
     return data
+
+
+def configured_exiftool_path() -> str | None:
+    """Return the top-level ``exiftool_path`` config value, or None when unset."""
+    value = load_config().get("exiftool_path")
+    return str(value) if value else None
 
 
 def _coerce_field(annotation: object, value: object) -> object:
