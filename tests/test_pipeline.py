@@ -304,6 +304,29 @@ def test_run_batch_calls_on_success_for_each_completed_file(tmp_path: Path) -> N
     assert notified == [success_first, success_retry]
 
 
+def test_run_batch_dry_run_never_fires_on_success(tmp_path: Path) -> None:
+    """
+    A dry run must not report photos as done to the caller's callback.
+
+    Regression test: the CLI wires on_success to the --append-to-skip-file appender, and a dry run
+    used to append every previewed photo, so a later real run silently skipped them.
+    """
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+
+    notified: list[Path] = []
+    with patch("photo_tagger.pipeline.process_photo", return_value=True):
+        totals = run_batch(
+            [image],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(dry_run=True),
+            on_success=notified.append,
+        )
+
+    assert totals.success == 1
+    assert notified == []
+
+
 def test_run_batch_swallows_on_success_callback_errors(tmp_path: Path) -> None:
     """A callback that raises must not abort the batch; success count still reflects work."""
     image = tmp_path / "img.cr3"

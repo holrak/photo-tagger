@@ -684,7 +684,8 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
     The optional *on_success* callback fires once per image that completes successfully (whether on
     the first pass or after a retry). It receives the image path. The CLI uses this to append
     filenames to a skip list as work progresses, so a killed run can be resumed without redoing
-    finished photos.
+    finished photos. Dry runs never fire it: nothing was written, so nothing may be recorded as
+    done.
 
     The optional *progress* callback fires exactly once per image when the pipeline is finally done
     with it: either on first-pass success, or on retry-pass success or failure. First-pass failures
@@ -696,7 +697,10 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
 
     def _record_success(path: Path) -> None:
         successful_files.append(path)
-        if on_success is not None:
+        # A dry run writes no metadata, so the caller's callback must not fire: the CLI wires it
+        # to the --append-to-skip-file appender, and recording previewed photos there would make
+        # a later real run silently skip them.
+        if on_success is not None and not options.dry_run:
             on_success(path)
 
     ctx = _BatchContext(
