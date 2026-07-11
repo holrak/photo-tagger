@@ -483,8 +483,15 @@ def _(chart_card, days, hbar, mo, query, runs_where, version_key):
         ORDER BY runs DESC
         LIMIT 12
         """,
-    ).sort_values("app_version", key=lambda s: s.map(version_key), ascending=False)
+    )
+    # Guard before sorting: an empty AE result has no columns at all, so sort_values would
+    # KeyError ahead of the empty-window message.
     mo.stop(app_version_frame.empty, mo.md("_No version data in this window._"))
+    app_version_frame = app_version_frame.sort_values(
+        "app_version",
+        key=lambda s: s.map(version_key),
+        ascending=False,
+    )
     app_version_view = chart_card(
         hbar(
             app_version_frame,
@@ -509,8 +516,14 @@ def _(chart_card, hbar, mo, query, runs_where, version_key):
         ORDER BY runs DESC
         LIMIT 12
         """,
-    ).sort_values("python_version", key=lambda s: s.map(version_key), ascending=False)
+    )
+    # Guard before sorting; see the app-version cell.
     mo.stop(python_version_frame.empty, mo.md("_No Python version data in this window._"))
+    python_version_frame = python_version_frame.sort_values(
+        "python_version",
+        key=lambda s: s.map(version_key),
+        ascending=False,
+    )
     python_version_view = chart_card(
         hbar(
             python_version_frame,
@@ -967,8 +980,14 @@ def _(COLORS, chart_card, crash_where, hbar, mo, query, version_key):
         ORDER BY crashes DESC
         LIMIT 12
         """,
-    ).sort_values("app_version", key=lambda s: s.map(version_key), ascending=False)
+    )
+    # Guard before sorting; see the app-version cell.
     mo.stop(crash_version_frame.empty, mo.md("_No crashes to attribute to versions._"))
+    crash_version_frame = crash_version_frame.sort_values(
+        "app_version",
+        key=lambda s: s.map(version_key),
+        ascending=False,
+    )
     crash_version_view = chart_card(
         hbar(
             crash_version_frame,
