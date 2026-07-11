@@ -4,6 +4,63 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-11
+
+### Added
+
+- Anonymous crash reports: an unhandled exception sends the exception *type* and its code location
+  inside photo-tagger (`module:function:line`), never the error message (messages can embed paths).
+  Same opt-outs as the usage telemetry; capped per process. The one-time telemetry notice re-shows
+  once for existing installs so the expanded disclosure is seen.
+- Telemetry now reports coarse hardware facts (CPU/GPU model, logical cores, RAM in whole GB; probed
+  once and cached), per-run outcome counters (successes, failures, cache hits, retry recoveries,
+  workers, token totals, model time, dry-run flag), and failure buckets (fixed labels like `timeout`
+  or `metadata-write`) so breakage is measurable, not anecdotal.
+- The telemetry dashboard grew sections for adoption, usage, hardware & performance, and reliability
+  & crashes, plus a global interface filter (all/CLI/GUI).
+- The inference cache prunes entries older than 180 days when it opens, so `cache.sqlite` stops
+  growing forever (every settings change orphans its old namespace).
+- A short pause before the retry pass, so an overloaded model server is not immediately re-hit.
+
+### Changed
+
+- `--append-to-skip-file` records full paths instead of bare filenames, so duplicate camera names
+  across folders (`A/IMG_0001.CR3`, `B/IMG_0001.CR3`) can no longer make a resumed run silently skip
+  unprocessed photos. Old name-only skip files keep working.
+- Config-file values now pass through the same conversion and validation as CLI flags, so a mistyped
+  value fails with a clean error at startup instead of a traceback mid-run.
+- Photos with identical pixel content in one concurrent run share a single model call instead of
+  each paying their own.
+- CSV reports are written as `utf-8-sig` so Excel renders accented titles and keywords correctly.
+
+### Fixed
+
+- Passing any CLI flag from an option group no longer silently resets the group's other config-file
+  values to built-in defaults (e.g. `--temperature` used to revert a configured `max_tokens`).
+- `--dry-run` no longer appends previewed photos to `--append-to-skip-file`, which made later real
+  runs skip photos that never got metadata.
+- The description mirror is written to `XMP-tiff:ImageDescription`; the previous `XMP-exif` tag was
+  silently rejected by ExifTool, so the mirror never reached the file.
+- Keyword capitalization no longer corrupts acronyms and apostrophes (`NYC` stays `NYC` instead of
+  becoming `Nyc`; `bird's nest` no longer becomes `Bird'S Nest`).
+- One corrupt or zero-byte photo no longer makes the whole folder read as untagged (and get
+  re-tagged): the batched ExifTool reads salvage the healthy files, and `--skip-tagged` and the
+  GUI's Tagged column now distinguish "could not read" from "no metadata".
+- Windows: file locking works again (the PID note into the held lock file raised on every
+  acquisition), and the batched metadata reads no longer miss every file over path-separator
+  differences.
+- Ctrl-C during concurrent batch start-up is honored instead of grinding through every queued photo;
+  never-submitted photos are reported as pending.
+- A single over-long or blank keyword from the model no longer burns the whole validation retry
+  budget (full vision calls); items are cleaned instead.
+- GUI: streamed-in thumbnails no longer swallow the next grid click; a non-domain error during
+  generation no longer leaves the window stuck in the running state; removing photos prunes the
+  visible grid and thumbnail cache; bulk actions no longer kick you out of the photo or folder being
+  reviewed.
+- The `gui` command only suggests installing the `[gui]` extra when PySide6/shiboken6 is actually
+  missing; other import errors surface as themselves.
+- A failed cache initialization no longer leaks its SQLite connection.
+
 ## [0.5.0] - 2026-07-09
 
 ### Added
