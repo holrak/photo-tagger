@@ -21,6 +21,31 @@ _Keyword = Annotated[str, Field(min_length=1, max_length=_MAX_KEYWORD_CHARS)]
 _Hierarchy = Annotated[str, Field(min_length=1, max_length=_MAX_HIERARCHY_CHARS)]
 
 
+def _clean_items(value: object, *, max_items: int, max_chars: int) -> object:
+    """
+    Drop blank strings, clip over-long ones, and truncate the list to *max_items*.
+
+    Runs in a ``mode="before"`` validator so the per-item ``min_length``/``max_length`` constraints
+    (which the model sees in the JSON schema, and which validate *before* any after-mode validator)
+    can no longer fail on a rambling item. A failure there makes pydantic-ai retry the full vision
+    call up to ``retries`` times, and the model rarely self-corrects; cleaning is cheaper than
+    burning that inference budget. Non-list values and non-string items pass through untouched so
+    pydantic still reports real schema violations.
+    """
+    if not isinstance(value, list):
+        return value
+    cleaned: list[object] = []
+    for item in value:
+        if isinstance(item, str):
+            stripped = item.strip()[:max_chars]
+            if not stripped:
+                continue
+            cleaned.append(stripped)
+        else:
+            cleaned.append(item)
+    return cleaned[:max_items]
+
+
 class GeneratedMetadata(BaseModel):
     """Schema returned by the vision-language model."""
 
@@ -33,24 +58,17 @@ class GeneratedMetadata(BaseModel):
     # hierarchy is lost.
     hierarchies: list[_Hierarchy] = Field(default_factory=list)
 
-    @field_validator("keywords")
+    @field_validator("keywords", mode="before")
     @classmethod
-    def _cap_keywords(cls, v: list[str]) -> list[str]:
-        """
-        Silently truncate over-long keyword lists instead of failing validation.
+    def _clean_keywords(cls, v: object) -> object:
+        """Clean model keyword output instead of failing validation; see _clean_items."""
+        return _clean_items(v, max_items=_MAX_KEYWORDS, max_chars=_MAX_KEYWORD_CHARS)
 
-        Thinking models (e.g. Qwen3) occasionally overshoot the requested cap by a few items. A hard
-        ``max_length`` on the field makes pydantic-ai retry up to 5 times (and the model rarely
-        self-corrects). Truncating here avoids wasting inference budget on retries that will all
-        fail.
-        """
-        return v[:_MAX_KEYWORDS]
-
-    @field_validator("hierarchies")
+    @field_validator("hierarchies", mode="before")
     @classmethod
-    def _cap_hierarchies(cls, v: list[str]) -> list[str]:
-        """Truncate an over-long hierarchy list, mirroring the keyword cap."""
-        return v[:_MAX_HIERARCHIES]
+    def _clean_hierarchies(cls, v: object) -> object:
+        """Clean model hierarchy output, mirroring the keyword cleaning."""
+        return _clean_items(v, max_items=_MAX_HIERARCHIES, max_chars=_MAX_HIERARCHY_CHARS)
 
 
 @dataclass(slots=True)

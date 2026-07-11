@@ -39,10 +39,27 @@ def test_generated_metadata_truncates_too_many_keywords() -> None:
     assert len(meta.keywords) == 30  # noqa: PLR2004 - matches _MAX_KEYWORDS
 
 
-def test_generated_metadata_rejects_blank_keyword() -> None:
-    """Empty strings inside the keyword list are useless and break downstream merging."""
+def test_generated_metadata_drops_blank_keywords() -> None:
+    """
+    Blank keyword items are dropped, not rejected.
+
+    Regression test: the per-item min_length used to fail the whole validation, making pydantic-ai
+    re-run the full vision call up to `retries` times over a single stray empty string.
+    """
+    meta = GeneratedMetadata(title="t", description="d", keywords=["ok", "", "  "])
+    assert meta.keywords == ["ok"]
+
+
+def test_generated_metadata_clips_over_long_keyword_items() -> None:
+    """An over-long keyword is clipped to the cap instead of failing validation."""
+    meta = GeneratedMetadata(title="t", description="d", keywords=["x" * 200])
+    assert meta.keywords == ["x" * 80]
+
+
+def test_generated_metadata_still_rejects_non_string_keywords() -> None:
+    """Real schema violations (wrong item type) still fail so pydantic-ai retries."""
     with pytest.raises(ValidationError):
-        GeneratedMetadata(title="t", description="d", keywords=["ok", ""])
+        GeneratedMetadata(title="t", description="d", keywords=["ok", 42])  # type: ignore[list-item]
 
 
 def test_generated_metadata_accepts_hierarchies() -> None:
