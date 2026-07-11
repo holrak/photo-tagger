@@ -46,6 +46,7 @@ Exif
 exiftool
 Exiftool
 filelock
+filterwarnings
 fontawesome
 fromarray
 frontends

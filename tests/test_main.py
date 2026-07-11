@@ -996,10 +996,9 @@ def test_main_reports_unhandled_crashes_and_re_raises(tmp_path: Path) -> None:
         patch.object(main_module, "create_agent", return_value=object()),
         patch.object(main_module, "run_batch", side_effect=RuntimeError("boom")),
         patch.object(telemetry, "emit_crash", side_effect=fake_emit_crash),
-        patch("sys.argv", ["photo-tagger", "--input", str(image)]),
         pytest.raises(RuntimeError, match="boom"),
     ):
-        main_module.main()
+        main_module.main(["--input", str(image)])
 
     assert len(crashes) == 1
     assert isinstance(crashes[0]["exc"], RuntimeError)
@@ -1014,16 +1013,26 @@ def test_main_does_not_report_clean_exits_as_crashes() -> None:
         patch.object(main_module, "app", side_effect=SystemExit(1)),
         pytest.raises(SystemExit),
     ):
-        main_module.main()
+        main_module.main([])
     assert crashes == []
 
 
 def test_crash_telemetry_enabled_honors_argv_flag() -> None:
     """A --no-telemetry anywhere on the command line disables the crash beacon too."""
-    with patch("sys.argv", ["photo-tagger", "-i", "x", "--no-telemetry"]):
-        assert main_module._crash_telemetry_enabled() is False  # noqa: SLF001
-    with patch("sys.argv", ["photo-tagger", "-i", "x"]):
-        assert main_module._crash_telemetry_enabled() is True  # noqa: SLF001
+    assert main_module._crash_telemetry_enabled(["-i", "x", "--no-telemetry"]) is False  # noqa: SLF001
+    assert main_module._crash_telemetry_enabled(["-i", "x"]) is True  # noqa: SLF001
+
+
+def test_crash_telemetry_enabled_honors_the_config_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[telemetry] enabled = false in the config disables crash beacons; garbage tables do not."""
+    _point_config_at(tmp_path, monkeypatch, "[telemetry]\nenabled = false\n")
+    assert main_module._crash_telemetry_enabled([]) is False  # noqa: SLF001
+
+    _point_config_at(tmp_path, monkeypatch, 'telemetry = "not-a-table"\n')
+    assert main_module._crash_telemetry_enabled([]) is True  # noqa: SLF001
 
 
 def test_suite_is_isolated_from_developer_config() -> None:

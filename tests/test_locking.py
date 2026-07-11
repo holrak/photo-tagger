@@ -71,23 +71,25 @@ def test_file_lock_blocks_second_acquirer(tmp_path: Path) -> None:
     lock_path = tmp_path / "photo-tagger.lock"
     src_root = str((__import__("photo_tagger").__file__ or "").rsplit("/", 2)[0])
     script = _HOLDER_SCRIPT.format(src_root=src_root)
-    holder = subprocess.Popen(  # noqa: S603 - inputs are test-controlled.
+    # The context manager closes the pipe file objects on exit; a bare Popen would leak them
+    # and trip ResourceWarnings once the suite runs with warnings-as-errors.
+    with subprocess.Popen(  # noqa: S603 - inputs are test-controlled.
         [sys.executable, "-c", script, str(lock_path), "30"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-    )
-    try:
-        # Wait for the child to print ACQUIRED so we know it owns the lock.
-        assert holder.stdout is not None
-        first = holder.stdout.readline()
-        assert first.strip() == b"ACQUIRED", f"child failed to acquire: stdout={first!r}"
+    ) as holder:
+        try:
+            # Wait for the child to print ACQUIRED so we know it owns the lock.
+            assert holder.stdout is not None
+            first = holder.stdout.readline()
+            assert first.strip() == b"ACQUIRED", f"child failed to acquire: stdout={first!r}"
 
-        with pytest.raises(LockHeldError), FileLock(lock_path) as held:
-            # Acquisition must raise LockHeldError; reaching this line is the test failure.
-            pytest.fail(f"expected LockHeldError, got lock {held!r}")
-    finally:
-        holder.terminate()
-        holder.wait(timeout=10)
+            with pytest.raises(LockHeldError), FileLock(lock_path) as held:
+                # Acquisition must raise LockHeldError; reaching this line is the test failure.
+                pytest.fail(f"expected LockHeldError, got lock {held!r}")
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
 
 
 def test_file_lock_is_reentrant_after_release(tmp_path: Path) -> None:

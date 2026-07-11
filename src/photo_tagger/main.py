@@ -778,21 +778,21 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
             csv_writer.close()
 
 
-def _crash_telemetry_enabled() -> bool:
+def _crash_telemetry_enabled(tokens: list[str]) -> bool:
     """
     Best-effort telemetry opt-out resolution for the crash path.
 
     A crash may happen before (or during) CLI parsing, so the parsed --no-telemetry flag is not
-    available; scan argv for it directly and read the config file's [telemetry] table. The
+    available; scan the raw *tokens* for it and read the config file's [telemetry] table. The
     environment opt-outs are enforced inside emit_crash itself.
     """
-    if "--no-telemetry" in sys.argv[1:]:
+    if "--no-telemetry" in tokens:
         return False
     table = load_config().get("telemetry", {})
     return bool(table.get("enabled", True)) if isinstance(table, dict) else True
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """
     Console entry point: run the CLI, reporting an unhandled crash before re-raising.
 
@@ -800,12 +800,18 @@ def main() -> None:
     else is a genuine crash, so an anonymous beacon (exception type and in-app code location only,
     never the message) is sent before the traceback surfaces as usual.
     """
+    tokens = sys.argv[1:] if argv is None else argv
     try:
-        app()
+        app(tokens)
     except SystemExit, KeyboardInterrupt:
         raise
     except Exception as exc:
-        telemetry.emit_crash(exc, interface="cli", enabled=_crash_telemetry_enabled(), block=True)
+        telemetry.emit_crash(
+            exc,
+            interface="cli",
+            enabled=_crash_telemetry_enabled(tokens),
+            block=True,
+        )
         raise
 
 

@@ -239,8 +239,12 @@ addopts = [
     "not integration",
 ]
 markers = [
-    "integration: marks tests as integration testsdeselect with '-m \"not integration\"'",
+    "integration: marks tests as integration tests; deselect with '-m \"not integration\"'",
 ]
+# Warnings are errors: a new DeprecationWarning from a dependency bump (the exact thing Renovate
+# ships) must fail the suite instead of scrolling past. Add targeted `ignore::...` entries here
+# when a third-party warning is genuinely not actionable.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 # The PySide6 desktop window and its Qt event loop cannot run under the headless
