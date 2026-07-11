@@ -2,6 +2,7 @@
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,7 @@ from photo_tagger.models import InferenceResult
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -75,6 +77,22 @@ def test_open_cache_degrades_on_open_failure(tmp_path: Path) -> None:
     blocker = tmp_path / "blocker"
     blocker.write_text("a file where the cache's parent dir should be")
     assert open_cache(blocker / "cache.sqlite3", namespace="m#x") is None
+
+
+def test_open_cache_returns_a_working_cache(tmp_path: Path) -> None:
+    """
+    The happy path yields a real, usable cache.
+
+    Only the degradation cases were asserted before, all of which expect None; a regression that
+    made open_cache always degrade would have run every install uncached with a green suite.
+    """
+    cache = open_cache(tmp_path / "cache.sqlite3", namespace="m#x")
+    assert cache is not None
+    with cache:
+        cache.put("hash-1", _sample_result(title="Round trip"))
+        got = cache.get("hash-1")
+        assert got is not None
+        assert got.title == "Round trip"
 
 
 def test_cache_prunes_stale_rows_on_open(tmp_path: Path) -> None:
@@ -152,56 +170,66 @@ def test_safe_cache_put_swallows_errors() -> None:
     safe_cache_put(broken, "key", _sample_result(), file_name="img.jpg")  # must not raise
 
 
-def test_inference_cache_round_trip(tmp_path: Path) -> None:
+@pytest.fixture
+def make_cache() -> Iterator[Callable[..., InferenceCache]]:
+    """
+    Build InferenceCache instances that always close when the test ends.
+
+    Hand-rolled try/finally around every cache was easy to forget, and a leaked WAL-mode SQLite
+    handle bleeds into later tests on the same xdist worker.
+    """
+    with ExitStack() as stack:
+
+        def _make(db: Path, *, model_name: str) -> InferenceCache:
+            return stack.enter_context(InferenceCache(db, model_name=model_name))
+
+        yield _make
+
+
+def test_inference_cache_round_trip(
+    tmp_path: Path,
+    make_cache: Callable[..., InferenceCache],
+) -> None:
     """A put/get round-trip returns equal InferenceResult fields."""
-    cache = InferenceCache(tmp_path / "cache.sqlite3", model_name="m1")
-    try:
-        cache.put("hash-1", _sample_result(title="Forest"))
-        got = cache.get("hash-1")
-        assert got is not None
-        assert got.title == "Forest"
-        assert got.keywords == ["Beach", "Sunset"]
-        assert got.total_tokens == _sample_result().total_tokens
-    finally:
-        cache.close()
+    cache = make_cache(tmp_path / "cache.sqlite3", model_name="m1")
+    cache.put("hash-1", _sample_result(title="Forest"))
+    got = cache.get("hash-1")
+    assert got is not None
+    assert got.title == "Forest"
+    assert got.keywords == ["Beach", "Sunset"]
+    assert got.total_tokens == _sample_result().total_tokens
 
 
-def test_inference_cache_get_returns_none_on_miss(tmp_path: Path) -> None:
+def test_inference_cache_get_returns_none_on_miss(
+    tmp_path: Path,
+    make_cache: Callable[..., InferenceCache],
+) -> None:
     """A lookup for an unknown hash returns None instead of raising."""
-    cache = InferenceCache(tmp_path / "cache.sqlite3", model_name="m1")
-    try:
-        assert cache.get("never-stored") is None
-    finally:
-        cache.close()
+    cache = make_cache(tmp_path / "cache.sqlite3", model_name="m1")
+    assert cache.get("never-stored") is None
 
 
-def test_inference_cache_keys_by_model_name(tmp_path: Path) -> None:
+def test_inference_cache_keys_by_model_name(
+    tmp_path: Path,
+    make_cache: Callable[..., InferenceCache],
+) -> None:
     """The same hash under a different model name is a cache miss."""
     db = tmp_path / "cache.sqlite3"
-    c_a = InferenceCache(db, model_name="model-a")
-    try:
-        c_a.put("hash-1", _sample_result())
-    finally:
-        c_a.close()
-
-    c_b = InferenceCache(db, model_name="model-b")
-    try:
-        assert c_b.get("hash-1") is None
-    finally:
-        c_b.close()
+    make_cache(db, model_name="model-a").put("hash-1", _sample_result())
+    assert make_cache(db, model_name="model-b").get("hash-1") is None
 
 
-def test_inference_cache_replaces_existing_entry(tmp_path: Path) -> None:
+def test_inference_cache_replaces_existing_entry(
+    tmp_path: Path,
+    make_cache: Callable[..., InferenceCache],
+) -> None:
     """A second put for the same (hash, model) overwrites the prior row."""
-    cache = InferenceCache(tmp_path / "cache.sqlite3", model_name="m1")
-    try:
-        cache.put("hash-1", _sample_result(title="Old"))
-        cache.put("hash-1", _sample_result(title="New"))
-        got = cache.get("hash-1")
-        assert got is not None
-        assert got.title == "New"
-    finally:
-        cache.close()
+    cache = make_cache(tmp_path / "cache.sqlite3", model_name="m1")
+    cache.put("hash-1", _sample_result(title="Old"))
+    cache.put("hash-1", _sample_result(title="New"))
+    got = cache.get("hash-1")
+    assert got is not None
+    assert got.title == "New"
 
 
 def _baseline_namespace_kwargs() -> dict[str, object]:
@@ -249,7 +277,10 @@ def test_build_cache_namespace_changes_with_each_input() -> None:
         seen.add(ns)
 
 
-def test_inference_cache_namespace_isolates_configs(tmp_path: Path) -> None:
+def test_inference_cache_namespace_isolates_configs(
+    tmp_path: Path,
+    make_cache: Callable[..., InferenceCache],
+) -> None:
     """A hash stored under one namespace is invisible under a different one."""
     db = tmp_path / "cache.sqlite3"
     ns_a = build_cache_namespace("m", **_baseline_namespace_kwargs())  # type: ignore[arg-type]
@@ -257,18 +288,9 @@ def test_inference_cache_namespace_isolates_configs(tmp_path: Path) -> None:
         "m",
         **(_baseline_namespace_kwargs() | {"temperature": 0.9}),  # type: ignore[arg-type]
     )
-    c_a = InferenceCache(db, model_name=ns_a)
-    try:
-        c_a.put("hash-1", _sample_result(title="under-a"))
-    finally:
-        c_a.close()
-
-    c_b = InferenceCache(db, model_name=ns_b)
-    try:
-        # The same hash under a config with a different temperature must miss.
-        assert c_b.get("hash-1") is None
-    finally:
-        c_b.close()
+    make_cache(db, model_name=ns_a).put("hash-1", _sample_result(title="under-a"))
+    # The same hash under a config with a different temperature must miss.
+    assert make_cache(db, model_name=ns_b).get("hash-1") is None
 
 
 def test_inference_cache_is_thread_safe(tmp_path: Path) -> None:
