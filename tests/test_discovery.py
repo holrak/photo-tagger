@@ -416,8 +416,8 @@ def test_resolve_image_files_recursive_walks_subdirectories(tmp_path: Path) -> N
     """
     Recursive=True finds nested files; recursive=False stays at the top level.
 
-    The rglob branch had no coverage at all: --recursive silently processing nothing would
-    have passed the suite.
+    The rglob branch had no coverage at all: --recursive silently processing nothing would have
+    passed the suite.
     """
     top = tmp_path / "top.cr3"
     top.write_text("x")

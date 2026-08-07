@@ -44,8 +44,8 @@ def setup_logging(
     Configure Loguru for both console and file logging.
 
     The file sink is serialized: each line is one JSON record (message, level, timestamp, and the
-    structured ``extra`` fields), so the logs can be filtered and parsed with jq and friends
-    instead of regexes.
+    structured ``extra`` fields), so the logs can be filtered and parsed with jq and friends instead
+    of regexes.
 
     Args:
         file_log_level: Log level for file (use 'OFF' to disable)

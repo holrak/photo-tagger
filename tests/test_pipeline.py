@@ -501,11 +501,11 @@ def test_resolve_inference_coordinates_duplicate_content(tmp_path: Path) -> None
     """
     Concurrent misses on the same content key share one model call.
 
-    Regression test: two workers with identical pixels (burst duplicates, one image in two
-    folders) used to both miss the cache and each pay a full inference; only the last put
-    mattered. The first worker now leads, the second waits and replays the cache. The leader is
-    held until the follower has demonstrably missed the cache, so this exercises the real
-    wait-then-replay path rather than a lucky plain cache hit.
+    Regression test: two workers with identical pixels (burst duplicates, one image in two folders)
+    used to both miss the cache and each pay a full inference; only the last put mattered. The first
+    worker now leads, the second waits and replays the cache. The leader is held until the follower
+    has demonstrably missed the cache, so this exercises the real wait-then-replay path rather than
+    a lucky plain cache hit.
     """
     calls = {"n": 0}
     leader_started = threading.Event()
@@ -1019,8 +1019,8 @@ def test_run_batch_concurrent_interrupt_during_submission(tmp_path: Path) -> Non
     Ctrl-C while futures are still being queued takes the cancel-and-drain path.
 
     Regression test: submission used to sit outside the KeyboardInterrupt handler, so an early
-    Ctrl-C fell through to the blocking shutdown(wait=True) and the batch ground on to the end
-    with no summary accounting.
+    Ctrl-C fell through to the blocking shutdown(wait=True) and the batch ground on to the end with
+    no summary accounting.
     """
     files = [tmp_path / f"img{i}.cr3" for i in range(4)]
     for f in files:

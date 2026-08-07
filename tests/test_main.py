@@ -450,8 +450,8 @@ def test_cli_older_than_filters_input_batch(tmp_path: Path) -> None:
     """
     --older-than parses the timestamp and drops files newer than the bound.
 
-    The mirror of the --newer-than test: without it, swapping the two keyword arguments handed
-    to apply_date_filter (or dropping older_than entirely) passed the whole suite.
+    The mirror of the --newer-than test: without it, swapping the two keyword arguments handed to
+    apply_date_filter (or dropping older_than entirely) passed the whole suite.
     """
     import os  # noqa: PLC0415 - test-local import.
     from datetime import UTC, datetime, timedelta  # noqa: PLC0415 - test-local import.
@@ -942,8 +942,8 @@ def test_gui_propagates_non_qt_import_errors(capsys: pytest.CaptureFixture[str])
     """
     An ImportError from inside the gui module chain is not "PySide6 missing".
 
-    Regression test: a broken transitive dependency used to be reported with the pip install
-    hint, sending the user to reinstall an extra that was never the problem.
+    Regression test: a broken transitive dependency used to be reported with the pip install hint,
+    sending the user to reinstall an extra that was never the problem.
     """
 
     def raise_import_error(_name: str) -> object:
@@ -1091,9 +1091,9 @@ def test_config_file_survives_sibling_cli_flag(
     """
     Passing one flag from a group must not reset the group's other fields to built-ins.
 
-    Regression test: config defaults used to be baked into the default group instances, and
-    cyclopts rebuilds a group from class defaults whenever any of its flags is passed, silently
-    dropping the config values of every sibling field.
+    Regression test: config defaults used to be baked into the default group instances, and cyclopts
+    rebuilds a group from class defaults whenever any of its flags is passed, silently dropping the
+    config values of every sibling field.
     """
     _point_config_at(tmp_path, monkeypatch, "[inference]\nmax_tokens = 500\n")
     image = _make_jpeg(tmp_path / "img.cr3")

@@ -327,9 +327,9 @@ def test_find_field_presence_degrades_on_exiftool_error(tmp_path: Path) -> None:
     """
     An exiftool failure yields an empty dict rather than raising.
 
-    Regression test: the failure path used to return empty sets for every path, which callers
-    read as "scanned, nothing found" and the GUI then wrongly showed every photo as untagged.
-    An empty dict means "could not read", leaving the per-photo state unknown.
+    Regression test: the failure path used to return empty sets for every path, which callers read
+    as "scanned, nothing found" and the GUI then wrongly showed every photo as untagged. An empty
+    dict means "could not read", leaving the per-photo state unknown.
     """
     img = tmp_path / "a.cr3"
     img.write_text("x")
@@ -351,9 +351,9 @@ def test_find_tagged_images_salvages_batch_with_one_bad_file(tmp_path: Path) -> 
     """
     One corrupt file in the batch must not wipe out the whole folder's tagged check.
 
-    Regression test: exiftool exits 1 when any file has a format error, pyexiftool raises, and
-    the old code returned set() so every already-tagged photo was reported untagged (and re-run).
-    The JSON for the healthy files is still on the error's stdout; use it.
+    Regression test: exiftool exits 1 when any file has a format error, pyexiftool raises, and the
+    old code returned set() so every already-tagged photo was reported untagged (and re-run). The
+    JSON for the healthy files is still on the error's stdout; use it.
     """
     good = tmp_path / "good.cr3"
     bad = tmp_path / "bad.cr3"
@@ -723,8 +723,8 @@ def test_write_metadata_targets_the_sidecar_by_default(tmp_path: Path) -> None:
     """
     use_sidecar=True (the production default) writes to img.xmp, never the original.
 
-    This is the non-destructive promise the whole tool is built on: a regression that targeted
-    the image would modify originals on every default run.
+    This is the non-destructive promise the whole tool is built on: a regression that targeted the
+    image would modify originals on every default run.
     """
     img = tmp_path / "img.cr3"
     helper = _fake_helper()

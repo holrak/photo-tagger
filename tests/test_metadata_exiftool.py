@@ -151,8 +151,8 @@ def test_description_mirror_round_trips_as_image_description(tmp_path: Path) -> 
     The ImageDescription mirror is actually written, not silently rejected.
 
     Regression test: the payload used XMP-exif:ImageDescription, which exiftool refuses with a
-    warning but exit code 0, so the mirror never reached the file and write_metadata still
-    reported success.
+    warning but exit code 0, so the mirror never reached the file and write_metadata still reported
+    success.
     """
     from exiftool import ExifToolHelper  # type: ignore[attr-defined]  # noqa: PLC0415
 

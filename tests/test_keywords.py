@@ -151,8 +151,8 @@ def test_merge_keywords_dedupes_hierarchies_case_insensitively() -> None:
     """
     An existing lowercase hierarchy suppresses the same path in canonical casing.
 
-    Guards the casefold in the hierarchical-seen set: without it, files tagged by other tools
-    with "animal|bird" would gain a duplicate "Animal|Bird" entry on every run.
+    Guards the casefold in the hierarchical-seen set: without it, files tagged by other tools with
+    "animal|bird" would gain a duplicate "Animal|Bird" entry on every run.
     """
     existing = KeywordSet(
         subject=["animal", "bird"],

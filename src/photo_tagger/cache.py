@@ -64,9 +64,9 @@ def build_cache_namespace(  # noqa: PLR0913 - each kwarg is a distinct input to 
     cache treats them as separate namespaces.
 
     The system prompt text is intentionally NOT folded in: it ships with the code, so a different
-    system prompt means a new release, which is the right moment for a stale cache to be
-    re-validated by the user anyway. Its one runtime-configurable input, *output_language*, IS
-    folded in, so switching language never replays results generated in the old one.
+    system prompt means a new release, which is the right moment for a stale cache to be re-
+    validated by the user anyway. Its one runtime-configurable input, *output_language*, IS folded
+    in, so switching language never replays results generated in the old one.
     """
     h = hashlib.blake2b(digest_size=_CONFIG_DIGEST_BYTES)
     payload = (

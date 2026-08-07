@@ -134,8 +134,8 @@ def test_open_cache_closes_connection_when_setup_fails(tmp_path: Path) -> None:
     """
     A corrupt DB file degrades to no-cache AND closes the already-opened connection.
 
-    Regression test: the connection (and its file handle) used to leak for the life of the
-    process when the PRAGMA/schema setup raised after sqlite3.connect succeeded.
+    Regression test: the connection (and its file handle) used to leak for the life of the process
+    when the PRAGMA/schema setup raised after sqlite3.connect succeeded.
     """
     corrupt = tmp_path / "cache.sqlite3"
     corrupt.write_bytes(b"this is not a sqlite database, it just lives at the cache path")

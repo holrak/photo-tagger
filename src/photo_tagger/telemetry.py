@@ -214,11 +214,11 @@ def first_run_notice() -> str | None:
     """
     Return :data:`FIRST_RUN_NOTICE` the first time telemetry is active, else ``None``.
 
-    A marker file records the :data:`NOTICE_VERSION` that has been shown, so the notice appears
-    once per disclosure version: when new data categories are added (hardware, crash reports),
-    existing installs see the updated text once too. The marker is written before returning, so
-    two calls in one process do not both show it. If the marker cannot be written the notice may
-    reappear on a later run, which is harmless.
+    A marker file records the :data:`NOTICE_VERSION` that has been shown, so the notice appears once
+    per disclosure version: when new data categories are added (hardware, crash reports), existing
+    installs see the updated text once too. The marker is written before returning, so two calls in
+    one process do not both show it. If the marker cannot be written the notice may reappear on a
+    later run, which is harmless.
     """
     marker = _state_dir() / _NOTICE_MARKER_FILE
     try:

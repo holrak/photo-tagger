@@ -20,9 +20,8 @@ def test_version_matches_pyproject() -> None:
     """
     The runtime version agrees with the canonical pyproject.toml value.
 
-    This is the metadata-path counterpart to ``scripts/check_version_sync.py``:
-    it catches a stale editable install whose recorded version drifted from
-    ``[project].version`` after a bump.
+    This is the metadata-path counterpart to ``scripts/check_version_sync.py``: it catches a stale
+    editable install whose recorded version drifted from ``[project].version`` after a bump.
     """
     data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
     assert photo_tagger.__version__ == data["project"]["version"]

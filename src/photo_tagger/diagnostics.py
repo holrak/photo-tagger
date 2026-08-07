@@ -35,9 +35,9 @@ def check_exiftool() -> CheckResult:
     """
     Verify the ExifTool binary is available (pyexiftool shells out to it).
 
-    Resolves the same way the pipeline does: an explicit ``PHOTO_TAGGER_EXIFTOOL`` /
-    config ``exiftool_path`` if set, otherwise ``exiftool`` on PATH. ``shutil.which`` handles
-    both - it validates an absolute path and searches PATH for a bare name.
+    Resolves the same way the pipeline does: an explicit ``PHOTO_TAGGER_EXIFTOOL`` / config
+    ``exiftool_path`` if set, otherwise ``exiftool`` on PATH. ``shutil.which`` handles both - it
+    validates an absolute path and searches PATH for a bare name.
     """
     target = exiftool_executable() or "exiftool"
     path = shutil.which(target)

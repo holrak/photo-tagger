@@ -262,9 +262,9 @@ def _resolve_inference(
     result back to the cache.
 
     Concurrent misses on the *same* content key (burst duplicates, one image in two folders) are
-    coordinated: the first worker becomes the leader and runs the model; the others wait for it
-    and replay the cache, so identical pixels never pay twice. If the leader fails (or cannot
-    cache its result), the waiters fall back to their own model call.
+    coordinated: the first worker becomes the leader and runs the model; the others wait for it and
+    replay the cache, so identical pixels never pay twice. If the leader fails (or cannot cache its
+    result), the waiters fall back to their own model call.
 
     Cache I/O failures are logged at warning level but never raised: a broken SQLite file or full
     disk degrades the run to "no cache" without aborting photos that the model would otherwise
