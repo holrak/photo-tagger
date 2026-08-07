@@ -32,6 +32,7 @@ from photo_tagger.gui_state import (
     SORT_TAGGED,
     SORT_TYPE,
     STATUS_SORT_ORDER,
+    TOOLTIP_WIDTH,
     UNCHANGED,
     WORKING,
     FolderNode,
@@ -77,6 +78,8 @@ from photo_tagger.gui_state import (
     tagged_summary,
     tagged_tooltip,
     thumb_badges,
+    tooltip,
+    wrap_tooltip,
 )
 from photo_tagger.i18n import activate
 from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
@@ -428,6 +431,44 @@ def test_tagged_tooltip_is_fully_translated() -> None:
         )
     finally:
         activate("en")
+
+
+def test_wrap_tooltip_breaks_long_text_into_lines() -> None:
+    """A long tooltip becomes several lines, none wider than the tooltip column."""
+    text = "Let ExifTool save the untouched file as *_original before writing. " * 3
+    wrapped = wrap_tooltip(text)
+    lines = wrapped.splitlines()
+    assert len(lines) > 1
+    assert max(len(line) for line in lines) <= TOOLTIP_WIDTH
+    assert wrapped.split() == text.split()  # only whitespace changed
+
+
+def test_wrap_tooltip_leaves_short_text_and_existing_breaks_alone() -> None:
+    """Text that already fits is untouched, and hand-written line breaks survive re-wrapping."""
+    assert wrap_tooltip("Short enough.") == "Short enough."
+
+    paragraphs = "First line.\n\nSecond line."
+    assert wrap_tooltip(paragraphs) == paragraphs
+    # Wrapping is idempotent, so a tooltip built from an already-wrapped one does not re-flow.
+    once = wrap_tooltip("Wrap me. " * 20)
+    assert wrap_tooltip(once) == once
+
+
+def test_tooltip_translates_formats_and_wraps() -> None:
+    """Tooltip() runs the message through gettext, fills placeholders, then wraps the result."""
+    activate("pt_BR")
+    try:
+        text = tooltip(
+            "Language of the app itself (menus, buttons, messages). The language of "
+            "the generated metadata is set under Metadata Language.",
+        )
+    finally:
+        activate("en")
+    assert text.startswith("Idioma do próprio aplicativo")
+    assert max(len(line) for line in text.splitlines()) <= TOOLTIP_WIDTH
+
+    filled = tooltip("Already on the file: {fields}", fields="T = title")
+    assert filled == "Already on the file: T = title"
 
 
 def test_fields_written_reports_only_nonempty_values() -> None:

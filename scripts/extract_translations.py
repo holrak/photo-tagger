@@ -57,10 +57,14 @@ def _ensure_trailing_newline(path: Path) -> None:
 def main() -> int:
     """Extract the template, then merge it into the per-locale catalogs; return the exit code."""
     os.chdir(ROOT)
+    # Besides the gettext defaults, two of our own helpers take a translatable literal:
+    # gettext_noop (mark now, translate later) and gui_state.tooltip (translate and word-wrap).
     _pybabel(
         "extract",
         "-k",
         "gettext_noop",
+        "-k",
+        "tooltip",
         "--project",
         "photo-tagger",
         "--copyright-holder",

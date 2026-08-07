@@ -35,6 +35,7 @@ from photo_tagger.gui_state import (
     PENDING,
     READY,
     SAVED,
+    TOOLTIP_WIDTH,
     WORKING,
     Proposal,
 )
@@ -1987,21 +1988,33 @@ def test_save_buttons_share_the_options_menu(window: gui.MainWindow) -> None:
     assert window._backup in actions  # noqa: SLF001
 
 
+def _unwrapped(tip: str) -> str:
+    """Join a wrapped tooltip back into one line, so tests can assert on its wording."""
+    return " ".join(tip.split())
+
+
+def test_long_tooltips_are_wrapped_into_lines(window: gui.MainWindow) -> None:
+    """Tooltips are hard-wrapped, since Qt draws a long plain-text one as a single wide line."""
+    tip = window._backup.toolTip()  # noqa: SLF001
+    assert "\n" in tip
+    assert max(len(line) for line in tip.splitlines()) <= TOOLTIP_WIDTH
+
+
 def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None:
     """Toggling a save option rewrites the Save buttons' current-options summary."""
-    assert "title, description, keywords" in window._save_selected_button.toolTip()  # noqa: SLF001
-    assert "XMP sidecar" in window._save_button.toolTip()  # noqa: SLF001
+    assert "title, description, keywords" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
+    assert "XMP sidecar" in _unwrapped(window._save_button.toolTip())  # noqa: SLF001
 
     window._write_description.setChecked(False)  # noqa: SLF001
     window._embed.setChecked(True)  # noqa: SLF001
 
-    tip = window._save_selected_button.toolTip()  # noqa: SLF001
+    tip = _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
     assert "title, keywords" in tip
     assert "into the image file" in tip
     assert "keeping a *_original backup" in tip
 
     window._backup.setChecked(False)  # noqa: SLF001
-    assert "with no *_original backup" in window._save_selected_button.toolTip()  # noqa: SLF001
+    assert "with no *_original backup" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
 
 
 def test_grid_checkbox_unchecks_photo_and_tree(

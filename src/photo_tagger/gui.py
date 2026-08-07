@@ -180,6 +180,8 @@ from photo_tagger.gui_state import (
     tagged_summary,
     tagged_tooltip,
     thumb_badges,
+    tooltip,
+    wrap_tooltip,
 )
 from photo_tagger.i18n import _, gettext_noop, ngettext
 from photo_tagger.image_io import prepare_image_for_agent
@@ -803,7 +805,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         export_action = file_menu.addAction(_("Export CSV Report..."), self._export_csv)
         export_action.setToolTip(
-            _(
+            tooltip(
                 "Save a CSV report of every photo: generated and existing metadata, EXIF, and "
                 "token usage.",
             ),
@@ -821,18 +823,19 @@ class MainWindow(QMainWindow):
         self._cache_action.setCheckable(True)
         self._cache_action.setChecked(True)
         self._cache_action.setToolTip(
-            _(
+            tooltip(
                 "Reuse earlier results for unchanged photos ({cache_file}). Uncheck to call "
                 "the model again for everything; a single photo can skip the cache from its "
                 "right-click menu.",
-            ).format(cache_file=self._cache_file),
+                cache_file=self._cache_file,
+            ),
         )
         settings_menu.addAction(self._cache_action)
         self._telemetry_action = QAction(_("Send Anonymous Telemetry"), self)
         self._telemetry_action.setCheckable(True)
         self._telemetry_action.setChecked(self._telemetry_enabled)
         self._telemetry_action.setToolTip(
-            _(
+            tooltip(
                 "Anonymous usage stats (model, batch size, OS, CPU/GPU model, RAM, timing) and "
                 "crash reports (error type and code location only). No photos, error messages, "
                 "or personal data.",
@@ -849,7 +852,7 @@ class MainWindow(QMainWindow):
             self._save_config,
         )
         save_defaults.setToolTip(
-            _(
+            tooltip(
                 "Update the config file with the current provider, model, URL, file types, and "
                 "save options. Other settings and comments in the file are preserved; the API "
                 "key is never written.",
@@ -857,7 +860,7 @@ class MainWindow(QMainWindow):
         )
         edit_config = settings_menu.addAction(_("Edit Config File..."), self._edit_config)
         edit_config.setToolTip(
-            _(
+            tooltip(
                 "Open the config file in your default editor for the settings the GUI does not "
                 "surface (prompt file, sampling, workers, filters, ...). Created if missing.",
             ),
@@ -879,7 +882,7 @@ class MainWindow(QMainWindow):
         """Add the Language submenu: System Default plus every shipped catalog."""
         self._language_menu = settings_menu.addMenu(_("Language"))
         self._language_menu.menuAction().setToolTip(
-            _(
+            tooltip(
                 "Language of the app itself (menus, buttons, messages). The language of the "
                 "generated metadata is set under Metadata Language.",
             ),
@@ -916,7 +919,7 @@ class MainWindow(QMainWindow):
         menu = self._output_language_menu = settings_menu.addMenu(_("Metadata Language"))
         menu.setToolTipsVisible(True)
         menu.menuAction().setToolTip(
-            _(
+            tooltip(
                 "Language of the generated titles, descriptions, and keywords. The language of "
                 "the app itself is set under Language.",
             ),
@@ -928,7 +931,7 @@ class MainWindow(QMainWindow):
         self._output_language_separator = menu.addSeparator()
         other = menu.addAction(_("Other..."), self._choose_other_output_language)
         other.setToolTip(
-            _(
+            tooltip(
                 "Any language name the model understands works; it is sent to the model as is. "
                 "Saved to the config file, which the CLI's --output-language default also reads.",
             ),
@@ -1091,22 +1094,24 @@ class MainWindow(QMainWindow):
         # Size to the widest label so "LM Studio" is not clipped.
         self._provider.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._provider.setMinimumContentsLength(10)
-        self._provider.setToolTip(_("Backend that serves the vision-language model."))
+        self._provider.setToolTip(tooltip("Backend that serves the vision-language model."))
 
         self._model = QComboBox()
         self._model.setEditable(True)
         self._model.setMinimumWidth(260)
         self._model.setCurrentText(provider.model_name)
         self._model.setToolTip(
-            _("Model identifier. Type it, or press Refresh to list what the provider serves."),
+            tooltip(
+                "Model identifier. Type it, or press Refresh to list what the provider serves.",
+            ),
         )
         refresh = QPushButton(_("Refresh"))
-        refresh.setToolTip(_("Query the provider for the models it currently serves."))
+        refresh.setToolTip(tooltip("Query the provider for the models it currently serves."))
         refresh.clicked.connect(self._refresh_models)
 
         self._connection_dialog = self._build_connection_dialog()
         connection = QPushButton(_("Connection..."))
-        connection.setToolTip(_("Server URL, API key, and a connection test."))
+        connection.setToolTip(tooltip("Server URL, API key, and a connection test."))
         connection.clicked.connect(self._connection_dialog.exec)
 
         row = QHBoxLayout()
@@ -1131,7 +1136,9 @@ class MainWindow(QMainWindow):
         self._url = QLineEdit(provider.api_base_url or "")
         self._url.setMinimumWidth(380)
         self._url.setPlaceholderText(_("(provider default URL)"))
-        self._url.setToolTip(_("Provider API base URL. Leave blank to use the provider's default."))
+        self._url.setToolTip(
+            tooltip("Provider API base URL. Leave blank to use the provider's default."),
+        )
         form.addRow(_("Base URL"), self._url)
 
         # Pre-filled from a config-file key if one is set, never from an environment variable: an
@@ -1143,7 +1150,7 @@ class MainWindow(QMainWindow):
         self._api_key.setMinimumWidth(380)
         self._api_key.setPlaceholderText(_("(uses provider env var)"))
         self._api_key.setToolTip(
-            _(
+            tooltip(
                 "API key for the provider. Leave blank to use the provider's environment variable "
                 "(OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or OLLAMA_API_KEY). "
                 "Required for OpenAI. A typed key is used for this session only and is never "
@@ -1153,7 +1160,9 @@ class MainWindow(QMainWindow):
         form.addRow(_("API key"), self._api_key)
 
         self._test_button = QPushButton(_("Test Connection"))
-        self._test_button.setToolTip(_("Check ExifTool and that the provider serves the model."))
+        self._test_button.setToolTip(
+            tooltip("Check ExifTool and that the provider serves the model."),
+        )
         self._test_button.clicked.connect(self._test_connection)
         close = QPushButton(_("Close"))
         close.setDefault(True)
@@ -1189,10 +1198,11 @@ class MainWindow(QMainWindow):
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(_COL_NAME, Qt.SortOrder.AscendingOrder)
         header.setToolTip(
-            _(
+            tooltip(
                 "Click a column header to sort. Type: file extension, +xmp when a sidecar "
                 "exists.\nTagged: metadata already on the file ({legend}).",
-            ).format(legend=tagged_legend()),
+                legend=tagged_legend(),
+            ),
         )
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_tree_context_menu)
@@ -1220,7 +1230,7 @@ class MainWindow(QMainWindow):
         add.setObjectName("add")
         add.setText(_("Add Photos..."))
         add.setToolTip(
-            _(
+            tooltip(
                 "Add photos (click), or open the arrow for adding a whole folder and for the "
                 "folder-scan options. Dragging files or folders onto the window also works.",
             ),
@@ -1233,12 +1243,14 @@ class MainWindow(QMainWindow):
 
         select = QPushButton(_("Select"))
         select.setObjectName("menubutton")
-        select.setToolTip(_("Check or uncheck photos in bulk."))
+        select.setToolTip(tooltip("Check or uncheck photos in bulk."))
         select.setMenu(self._build_select_menu())
         controls.addWidget(select)
 
         remove = QPushButton(_("Remove"))
-        remove.setToolTip(_("Remove the selected folder or photo from the list (or press Delete)."))
+        remove.setToolTip(
+            tooltip("Remove the selected folder or photo from the list (or press Delete)."),
+        )
         remove.clicked.connect(self._remove_selected)
         controls.addWidget(remove)
         return controls
@@ -1253,7 +1265,7 @@ class MainWindow(QMainWindow):
         self._extensions = QLineEdit(self._raw_config.get("extensions", DEFAULT_GUI_EXTENSIONS))
         self._extensions.setMinimumWidth(280)
         self._extensions.setToolTip(
-            _(
+            tooltip(
                 "Extensions to scan for in folders (comma-separated).\n"
                 "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg.",
             ),
@@ -1261,7 +1273,7 @@ class MainWindow(QMainWindow):
         form.addRow(_("File types"), self._extensions)
         self._recursive = QCheckBox(_("Include subfolders"))
         self._recursive.setChecked(bool(self._raw_config.get("recursive", True)))
-        self._recursive.setToolTip(_("Descend into subfolders when adding a folder."))
+        self._recursive.setToolTip(tooltip("Descend into subfolders when adding a folder."))
         form.addRow("", self._recursive)
         host = QWidgetAction(menu)
         host.setDefaultWidget(panel)
@@ -1278,7 +1290,7 @@ class MainWindow(QMainWindow):
 
         self._tagged_menu = menu.addMenu(_("Uncheck Already Tagged"))
         self._tagged_menu.setToolTip(
-            _(
+            tooltip(
                 "Uncheck photos that already have the chosen metadata (in the image or its XMP "
                 "sidecar), e.g. 'a title and a description' to skip those while keeping "
                 "keyword-only photos. Mirrors the CLI's --skip-tagged.",
@@ -1298,7 +1310,7 @@ class MainWindow(QMainWindow):
 
         from_file = menu.addAction(_("Uncheck From Skip List..."), self._deselect_from_file)
         from_file.setToolTip(
-            _(
+            tooltip(
                 "Uncheck photos whose filename or full path is listed in a text file (one per "
                 "line), like the CLI's --skip-from.",
             ),
@@ -1356,7 +1368,9 @@ class MainWindow(QMainWindow):
                 _("Generate (Skip Cache)"),
                 lambda: self._run_generation([item], use_cache=False),
             )
-            fresh.setToolTip(_("Call the model even when a cached result exists for this photo."))
+            fresh.setToolTip(
+                tooltip("Call the model even when a cached result exists for this photo."),
+            )
             fresh.setEnabled(self._thread is None)
             menu.addSeparator()
         menu.addAction(reveal_label(sys.platform), lambda: self._reveal(Path(path)))
@@ -1394,7 +1408,9 @@ class MainWindow(QMainWindow):
             ngettext("Check Only {n} Photo", "Check Only {n} Photos", n).format(n=n),
             lambda: self._check_only_items(items),
         )
-        only.setToolTip(_("Check the selected photos and uncheck every other photo in the list."))
+        only.setToolTip(
+            tooltip("Check the selected photos and uncheck every other photo in the list."),
+        )
         menu.addSeparator()
         generate = menu.addAction(
             ngettext("Generate {n} Photo", "Generate {n} Photos", n).format(n=n),
@@ -1409,7 +1425,7 @@ class MainWindow(QMainWindow):
             ).format(n=n),
             lambda: self._run_generation(items, use_cache=False),
         )
-        fresh.setToolTip(_("One-time: call the model even for photos with cached results."))
+        fresh.setToolTip(tooltip("One-time: call the model even for photos with cached results."))
         fresh.setEnabled(self._thread is None)
         menu.addSeparator()
         menu.addAction(
@@ -1631,7 +1647,7 @@ class MainWindow(QMainWindow):
             (_("Untagged"), FILTER_UNTAGGED),
         ):
             self._grid_filter_combo.addItem(label, criterion)
-        self._grid_filter_combo.setToolTip(_("Show only the photos in the chosen state."))
+        self._grid_filter_combo.setToolTip(tooltip("Show only the photos in the chosen state."))
         _fit_combo(self._grid_filter_combo)
         row.addWidget(self._grid_filter_combo)
         row.addSpacing(16)
@@ -1646,7 +1662,7 @@ class MainWindow(QMainWindow):
         ):
             self._grid_sort_combo.addItem(label, criterion)
         self._grid_sort_combo.setToolTip(
-            _("Order the thumbnails by name, file type, status, or existing metadata."),
+            tooltip("Order the thumbnails by name, file type, status, or existing metadata."),
         )
         _fit_combo(self._grid_sort_combo)
         row.addWidget(self._grid_sort_combo)
@@ -1655,7 +1671,7 @@ class MainWindow(QMainWindow):
         self._grid_sort_dir.setObjectName("sortdir")
         self._grid_sort_dir.setCheckable(True)
         self._grid_sort_dir.setText("↑")
-        self._grid_sort_dir.setToolTip(_("Ascending. Click to sort descending."))
+        self._grid_sort_dir.setToolTip(tooltip("Ascending. Click to sort descending."))
         row.addWidget(self._grid_sort_dir)
         row.addStretch(1)
 
@@ -1679,7 +1695,7 @@ class MainWindow(QMainWindow):
         self._grid_sort_desc = descending
         self._grid_sort_dir.setText("↓" if descending else "↑")
         self._grid_sort_dir.setToolTip(
-            _("Descending. Click to sort ascending.")
+            tooltip("Descending. Click to sort ascending.")
             if descending
             else _("Ascending. Click to sort descending."),
         )
@@ -1732,7 +1748,7 @@ class MainWindow(QMainWindow):
         self._existing_source = QLabel("")
         self._existing_source.setObjectName("hint")
         self._existing_source.setToolTip(
-            _(
+            tooltip(
                 "Where the existing metadata was read from: the image file, an XMP sidecar, "
                 "or both.",
             ),
@@ -1745,7 +1761,7 @@ class MainWindow(QMainWindow):
         self._existing_title = QLineEdit()
         self._existing_title.setReadOnly(True)
         self._title = QLineEdit()
-        self._title.setToolTip(_("The title to write. Edit freely before saving."))
+        self._title.setToolTip(tooltip("The title to write. Edit freely before saving."))
         grid.addWidget(QLabel(_("Title")), 1, 0)
         grid.addWidget(self._existing_title, 1, 1)
         grid.addWidget(self._title, 1, 2)
@@ -1753,7 +1769,7 @@ class MainWindow(QMainWindow):
         top = Qt.AlignmentFlag.AlignTop
         self._existing_description = _readonly_box(44)
         self._description = QPlainTextEdit()
-        self._description.setToolTip(_("The description to write."))
+        self._description.setToolTip(tooltip("The description to write."))
         # Descriptions are usually a sentence or two; grow the boxes with the text instead of
         # reserving a fixed block of the pane (textChanged also fires on programmatic fills).
         self._description.textChanged.connect(lambda: _fit_text_height(self._description))
@@ -1767,7 +1783,7 @@ class MainWindow(QMainWindow):
         self._keywords.setMinimumHeight(150)
         self._keywords.setPlaceholderText(_("One per line. Use < for hierarchy (Duck<Bird<Animal)"))
         self._keywords.setToolTip(
-            _(
+            tooltip(
                 "Keywords to write, one per line. Use '<' for a hierarchy "
                 "(e.g. 'Duck<Bird<Animal'); the changes and resulting paths show below.",
             ),
@@ -1787,7 +1803,7 @@ class MainWindow(QMainWindow):
         self._details_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self._details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._details_toggle.setToolTip(
-            _(
+            tooltip(
                 "Show exactly what saving will change: added and removed keywords, plus the "
                 "resulting keyword tree.",
             ),
@@ -1802,11 +1818,15 @@ class MainWindow(QMainWindow):
         self._diff = QTextEdit()
         self._diff.setReadOnly(True)
         self._diff.setMinimumHeight(90)
-        self._diff.setToolTip(_("Keyword changes a save will make: green added, red removed."))
+        self._diff.setToolTip(
+            tooltip("Keyword changes a save will make: green added, red removed."),
+        )
         self._hierarchy = _readonly_box(60)
         self._hierarchy.setObjectName("tree")  # monospace, so the branch guides line up
         self._hierarchy.setToolTip(
-            _("The keyword tree that saving will write (stored as Lightroom hierarchy paths)."),
+            tooltip(
+                "The keyword tree that saving will write (stored as Lightroom hierarchy paths).",
+            ),
         )
         form.addRow(_("Changes"), self._diff)
         form.addRow(_("Tree"), self._hierarchy)
@@ -1826,15 +1846,15 @@ class MainWindow(QMainWindow):
         menu.setToolTipsVisible(True)
         self._write_title = QAction(_("Write Title"), self)
         self._write_title.setToolTip(
-            _("Write the title. Uncheck to leave the existing title as is."),
+            tooltip("Write the title. Uncheck to leave the existing title as is."),
         )
         self._write_description = QAction(_("Write Description"), self)
         self._write_description.setToolTip(
-            _("Write the description. Uncheck to leave the existing description as is."),
+            tooltip("Write the description. Uncheck to leave the existing description as is."),
         )
         self._write_keywords = QAction(_("Write Keywords"), self)
         self._write_keywords.setToolTip(
-            _(
+            tooltip(
                 "Write keywords. Uncheck to leave existing keywords untouched, e.g. to refresh "
                 "only the title and description.",
             ),
@@ -1857,14 +1877,14 @@ class MainWindow(QMainWindow):
 
         self._overwrite = QAction(_("Overwrite Existing Keywords"), self)
         self._overwrite.setToolTip(
-            _("Replace existing keywords instead of merging the new ones in."),
+            tooltip("Replace existing keywords instead of merging the new ones in."),
         )
         self._overwrite.toggled.connect(self._refresh_derived)
         self._embed = QAction(_("Embed in Photo"), self)
-        self._embed.setToolTip(_("Write into the image file instead of an XMP sidecar."))
+        self._embed.setToolTip(tooltip("Write into the image file instead of an XMP sidecar."))
         self._backup = QAction(_("Keep ExifTool Backup"), self)
         self._backup.setToolTip(
-            _(
+            tooltip(
                 "Let ExifTool save the untouched file as *_original before writing. Uncheck to "
                 "write in place, which leaves no extra copies filling up the disk on a large "
                 "batch (make sure you have a backup elsewhere).",
@@ -1925,15 +1945,17 @@ class MainWindow(QMainWindow):
         """Keep both Save buttons' tooltips describing the currently chosen options."""
         summary = _("Currently writes {options}.").format(options=self._save_options_summary())
         self._save_button.setToolTip(
-            _("Write this photo. {summary} Change what is written with the arrow.").format(
+            tooltip(
+                "Write this photo. {summary} Change what is written with the arrow.",
                 summary=summary,
             ),
         )
         self._save_selected_button.setToolTip(
-            _(
+            tooltip(
                 "Write the checked photos that have a generated proposal. {summary} "
                 "Change what is written with the arrow.",
-            ).format(summary=summary),
+                summary=summary,
+            ),
         )
 
     def _build_save_row(self) -> QHBoxLayout:
@@ -1944,7 +1966,7 @@ class MainWindow(QMainWindow):
         self._hint.setPlaceholderText(_("e.g. 'The animal is a deer, not a boar'"))
         self._hint.setClearButtonEnabled(True)
         self._hint.setToolTip(
-            _(
+            tooltip(
                 "A note about this photo that the model trusts over its own reading of the "
                 "image; useful when it misidentifies the subject. It is sent along on every "
                 "generation of this photo (a hinted photo skips the cached result) and is "
@@ -1960,7 +1982,7 @@ class MainWindow(QMainWindow):
         self._generate_one_button.setObjectName("split")
         self._generate_one_button.setText(_("Generate This Photo"))
         self._generate_one_button.setToolTip(
-            _("Run the model on just this photo, regardless of which photos are checked."),
+            tooltip("Run the model on just this photo, regardless of which photos are checked."),
         )
         self._generate_one_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._generate_one_button.clicked.connect(
@@ -1972,7 +1994,7 @@ class MainWindow(QMainWindow):
             _("Generate This Photo (Skip Cache)"),
             lambda: self._generate_current(use_cache=False),
         )
-        skip_one.setToolTip(_("One-time: call the model even when a cached result exists."))
+        skip_one.setToolTip(tooltip("One-time: call the model even when a cached result exists."))
         self._generate_one_button.setMenu(self._generate_one_menu)
         # The save options live on the button's own arrow, so what a save writes is
         # discoverable right where the save happens (both Save buttons share one menu).
@@ -1999,7 +2021,7 @@ class MainWindow(QMainWindow):
 
         self._retry_button = QPushButton(_("Retry Failed"))
         self._retry_button.setToolTip(
-            _(
+            tooltip(
                 "Re-run the model on every photo that failed to generate. Enabled once a photo "
                 "has actually failed.",
             ),
@@ -2008,7 +2030,7 @@ class MainWindow(QMainWindow):
         self._retry_button.clicked.connect(self._retry_failed)
         self._cancel_button = QPushButton(_("Cancel"))
         self._cancel_button.setToolTip(
-            _(
+            tooltip(
                 "Stop generating. The photo currently in flight finishes; the rest are left "
                 "untouched so you can resume them later.",
             ),
@@ -2021,7 +2043,7 @@ class MainWindow(QMainWindow):
         self._generate_button = QToolButton()
         self._generate_button.setObjectName("primarysplit")
         self._generate_button.setText(_("Generate Selected"))
-        self._generate_button.setToolTip(_("Run the model on the checked photos."))
+        self._generate_button.setToolTip(tooltip("Run the model on the checked photos."))
         self._generate_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._generate_button.clicked.connect(
             lambda: self._generate(),  # noqa: PLW0108  # drop Qt's clicked(checked) arg
@@ -2033,7 +2055,9 @@ class MainWindow(QMainWindow):
             _("Generate Selected (Skip Cache)"),
             lambda: self._generate(use_cache=False),
         )
-        skip_all.setToolTip(_("One-time: call the model even for photos with cached results."))
+        skip_all.setToolTip(
+            tooltip("One-time: call the model even for photos with cached results."),
+        )
         self._generate_button.setMenu(self._generate_menu)
 
         self._save_selected_button = QToolButton()
@@ -2961,11 +2985,12 @@ class MainWindow(QMainWindow):
             Qt.ItemDataRole.ForegroundRole,
             QBrush(color) if color is not None else None,
         )
-        # Surface the failure reason on hover so it is discoverable straight from the tree.
-        leaf.setToolTip(_COL_STATUS, item.error if item.status == FAILED else "")
+        # Surface the failure reason on hover so it is discoverable straight from the tree. Model
+        # errors can be a paragraph long, hence the wrap.
+        leaf.setToolTip(_COL_STATUS, wrap_tooltip(item.error) if item.status == FAILED else "")
         if item.known_fields is not None:
             leaf.setText(_COL_TAGGED, tagged_summary(item.known_fields))
-            leaf.setToolTip(_COL_TAGGED, tagged_tooltip(item.known_fields))
+            leaf.setToolTip(_COL_TAGGED, wrap_tooltip(tagged_tooltip(item.known_fields)))
 
     def _resort(self) -> None:
         """Re-apply the active sort so changed statuses settle when sorting by the Status column."""
