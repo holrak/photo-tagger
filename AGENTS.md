@@ -10,7 +10,7 @@ module owns one slice of that pipeline:
 
 - `main.py` - cyclopts entry point and orchestration (`tag` default command, `doctor` command). Keep
   it thin: it wires modules together and translates domain errors into exit codes.
-- `cli_options.py` - the CLI *schema*: the seven `@dataclass` option groups, their config-file
+- `cli_options.py` - the CLI _schema_: the seven `@dataclass` option groups, their config-file
   defaults (`load_defaults`), and the `ProcessingOptions` mapping. New flags go here, not in `main`.
 - `providers.py` - the backend registry. A `ProviderBackend` (Strategy) bundles the per-backend bits
   (listing URL, listing parser, provider factory); shared HTTP plumbing is written once. Add a
@@ -37,7 +37,9 @@ version string. `scripts/check_version_sync.py` guards the hand-maintained docs 
   758 `except` without parentheses (`except ValueError, TypeError:`) are all fine.
 - 100-column width for code, comments, and docstrings.
 - Write comments and docstrings in plain, simple language. Explain the _why_, not the _what_.
-- Never use em-dash (`—`). Use a regular hyphen or rephrase.
+- Never use em-dash (`—`) or en-dash (`–`). Rephrase instead: a colon, a semicolon, parentheses, or
+  two sentences. A spaced hyphen is not a substitute, it means something else. Hyphens are for
+  compound words (`event-scoped`) and ranges (`09:00 - 17:30`).
 
 ## Tests and code quality
 
