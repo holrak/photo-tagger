@@ -830,6 +830,7 @@ class GuiConfigValues:
     write_keywords: bool
     preserve_keywords: bool
     use_sidecar: bool
+    backup_xmp: bool
     telemetry_enabled: bool
 
 
@@ -860,6 +861,7 @@ def config_toml_text(values: GuiConfigValues) -> str:
         f"write_keywords = {_toml_bool(values.write_keywords)}",
         f"preserve_keywords = {_toml_bool(values.preserve_keywords)}",
         f"use_sidecar = {_toml_bool(values.use_sidecar)}",
+        f"backup_xmp = {_toml_bool(values.backup_xmp)}",
         "",
         "[telemetry]",
         f"enabled = {_toml_bool(values.telemetry_enabled)}",
@@ -894,6 +896,7 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     output["write_keywords"] = values.write_keywords
     output["preserve_keywords"] = values.preserve_keywords
     output["use_sidecar"] = values.use_sidecar
+    output["backup_xmp"] = values.backup_xmp
 
     telemetry = document.setdefault("telemetry", tomlkit.table())
     telemetry["enabled"] = values.telemetry_enabled

@@ -23,8 +23,8 @@ location, GPS, and camera EXIF keeps the per-photo IPC cost to one round trip. I
 class ImageContext:
     existing_keywords: KeywordSet  # typed subject / hierarchical / weighted views
     location_tags: dict[str, str]  # city/country from XMP-photoshop and IPTC
-    gps_position: str | None       # Composite:GPSPosition, if present
-    camera_info: dict[str, str]    # EXIF Model, LensModel, DateTimeOriginal
+    gps_position: str | None  # Composite:GPSPosition, if present
+    camera_info: dict[str, str]  # EXIF Model, LensModel, DateTimeOriginal
 ```
 
 `KeywordSet` (in [`models.py`][models]) is a small dataclass with `subject`, `hierarchical`, and
@@ -143,7 +143,7 @@ into the image file instead.
 
 When writing, ExifTool keeps a `*_original` backup of the target before changing it. This is on by
 default. `--no-backup-xmp` passes `-overwrite_original` to ExifTool so no backup file is left
-behind.
+behind. The GUI exposes the same choice as **Keep ExifTool Backup** in the Save options menu.
 
 `--dry-run` runs the model and logs the proposed title, description, and keywords, but writes
 nothing. Use it to preview output before touching any files.

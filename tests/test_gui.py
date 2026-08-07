@@ -1011,6 +1011,42 @@ def test_save_with_no_write_fields_nags_and_writes_nothing(
     assert "at least one field" in window._status.text()  # noqa: SLF001
 
 
+def test_save_keeps_the_exiftool_backup_by_default(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Out of the box the GUI matches the CLI default and lets ExifTool keep *_original."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    captured = _capture_write(monkeypatch)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    window._save_current()  # noqa: SLF001
+
+    assert window._backup.isChecked()  # noqa: SLF001
+    assert captured["backup"] is True
+
+
+def test_unchecking_backup_writes_without_an_original_copy(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning the backup off passes backup=False, so ExifTool overwrites in place."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    captured = _capture_write(monkeypatch)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+    window._backup.setChecked(False)  # noqa: SLF001
+
+    window._save_current()  # noqa: SLF001
+
+    assert captured["backup"] is False
+
+
 def test_unchecking_write_keywords_disables_overwrite_and_blanks_diff(
     window: gui.MainWindow,
     tmp_path: Path,
@@ -1875,6 +1911,7 @@ def test_save_options_default_to_writing_all_fields(window: gui.MainWindow) -> N
         assert action.isChecked()
     assert not window._overwrite.isChecked()  # noqa: SLF001 - merge, not overwrite
     assert not window._embed.isChecked()  # noqa: SLF001 - sidecar, not embed
+    assert window._backup.isChecked()  # noqa: SLF001 - keep ExifTool's *_original
 
 
 def test_file_menu_offers_csv_export(window: gui.MainWindow) -> None:
@@ -1947,6 +1984,7 @@ def test_save_buttons_share_the_options_menu(window: gui.MainWindow) -> None:
     assert window._write_title in actions  # noqa: SLF001
     assert window._overwrite in actions  # noqa: SLF001
     assert window._embed in actions  # noqa: SLF001
+    assert window._backup in actions  # noqa: SLF001
 
 
 def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None:
@@ -1960,6 +1998,10 @@ def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None
     tip = window._save_selected_button.toolTip()  # noqa: SLF001
     assert "title, keywords" in tip
     assert "into the image file" in tip
+    assert "keeping a *_original backup" in tip
+
+    window._backup.setChecked(False)  # noqa: SLF001
+    assert "with no *_original backup" in window._save_selected_button.toolTip()  # noqa: SLF001
 
 
 def test_grid_checkbox_unchecks_photo_and_tree(
@@ -2468,6 +2510,7 @@ def test_save_config_writes_the_gui_choices(
     window._api_key.setText("sk-secret")  # noqa: SLF001 - must NOT be written
     window._extensions.setText("jpg,cr3")  # noqa: SLF001
     window._embed.setChecked(True)  # noqa: SLF001
+    window._backup.setChecked(False)  # noqa: SLF001
 
     window._save_config()  # noqa: SLF001
 
@@ -2477,6 +2520,7 @@ def test_save_config_writes_the_gui_choices(
     assert data["provider"]["model_name"] == "qwen/qwen3-vl-30b"
     assert data["extensions"] == "jpg,cr3"
     assert data["output"]["use_sidecar"] is False
+    assert data["output"]["backup_xmp"] is False
     assert data["telemetry"]["enabled"] is True
 
 

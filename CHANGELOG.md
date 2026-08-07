@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- GUI: a **Keep ExifTool Backup** toggle in the Save options menu (the CLI's `--no-backup-xmp`).
+  Saving used to always leave a `*_original` copy of every photo behind, which on a large batch
+  doubles the disk space used. It defaults to on and persists via *Save Settings as Defaults*.
+
 ## [0.6.0] - 2026-07-11
 
 ### Added

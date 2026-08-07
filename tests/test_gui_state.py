@@ -450,6 +450,7 @@ def _config_values(**overrides: object) -> GuiConfigValues:
         "write_keywords": True,
         "preserve_keywords": True,
         "use_sidecar": True,
+        "backup_xmp": True,
         "telemetry_enabled": True,
     }
     base.update(overrides)
@@ -467,6 +468,7 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
             model_name='qwen "vl" model',
             write_description=False,
             use_sidecar=False,
+            backup_xmp=False,
             telemetry_enabled=False,
         ),
     )
@@ -478,6 +480,7 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
     assert defaults.recursive is True
     assert defaults.output.write_description is False
     assert defaults.output.use_sidecar is False
+    assert defaults.output.backup_xmp is False
     assert defaults.telemetry.enabled is False
 
 
@@ -505,7 +508,7 @@ def test_merged_config_text_preserves_comments_and_unknown_keys() -> None:
         "[artifacts]\n"
         'summary_file = "summary.txt"  # keep me\n'
     )
-    merged = merged_config_text(existing, _config_values(model_name="llava"))
+    merged = merged_config_text(existing, _config_values(model_name="llava", backup_xmp=False))
 
     # Comments and untouched tables survive verbatim.
     assert "# my hand-written config" in merged
@@ -518,6 +521,7 @@ def test_merged_config_text_preserves_comments_and_unknown_keys() -> None:
     assert data["provider"]["provider_name"] == "lmstudio"
     assert data["provider"]["model_name"] == "llava"
     assert data["output"]["use_sidecar"] is True
+    assert data["output"]["backup_xmp"] is False
 
 
 def test_merged_config_text_drops_blank_url() -> None:

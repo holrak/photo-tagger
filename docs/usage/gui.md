@@ -192,6 +192,10 @@ The arrow on either **Save** button opens the save options, which choose what ev
     (turning it off also disables **Overwrite Existing Keywords**, since there is nothing to write).
 - **Overwrite Existing Keywords** replaces the existing keywords instead of merging the new ones in.
 - **Embed in Photo** writes into the image file instead of the default XMP sidecar.
+- **Keep ExifTool Backup** (on by default) lets ExifTool save the untouched file as `*_original`
+    before writing, the GUI's equivalent of the CLI's `--backup-xmp` / `--no-backup-xmp`. Uncheck it
+    to write in place: saving a few thousand photos otherwise leaves a full second copy of each one
+    next to the original. Only do that if you have your own backup elsewhere.
 
 You can edit and save a photo even without generating a proposal first: the editable fields then
 start from the existing values.
@@ -253,9 +257,8 @@ and `~/.photo-tagger/cache.sqlite` otherwise. **Settings > Cache AI Results** tu
 for a session; a photo's right-click menu offers **Generate (Skip Cache)** for one-off fresh
 results.
 
-The window surfaces the most common options; an ExifTool backup is always kept and inference
-settings use their defaults. For the full set of flags (custom prompts, date-range filters,
-sampling, logging), use the [CLI](cli-reference.md).
+The window surfaces the most common options; inference settings use their defaults. For the full set
+of flags (custom prompts, date-range filters, sampling, logging), use the [CLI](cli-reference.md).
 
 ## Limitations
 

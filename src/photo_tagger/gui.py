@@ -1030,6 +1030,7 @@ class MainWindow(QMainWindow):
             write_keywords=self._write_keywords.isChecked(),
             preserve_keywords=not self._overwrite.isChecked(),
             use_sidecar=not self._embed.isChecked(),
+            backup_xmp=self._backup.isChecked(),
             telemetry_enabled=self._telemetry_enabled,
         )
 
@@ -1820,7 +1821,7 @@ class MainWindow(QMainWindow):
         self._details_panel.setVisible(expanded)
 
     def _build_save_options_menu(self) -> QMenu:
-        """Build the menu deciding what a save writes: field toggles, merge mode, sidecar."""
+        """Build the menu deciding what a save writes: fields, merge mode, sidecar, backup."""
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
         self._write_title = QAction(_("Write Title"), self)
@@ -1861,9 +1862,18 @@ class MainWindow(QMainWindow):
         self._overwrite.toggled.connect(self._refresh_derived)
         self._embed = QAction(_("Embed in Photo"), self)
         self._embed.setToolTip(_("Write into the image file instead of an XMP sidecar."))
+        self._backup = QAction(_("Keep ExifTool Backup"), self)
+        self._backup.setToolTip(
+            _(
+                "Let ExifTool save the untouched file as *_original before writing. Uncheck to "
+                "write in place, which leaves no extra copies filling up the disk on a large "
+                "batch (make sure you have a backup elsewhere).",
+            ),
+        )
         for action, checked in (
             (self._overwrite, not output.preserve_keywords),
             (self._embed, not output.use_sidecar),
+            (self._backup, output.backup_xmp),
         ):
             action.setCheckable(True)
             action.setChecked(checked)
@@ -1878,6 +1888,7 @@ class MainWindow(QMainWindow):
             self._write_keywords,
             self._overwrite,
             self._embed,
+            self._backup,
         ):
             action.toggled.connect(self._refresh_save_tooltips)
         return menu
@@ -1902,6 +1913,11 @@ class MainWindow(QMainWindow):
             )
         parts.append(
             _("into the image file") if self._embed.isChecked() else _("to an XMP sidecar"),
+        )
+        parts.append(
+            _("keeping a *_original backup")
+            if self._backup.isChecked()
+            else _("with no *_original backup"),
         )
         return ", ".join(parts)
 
@@ -2648,6 +2664,7 @@ class MainWindow(QMainWindow):
             keywords,
             description=description,
             title=title,
+            backup=self._backup.isChecked(),
             use_sidecar=not self._embed.isChecked(),
         )
         item.status = SAVED if ok else FAILED
