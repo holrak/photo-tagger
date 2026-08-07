@@ -450,6 +450,7 @@ class GenerateWorker(QObject):
         model: str,
         api_base_url: str | None,
         paths: list[Path],
+        *,
         api_key: str | None = None,
         cache_file: Path | None = None,
         output_language: str = DEFAULT_OUTPUT_LANGUAGE,
