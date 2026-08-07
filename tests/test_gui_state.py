@@ -39,7 +39,9 @@ from photo_tagger.gui_state import (
     GuiConfigValues,
     PhotoItem,
     Proposal,
+    SaveOptions,
     apply_proposal,
+    build_save_job,
     build_tree,
     chain_to_display,
     config_text_with_language,
@@ -47,11 +49,13 @@ from photo_tagger.gui_state import (
     config_toml_text,
     deselect_paths,
     ensure_path_dirs,
+    estimate_remaining,
     expand_inputs,
     fields_written,
     file_dialog_name_filters,
     file_type_label,
     filter_photos,
+    format_duration,
     format_existing_keywords,
     group_by_parent,
     hierarchy_preview,
@@ -68,6 +72,7 @@ from photo_tagger.gui_state import (
     photo_item_to_report_row,
     photo_matches_filter,
     photo_sort_key,
+    progress_timing_text,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -82,7 +87,7 @@ from photo_tagger.gui_state import (
     wrap_tooltip,
 )
 from photo_tagger.i18n import activate
-from photo_tagger.metadata import FIELD_KEYWORDS, FIELD_TITLE
+from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
 
@@ -914,3 +919,86 @@ def test_login_shell_path_empty_on_shell_failure(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr("photo_tagger.gui_state.subprocess.run", boom)
     assert login_shell_path() == []
+
+
+def test_format_duration_switches_to_hours() -> None:
+    """Below an hour it reads m:ss; past it, h:mm:ss."""
+    assert format_duration(0) == "0:00"
+    assert format_duration(9.7) == "0:09"
+    assert format_duration(75) == "1:15"
+    assert format_duration(3675) == "1:01:15"
+
+
+def test_format_duration_clamps_negatives() -> None:
+    """A negative duration reads 0:00 instead of counting backwards."""
+    assert format_duration(-5) == "0:00"
+
+
+def test_estimate_remaining_extrapolates_from_finished_items() -> None:
+    """Three photos in 30s means 10s each, so the seven left are 70s away."""
+    assert estimate_remaining(3, 10, 30.0) == pytest.approx(70.0)
+
+
+def test_estimate_remaining_is_unknown_before_the_first_and_after_the_last() -> None:
+    """With nothing finished there is no rate, and a finished batch has nothing left."""
+    assert estimate_remaining(0, 10, 5.0) is None
+    assert estimate_remaining(10, 10, 100.0) is None
+
+
+def test_progress_timing_text_omits_the_estimate_until_something_finishes() -> None:
+    """The readout starts as bare elapsed time, then gains the remaining estimate."""
+    assert progress_timing_text(0, 7, 4.0) == "0:04 elapsed"
+    assert progress_timing_text(1, 7, 10.0) == "0:10 elapsed · 1:00 left"
+
+
+def _proposed_item() -> PhotoItem:
+    """Build a photo with existing metadata and an edited proposal, ready to save."""
+    return PhotoItem(
+        path=Path("/photos/a.jpg"),
+        existing_keywords=KeywordSet(subject=["Old"]),
+        title="New Title",
+        description="New caption.",
+        keywords=["Duck"],
+        has_proposal=True,
+    )
+
+
+def test_build_save_job_writes_every_checked_field() -> None:
+    """With all three toggles on, the job carries the title, description, and merged keywords."""
+    job = build_save_job(_proposed_item(), SaveOptions())
+    assert job.title == "New Title"
+    assert job.description == "New caption."
+    assert sorted(job.keywords.subject) == ["Duck", "Old"]
+    assert job.fields == {FIELD_TITLE, FIELD_DESCRIPTION, FIELD_KEYWORDS}
+
+
+def test_build_save_job_leaves_unchecked_fields_out() -> None:
+    """Switched-off fields become empty, which write_metadata leaves off the file."""
+    options = SaveOptions(write_title=False, write_description=False)
+    job = build_save_job(_proposed_item(), options)
+    assert job.title is None
+    assert job.description is None
+    assert job.fields == {FIELD_KEYWORDS}
+
+
+def test_build_save_job_overwrite_drops_the_existing_keywords() -> None:
+    """Overwrite replaces the keywords on the file instead of merging with them."""
+    job = build_save_job(_proposed_item(), SaveOptions(overwrite=True))
+    assert job.keywords.subject == ["Duck"]
+
+
+def test_build_save_job_without_keywords_writes_none() -> None:
+    """Keywords off means an empty set, so the keyword field is not touched."""
+    job = build_save_job(_proposed_item(), SaveOptions(write_keywords=False))
+    assert job.keywords.is_empty()
+
+
+def test_save_options_any_field_needs_one_toggle() -> None:
+    """A save with all three fields off would write nothing at all."""
+    assert SaveOptions().any_field
+    assert SaveOptions(write_title=False, write_keywords=False).any_field
+    assert not SaveOptions(
+        write_title=False,
+        write_description=False,
+        write_keywords=False,
+    ).any_field

@@ -8,9 +8,18 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- GUI: the bottom bar now shows the time **elapsed** and the estimated time **left** next to the
+  progress bar, for both generating and saving (`2:30 elapsed · 8:10 left`).
 - GUI: a **Keep ExifTool Backup** toggle in the Save options menu (the CLI's `--no-backup-xmp`).
   Saving used to always leave a `*_original` copy of every photo behind, which on a large batch
   doubles the disk space used. It defaults to on and persists via *Save Settings as Defaults*.
+
+### Changed
+
+- GUI: **Save Selected** now writes on a background thread (sharing one ExifTool process for the
+  batch) instead of blocking the window. Saving a large batch used to freeze the interface behind
+  the OS busy cursor with no sign of progress, which looked like a crash. It now reports per photo,
+  and **Cancel** stops it after the file in flight.
 
 ## [0.6.0] - 2026-07-11
 

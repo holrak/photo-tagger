@@ -12,7 +12,9 @@ see an unresolved-import error here.
 """
 
 import os
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +40,7 @@ from photo_tagger.gui_state import (
     TOOLTIP_WIDTH,
     WORKING,
     Proposal,
+    SaveJob,
 )
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE, ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
@@ -80,6 +83,19 @@ def _stub_reads(monkeypatch: pytest.MonkeyPatch, *, keywords: list[str]) -> None
         "read_image_context",
         lambda _p, **_kwargs: ImageContext(existing_keywords=KeywordSet(subject=keywords)),
     )
+
+
+def _stub_save_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the batch save's shared ExifTool out of the tests; the writes themselves are stubbed."""
+    monkeypatch.setattr(gui, "managed_helper", lambda _et: nullcontext(None))
+
+
+def _drain_save(window: gui.MainWindow, timeout: float = 10.0) -> None:
+    """Pump the event loop until the background save finishes (or fail on the deadline)."""
+    deadline = time.monotonic() + timeout
+    while window._save_thread is not None:  # noqa: SLF001
+        assert time.monotonic() < deadline, "the background save never finished"
+        QApplication.processEvents()
 
 
 def _add_dir(window: gui.MainWindow, files: dict[str, Path]) -> None:
@@ -894,6 +910,7 @@ def test_save_selected_writes_only_checked_generated_items(
     a = _jpeg(tmp_path / "a.jpg")
     b = _jpeg(tmp_path / "b.jpg")
     _stub_reads(monkeypatch, keywords=[])
+    _stub_save_helper(monkeypatch)
     written: list[str] = []
     monkeypatch.setattr(
         gui,
@@ -910,8 +927,10 @@ def test_save_selected_writes_only_checked_generated_items(
         item.keywords = ["Eagle"]
 
     window._save_selected()  # noqa: SLF001
+    _drain_save(window)
     assert written == ["a.jpg"]
     assert window._items[str(a)].status == SAVED  # noqa: SLF001
+    assert "Saved 1 of 1" in window._status.text()  # noqa: SLF001
 
 
 def test_save_marks_failed_when_write_fails(
@@ -927,6 +946,205 @@ def test_save_marks_failed_when_write_fails(
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._save_current()  # noqa: SLF001
     assert window._items[str(img)].status == FAILED  # noqa: SLF001
+
+
+def _two_ready_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    """Add two checked photos that both carry a proposal, ready for a batch save."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _stub_save_helper(monkeypatch)
+    _add_dir(window, {"a": a, "b": b})
+    for path in (a, b):
+        item = window._items[str(path)]  # noqa: SLF001
+        item.has_proposal = True
+        item.title = "T"
+        item.keywords = ["Eagle"]
+    return a, b
+
+
+def test_batch_save_runs_in_the_background_with_progress(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch save shows the bar and clock, locks the buttons, and frees them when done."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: True)
+
+    window._save_selected()  # noqa: SLF001
+    assert window._save_thread is not None  # noqa: SLF001 - the writes happen off the UI thread
+    assert window._progress.maximum() == 2  # noqa: SLF001, PLR2004 - both photos
+    assert not window._timing.isHidden()  # noqa: SLF001
+    assert not window._generate_button.isEnabled()  # noqa: SLF001
+    assert not window._save_selected_button.isEnabled()  # noqa: SLF001
+    assert window._cancel_button.isEnabled()  # noqa: SLF001 - a long save is cancellable
+
+    _drain_save(window)
+    assert window._progress.isHidden()  # noqa: SLF001
+    assert window._save_selected_button.isEnabled()  # noqa: SLF001
+    assert window._items[str(a)].status == SAVED  # noqa: SLF001
+    assert window._items[str(b)].status == SAVED  # noqa: SLF001
+    assert window._items[str(a)].known_fields == {FIELD_TITLE, FIELD_KEYWORDS}  # noqa: SLF001
+
+
+def test_batch_save_reports_a_failed_write_in_the_tally(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One photo failing to write leaves the rest saved and is counted in the final message."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    monkeypatch.setattr(gui, "write_metadata", lambda path, *_a, **_k: path.name != "b.jpg")
+
+    window._save_selected()  # noqa: SLF001
+    _drain_save(window)
+    assert window._items[str(a)].status == SAVED  # noqa: SLF001
+    assert window._items[str(b)].status == FAILED  # noqa: SLF001
+    assert "Saved 1 of 2" in window._status.text()  # noqa: SLF001
+
+
+def test_batch_save_refuses_to_start_while_generating(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two runs never overlap: a save asked for mid-generation is ignored."""
+    a, _b = _two_ready_photos(window, tmp_path, monkeypatch)
+    _stub_generation(monkeypatch)
+    written: list[str] = []
+    monkeypatch.setattr(gui, "write_metadata", lambda path, *_a, **_k: written.append(path.name))
+
+    window._run_generation([window._items[str(a)]])  # noqa: SLF001
+    window._save_selected()  # noqa: SLF001
+    assert window._save_thread is None  # noqa: SLF001
+    window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
+    assert written == []
+
+
+def test_cancelled_save_frees_the_unwritten_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling a save leaves the photos it never reached ready to save again."""
+    a, _b = _two_ready_photos(window, tmp_path, monkeypatch)
+    window._items[str(a)].status = WORKING  # noqa: SLF001 - never reached before the cancel
+    window._cancelling = True  # noqa: SLF001
+
+    window._on_save_finished()  # noqa: SLF001
+
+    assert window._items[str(a)].status == READY  # noqa: SLF001 - proposal still there to save
+    assert "Cancelled after saving 0 photos" in window._status.text()  # noqa: SLF001
+
+
+def test_cancel_stops_a_running_save(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one Cancel button also covers a save: the worker is asked to stop."""
+    _two_ready_photos(window, tmp_path, monkeypatch)
+    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: True)
+
+    window._save_selected()  # noqa: SLF001
+    window._cancel_generation()  # noqa: SLF001
+    assert window._cancelling  # noqa: SLF001
+    assert not window._cancel_button.isEnabled()  # noqa: SLF001
+    _drain_save(window)
+
+
+def test_save_worker_shares_one_exiftool_across_the_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every write in a batch reuses the same helper instead of spawning one process per photo."""
+    helper = object()
+    opened = 0
+
+    @contextmanager
+    def fake_helper(_et: object) -> Iterator[object]:
+        nonlocal opened
+        opened += 1
+        yield helper
+
+    monkeypatch.setattr(gui, "managed_helper", fake_helper)
+    seen: list[object] = []
+    monkeypatch.setattr(gui, "write_metadata", lambda *_a, et=None, **_k: bool(seen.append(et)))
+    jobs = [
+        SaveJob(
+            path=tmp_path / name,
+            keywords=KeywordSet(subject=["K"]),
+            title="T",
+            description=None,
+        )
+        for name in ("a.jpg", "b.jpg")
+    ]
+    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    results: list[tuple[str, bool]] = []
+    worker.file_done.connect(lambda path, ok: results.append((Path(path).name, ok)))
+
+    worker.run()
+
+    assert opened == 1
+    assert seen == [helper, helper]
+    assert len(results) == 2  # noqa: PLR2004 - one result per job
+
+
+def test_save_worker_reports_failures_when_exiftool_cannot_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken exiftool fails every photo rather than leaving the window waiting forever."""
+
+    def boom(_et: object) -> object:
+        message = "exiftool missing"
+        raise OSError(message)
+
+    monkeypatch.setattr(gui, "managed_helper", boom)
+    jobs = [SaveJob(path=tmp_path / "a.jpg", keywords=KeywordSet(), title="T", description=None)]
+    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    results: list[bool] = []
+    finished: list[bool] = []
+    worker.file_done.connect(lambda _path, ok: results.append(ok))
+    worker.finished.connect(lambda: finished.append(True))
+
+    worker.run()
+
+    assert results == [False]
+    assert finished == [True]
+
+
+def test_save_worker_stops_before_the_next_photo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop request takes effect at the next photo; the write in flight still completes."""
+    monkeypatch.setattr(gui, "managed_helper", lambda _et: nullcontext(None))
+    jobs = [
+        SaveJob(
+            path=tmp_path / name,
+            keywords=KeywordSet(subject=["K"]),
+            title=None,
+            description=None,
+        )
+        for name in ("a.jpg", "b.jpg", "c.jpg")
+    ]
+    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    written: list[str] = []
+
+    def fake_write(path: Path, *_a: object, **_k: object) -> bool:
+        written.append(path.name)
+        worker.stop()  # asked to cancel while the first photo is being written
+        return True
+
+    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    worker.run()
+    assert written == ["a.jpg"]
 
 
 # ---------------------------------------------------------------------------
@@ -1874,6 +2092,49 @@ def test_progress_bar_tracks_the_run(
 
     window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
     assert window._progress.isHidden()  # noqa: SLF001
+
+
+def test_timing_readout_shows_elapsed_then_an_estimate(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clock beside the bar runs during a generation and disappears when it is over."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_generation(monkeypatch)
+    _add_dir(window, {"a": img})
+    assert window._timing.isHidden()  # noqa: SLF001 - idle: no clock
+
+    window._run_generation([window._items[str(img)]])  # noqa: SLF001
+    assert not window._timing.isHidden()  # noqa: SLF001
+    # Backdate the start so the readout has something to show without a real wait.
+    window._run_started = time.monotonic() - 30  # noqa: SLF001
+    window._update_timing()  # noqa: SLF001
+    assert window._timing.text() == "0:30 elapsed"  # noqa: SLF001 - nothing finished yet
+
+    window._teardown_thread()  # noqa: SLF001 - join the worker thread the run started
+    assert window._timing.isHidden()  # noqa: SLF001
+    assert window._run_started is None  # noqa: SLF001
+
+
+def test_timing_readout_estimates_the_remaining_time_mid_run(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Once photos have finished, the readout extrapolates how long the rest will take."""
+    window._start_progress(4)  # noqa: SLF001
+    window._run_started = time.monotonic() - 60  # noqa: SLF001
+    window._progress.setValue(1)  # noqa: SLF001
+    window._update_timing()  # noqa: SLF001
+    assert window._timing.text() == "1:00 elapsed · 3:00 left"  # noqa: SLF001
+    window._stop_progress()  # noqa: SLF001
+
+
+def test_advance_progress_ignores_ticks_when_idle(window: gui.MainWindow) -> None:
+    """A late signal from a torn-down run must not move a bar that belongs to nothing."""
+    before = window._progress.value()  # noqa: SLF001
+    window._advance_progress()  # noqa: SLF001
+    assert window._progress.value() == before  # noqa: SLF001
 
 
 def test_details_disclosure_expands_and_collapses(window: gui.MainWindow) -> None:

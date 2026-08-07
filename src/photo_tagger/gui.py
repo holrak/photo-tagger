@@ -146,7 +146,10 @@ from photo_tagger.gui_state import (
     GuiConfigValues,
     PhotoItem,
     Proposal,
+    SaveJob,
+    SaveOptions,
     apply_proposal,
+    build_save_job,
     build_tree,
     config_text_with_language,
     config_text_with_output_language,
@@ -154,14 +157,12 @@ from photo_tagger.gui_state import (
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
-    fields_written,
     file_dialog_name_filters,
     file_type_label,
     filter_photos,
     format_existing_keywords,
     hierarchy_preview,
     keyword_diff,
-    keywords_to_save,
     keywords_to_text,
     login_shell_path,
     merged_config_text,
@@ -170,6 +171,7 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    progress_timing_text,
     rank_vision_models,
     reveal_command,
     reveal_label,
@@ -192,18 +194,19 @@ from photo_tagger.metadata import (
     FIELD_TITLE,
     build_contextual_prompt,
     find_field_presence,
+    managed_helper,
     prompt_with_hint,
     read_caption,
     read_image_context,
     read_metadata_sources,
     write_metadata,
 )
-from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES, ProviderName, get_backend
 
 
 if TYPE_CHECKING:
     # Annotation-only on Python 3.14 (lazy), so no runtime import is needed.
+    from exiftool import ExifToolHelper
     from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 
 
@@ -216,6 +219,9 @@ _PREVIEW_MAX = 640
 _THUMB_MAX = 200  # pixels for the grid thumbnails the model never sees
 _THUMB_SIZE = 160  # icon box in the grid
 _GENERATE_RETRIES = 2
+# How often the elapsed/remaining readout is repainted during a run. Half a second reads as a live
+# clock without being busywork.
+_TIMING_TICK_MS = 500
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 _IS_DIR_ROLE = Qt.ItemDataRole.UserRole + 1
 _STATUS_RANK_ROLE = Qt.ItemDataRole.UserRole + 2  # lifecycle rank for sorting the Status column
@@ -376,7 +382,7 @@ QProgressBar {
 }
 QProgressBar::chunk { background: #6366f1; border-radius: 4px; }
 QLabel#preview { background: #1f1f24; border-radius: 8px; color: #9a9aa5; }
-QLabel#hint, QLabel#status { color: #8a8a8a; }
+QLabel#hint, QLabel#status, QLabel#timing { color: #8a8a8a; }
 QLabel#empty { color: #8a8a8a; font-size: 15px; }
 QLabel#section { font-weight: 600; }
 QLabel#error {
@@ -584,6 +590,70 @@ class GenerateWorker(QObject):
         )
 
 
+class SaveWorker(QObject):
+    """
+    Writes the resolved metadata for a list of photos off the UI thread.
+
+    Saving a large batch is minutes of ExifTool work: doing it in the click handler froze the window
+    (the OS "busy" cursor and nothing else), which reads as a crash. Here each write reports back by
+    signal so the window can tick its progress bar and stay responsive.
+
+    One ExifTool process serves the whole batch, the same way the CLI's batch reads do, instead of
+    spawning one per photo.
+    """
+
+    file_done = Signal(str, bool)  # path, write succeeded
+    finished = Signal()
+
+    def __init__(self, jobs: list[SaveJob], *, backup: bool, use_sidecar: bool) -> None:
+        """Store the resolved write jobs and the two file-level options; nothing runs until run."""
+        super().__init__()
+        self._jobs = jobs
+        self._backup = backup
+        self._use_sidecar = use_sidecar
+        self._emitted = 0
+        self._stop = False
+
+    def stop(self) -> None:
+        """Ask the loop to stop before the next photo; the write in flight finishes."""
+        self._stop = True
+
+    def run(self) -> None:
+        """Write every job through one shared ExifTool, then report the batch as finished."""
+        try:
+            with managed_helper(None) as helper:
+                self._write_all(helper)
+        except Exception as exc:  # noqa: BLE001
+            # Per-photo failures are handled in the loop, so this is ExifTool itself failing to
+            # start or shut down. Report whatever never got a result as failed, or the window would
+            # wait forever for photos that can no longer be written.
+            logger.exception("gui_save_batch_failed", error=str(exc))
+            for job in self._jobs[self._emitted :]:
+                self.file_done.emit(str(job.path), False)  # noqa: FBT003 - Qt signal argument
+        self.finished.emit()
+
+    def _write_all(self, helper: ExifToolHelper) -> None:
+        """Write each job in turn, one photo's failure never stopping the rest."""
+        for job in self._jobs:
+            if self._stop:
+                return
+            try:
+                ok = write_metadata(
+                    job.path,
+                    job.keywords,
+                    description=job.description,
+                    title=job.title,
+                    backup=self._backup,
+                    use_sidecar=self._use_sidecar,
+                    et=helper,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("gui_save_failed", file=job.path.name, error=str(exc))
+                ok = False
+            self._emitted += 1
+            self.file_done.emit(str(job.path), ok)
+
+
 class ThumbnailWorker(QObject):
     """
     Decodes grid thumbnails off the UI thread.
@@ -728,13 +798,7 @@ class MainWindow(QMainWindow):
         self._grid_items: dict[str, QListWidgetItem] = {}
         self._init_grid_view_state()
         self._current: PhotoItem | None = None
-        self._thread: QThread | None = None
-        self._worker: GenerateWorker | None = None
-        self._cancelling = False
-        self._thumb_thread: QThread | None = None
-        self._thumb_worker: ThumbnailWorker | None = None
-        self._scan_thread: QThread | None = None
-        self._scan_worker: MetadataScanWorker | None = None
+        self._init_worker_state()
         self._syncing = False
         self._grid_check_toggled = False
         self._closing = False
@@ -778,6 +842,29 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self._refresh_save_tooltips()
         self._show_empty()
+
+    def _init_worker_state(self) -> None:
+        """
+        Seed the handles for every background job the window runs.
+
+        Four independent jobs, each with its own thread so one never waits on another: generation,
+        saving, grid thumbnails, and the metadata scan.
+        """
+        self._thread: QThread | None = None
+        self._worker: GenerateWorker | None = None
+        self._cancelling = False
+        self._save_thread: QThread | None = None
+        self._save_worker: SaveWorker | None = None
+        # The batch being written, keyed by path: the done handler needs each job's fields to
+        # update the Tagged column without re-reading the file.
+        self._save_jobs: dict[str, SaveJob] = {}
+        self._saved_ok = 0
+        # When the run in flight started, for the elapsed/remaining readout. None while idle.
+        self._run_started: float | None = None
+        self._thumb_thread: QThread | None = None
+        self._thumb_worker: ThumbnailWorker | None = None
+        self._scan_thread: QThread | None = None
+        self._scan_worker: MetadataScanWorker | None = None
 
     def _init_grid_view_state(self) -> None:
         """
@@ -2018,6 +2105,15 @@ class MainWindow(QMainWindow):
         self._progress.setMaximumWidth(220)
         self._progress.setFormat("%v / %m")
         self._progress.setVisible(False)
+        # Elapsed time (and, once a photo has finished, the estimate of what is left) beside the
+        # bar. A long save used to show nothing at all, which looks like the app hung.
+        self._timing = QLabel()
+        self._timing.setObjectName("timing")
+        self._timing.setVisible(False)
+        # Repaints the readout between photos so the clock keeps moving during a slow one.
+        self._timing_timer = QTimer(self)
+        self._timing_timer.setInterval(_TIMING_TICK_MS)
+        self._timing_timer.timeout.connect(self._update_timing)
 
         self._retry_button = QPushButton(_("Retry Failed"))
         self._retry_button.setToolTip(
@@ -2031,8 +2127,8 @@ class MainWindow(QMainWindow):
         self._cancel_button = QPushButton(_("Cancel"))
         self._cancel_button.setToolTip(
             tooltip(
-                "Stop generating. The photo currently in flight finishes; the rest are left "
-                "untouched so you can resume them later.",
+                "Stop the run in progress, generating or saving. The photo currently in flight "
+                "finishes; the rest are left untouched so you can resume them later.",
             ),
         )
         self._cancel_button.setEnabled(False)
@@ -2071,6 +2167,7 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         row.addWidget(self._status, stretch=1)
+        row.addWidget(self._timing)
         row.addWidget(self._progress)
         row.addWidget(self._retry_button)
         row.addWidget(self._cancel_button)
@@ -2658,53 +2755,52 @@ class MainWindow(QMainWindow):
         item.keywords = parse_keyword_lines(self._keywords.toPlainText())
         item.hint = self._hint.text().strip()
 
+    def _save_options(self) -> SaveOptions:
+        """Snapshot the save toggles, so a background write never has to read a widget."""
+        return SaveOptions(
+            write_title=self._write_title.isChecked(),
+            write_description=self._write_description.isChecked(),
+            write_keywords=self._write_keywords.isChecked(),
+            overwrite=self._overwrite.isChecked(),
+            backup=self._backup.isChecked(),
+            use_sidecar=not self._embed.isChecked(),
+        )
+
     def _write_fields_chosen(self) -> bool:
         """Report whether at least one write toggle (Title/Description/Keywords) is on."""
-        return (
-            self._write_title.isChecked()
-            or self._write_description.isChecked()
-            or self._write_keywords.isChecked()
-        )
+        return self._save_options().any_field
 
     def _write_item(self, item: PhotoItem) -> bool:
         """
         Write the item's checked fields to disk; return success.
 
-        Unchecked fields stay as is.
+        Unchecked fields stay as is. This is the inline path for saving one photo, which is a single
+        ExifTool call; a whole batch goes through :class:`SaveWorker` instead.
         """
-        keywords = (
-            keywords_to_save(
-                item.existing_keywords,
-                item.keywords,
-                overwrite=self._overwrite.isChecked(),
-            )
-            if self._write_keywords.isChecked()
-            else KeywordSet()
-        )
-        title = (item.title or None) if self._write_title.isChecked() else None
-        description = (item.description or None) if self._write_description.isChecked() else None
+        options = self._save_options()
+        job = build_save_job(item, options)
         ok = write_metadata(
-            item.path,
-            keywords,
-            description=description,
-            title=title,
-            backup=self._backup.isChecked(),
-            use_sidecar=not self._embed.isChecked(),
+            job.path,
+            job.keywords,
+            description=job.description,
+            title=job.title,
+            backup=options.backup,
+            use_sidecar=options.use_sidecar,
         )
+        self._apply_write_result(item, job, ok=ok)
+        return ok
+
+    def _apply_write_result(self, item: PhotoItem, job: SaveJob, *, ok: bool) -> None:
+        """Fold one finished write into its item: the status word and the Tagged column."""
         item.status = SAVED if ok else FAILED
         if ok:
             # The saved fields are now on the file, so the Tagged column can update without a
             # rescan.
-            item.known_fields = (item.known_fields or set()) | fields_written(
-                title,
-                description,
-                keywords,
-            )
+            item.known_fields = (item.known_fields or set()) | job.fields
         self._refresh_status_cell(item)
-        return ok
 
     def _save_current(self) -> None:
-        if self._current is None:
+        if self._current is None or self._busy():
             return
         if not self._write_fields_chosen():
             self._status.setText(
@@ -2733,16 +2829,95 @@ class MainWindow(QMainWindow):
         if not targets:
             self._status.setText(_("No checked photos have a proposal to save."))
             return
-        saved = sum(int(self._write_item(item)) for item in targets)
+        self._run_save(targets)
+
+    def _run_save(self, items: list[PhotoItem]) -> None:
+        """
+        Write *items* on a background thread, reporting each file as it lands.
+
+        Writing hundreds of photos inline blocked the event loop for minutes: the window stopped
+        repainting and the OS showed its busy cursor, which is indistinguishable from a hang. The
+        work now runs off the UI thread behind the same progress bar and clock a generation run
+        uses.
+        """
+        if self._busy():
+            return
+        options = self._save_options()
+        jobs = [build_save_job(item, options) for item in items]
+        self._save_jobs = {str(job.path): job for job in jobs}
+        self._saved_ok = 0
+        for item in items:
+            item.status = WORKING
+            self._refresh_status_cell(item)
+        self._cancelling = False
+        self._set_running(running=True, total=len(jobs))
+        self._status.setText(
+            ngettext("Saving {n} photo...", "Saving {n} photos...", len(jobs)).format(n=len(jobs)),
+        )
+
+        self._save_thread = QThread(self)
+        self._save_worker = SaveWorker(
+            jobs,
+            backup=options.backup,
+            use_sidecar=options.use_sidecar,
+        )
+        self._save_worker.moveToThread(self._save_thread)
+        self._save_thread.started.connect(self._save_worker.run)
+        self._save_worker.file_done.connect(self._on_save_done)
+        self._save_worker.finished.connect(self._on_save_finished)
+        self._save_thread.start()
+
+    def _on_save_done(self, path: str, ok: bool) -> None:  # noqa: FBT001 - Qt signal argument
+        """Fold one finished write into its item and tick the progress bar."""
+        item = self._items.get(path)
+        job = self._save_jobs.get(path)
+        if item is None or job is None:
+            return
+        self._apply_write_result(item, job, ok=ok)
+        self._saved_ok += int(ok)
+        self._advance_progress()
+        self._update_status()
+
+    def _on_save_finished(self) -> None:
+        """Report the batch tally and put the window back into its idle state."""
+        if self._closing:
+            # closeEvent already tore the thread down; this queued signal must not touch widgets
+            # on a window that is going away.
+            return
+        total = len(self._save_jobs)
+        # A cancelled save leaves the un-written photos marked WORKING; free them so they look
+        # ready-again rather than stuck.
+        self._reset_working()
+        self._save_jobs = {}
+        self._resort()
+        self._teardown_save_thread()
+        # Last, so the tally is not overwritten by the per-file status refresh above.
         self._status.setText(
             ngettext(
+                "Cancelled after saving {saved} photo.",
+                "Cancelled after saving {saved} photos.",
+                self._saved_ok,
+            ).format(saved=self._saved_ok)
+            if self._cancelling
+            else ngettext(
                 "Saved {saved} of {n} checked photo.",
                 "Saved {saved} of {n} checked photos.",
-                len(targets),
-            ).format(saved=saved, n=len(targets)),
+                total,
+            ).format(saved=self._saved_ok, n=total),
         )
-        self._resort()
-        self._update_status()
+        self._cancelling = False
+
+    def _teardown_save_thread(self) -> None:
+        """Join the save thread and release both it and its worker."""
+        if self._save_thread is not None:
+            self._save_thread.quit()
+            self._save_thread.wait()
+            self._save_thread.deleteLater()
+            self._save_thread = None
+        if self._save_worker is not None:
+            self._save_worker.deleteLater()
+        self._save_worker = None
+        self._set_running(running=False)
 
     # --- generation ------------------------------------------------------------------------
 
@@ -2767,7 +2942,7 @@ class MainWindow(QMainWindow):
         self._run_generation(failed)
 
     def _run_generation(self, items: list[PhotoItem], *, use_cache: bool = True) -> None:
-        if self._thread is not None or not items:
+        if self._busy() or not items:
             return
         # Fold the open photo's visible edits (most importantly a just-typed hint) into its
         # state before the run reads it.
@@ -2830,11 +3005,17 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _cancel_generation(self) -> None:
-        """Ask the running worker to stop after the photo currently in flight."""
-        if self._worker is None:
+        """
+        Ask whichever run is in flight to stop after the photo it is on.
+
+        One Cancel button covers both runs (they never overlap): a model call and a metadata write
+        are both uninterruptible once started, so cancelling takes effect at the next photo.
+        """
+        worker = self._worker or self._save_worker
+        if worker is None:
             return
         self._cancelling = True
-        self._worker.stop()
+        worker.stop()
         self._cancel_button.setEnabled(False)
         self._status.setText(_("Cancelling after the current photo finishes..."))
 
@@ -2843,8 +3024,8 @@ class MainWindow(QMainWindow):
             # closeEvent already tore the thread down; this queued signal arriving afterwards
             # must not touch widgets on a window that is going away, or tear down twice.
             return
-        # A cancelled run leaves the un-started photos marked WORKING; reset them to PENDING so
-        # they look queued-again rather than stuck, and report what actually got done.
+        # A cancelled run leaves the un-started photos marked WORKING; free them so they look
+        # queued-again rather than stuck, and report what actually got done.
         reset = self._reset_working()
         if self._cancelling:
             self._status.setText(
@@ -2861,34 +3042,89 @@ class MainWindow(QMainWindow):
         self._teardown_thread()
 
     def _reset_working(self) -> int:
-        """Revert any still-WORKING photos to PENDING; return how many were reset."""
+        """
+        Free any photo still marked WORKING; return how many were reset.
+
+        A photo that already has a proposal goes back to READY (the proposal is still there to
+        save), anything else back to PENDING. Used after a cancelled generation or save, so an
+        interrupted photo reads as queued-again rather than stuck.
+        """
         reset = 0
         for item in self._items.values():
             if item.status == WORKING:
-                item.status = PENDING
+                item.status = READY if item.has_proposal else PENDING
                 self._refresh_status_cell(item)
                 reset += 1
         return reset
+
+    def _busy(self) -> bool:
+        """
+        Whether a generation or save run is in flight.
+
+        The two never overlap.
+        """
+        return self._thread is not None or self._save_thread is not None
 
     def _has_failures(self) -> bool:
         """Report whether any photo is currently in the failed state."""
         return any(item.status == FAILED for item in self._items.values())
 
     def _set_running(self, *, running: bool, total: int = 0) -> None:
+        """Switch the window between idle and busy: buttons, progress bar, and the clock."""
         self._generate_button.setEnabled(not running)
         self._generate_one_button.setEnabled(not running)
+        self._save_button.setEnabled(not running)
+        self._save_selected_button.setEnabled(not running)
         self._retry_button.setEnabled(not running and self._has_failures())
         self._test_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)
-        self._progress.setVisible(running)
         if running:
-            self._progress.setRange(0, total)
-            self._progress.setValue(0)
+            self._start_progress(total)
+        else:
+            self._stop_progress()
+
+    def _start_progress(self, total: int) -> None:
+        """Show the bar and start the clock for a run over *total* photos."""
+        self._progress.setRange(0, total)
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
+        self._run_started = time.monotonic()
+        self._timing.setVisible(True)
+        self._update_timing()
+        self._timing_timer.start()
+
+    def _stop_progress(self) -> None:
+        """Hide the bar and the clock; the run is over."""
+        self._timing_timer.stop()
+        self._run_started = None
+        self._progress.setVisible(False)
+        self._timing.setVisible(False)
+        self._timing.clear()
+
+    def _update_timing(self) -> None:
+        """
+        Repaint the elapsed/remaining readout from the progress bar's own counters.
+
+        Driven by a timer as well as by each finished photo, so the elapsed time keeps moving while
+        a single slow photo is in flight. That movement is the point: it is what tells the user the
+        program is working rather than wedged.
+        """
+        if self._run_started is None:
+            return
+        self._timing.setText(
+            progress_timing_text(
+                self._progress.value(),
+                self._progress.maximum(),
+                time.monotonic() - self._run_started,
+            ),
+        )
 
     def _advance_progress(self) -> None:
         """Tick the run progress bar for one finished (or failed) photo."""
-        if self._thread is not None:
-            self._progress.setValue(self._progress.value() + 1)
+        if self._run_started is None:
+            return
+        self._progress.setValue(self._progress.value() + 1)
+        self._update_timing()
 
     def _teardown_thread(self) -> None:
         # deleteLater releases the C++ side of the thread and the (parentless, moved) worker;
@@ -3015,23 +3251,26 @@ class MainWindow(QMainWindow):
         if self._items:
             self._status.setText(status_summary(self._items.values()))
         # Retry only makes sense when something actually failed (and no run is in flight).
-        if self._thread is None:
+        if self._thread is None and self._save_thread is None:
             self._retry_button.setEnabled(self._has_failures())
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override.
         """
-        Stop any in-flight generation before closing.
+        Stop any in-flight generation or save before closing.
 
-        Asking the worker to stop first means closing mid-run only waits for the photo currently in
-        flight, not the whole batch. Waiting on the thread keeps a running QThread from being
+        Asking the workers to stop first means closing mid-run only waits for the photo currently in
+        flight, not the whole batch. Waiting on the threads keeps a running QThread from being
         destroyed under it.
         """
         self._closing = True
         if self._worker is not None:
             self._worker.stop()
+        if self._save_worker is not None:
+            self._save_worker.stop()
         self._stop_thumbs()
         self._stop_scan()
         self._teardown_thread()
+        self._teardown_save_thread()
         self._emit_telemetry()
         super().closeEvent(event)
 

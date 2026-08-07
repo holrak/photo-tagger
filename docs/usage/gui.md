@@ -126,7 +126,9 @@ model.
 **Generate Selected** (in the bottom bar) then runs the model on the checked photos on a background
 thread, building the same contextual prompt as the CLI (existing keywords, location, GPS, camera).
 Results stream in, the tree status updates per photo, and a progress bar in the bottom bar counts
-the batch down.
+the batch down. Next to it, a clock shows the time **elapsed** and, once the first photo is done,
+the estimated time **left** (`2:30 elapsed · 8:10 left`), so a long batch tells you how long it
+still needs.
 
 Results are **cached by default** (see [Configuration](#configuration)): re-running a batch after a
 crash, or generating a folder you partly processed before, reuses the earlier answers for unchanged
@@ -157,8 +159,9 @@ file. The CLI equivalent for a whole run is [`--hint`](cli-reference.md#inferenc
 
 To stop a run early, press **Cancel** (next to *Generate Selected*). The photo already in flight
 finishes (a model request cannot be interrupted mid-call), then the run stops and the un-started
-photos return to `pending` so you can resume them later with another **Generate Selected**. Anything
-already generated keeps its proposal.
+photos go back to `pending` (or to `ready`, if they already had a proposal) so you can resume them
+later with another **Generate Selected**. Anything already generated keeps its proposal. The same
+button also cancels a save in progress.
 
 ### 4. Review, edit, and save
 
@@ -196,6 +199,11 @@ The arrow on either **Save** button opens the save options, which choose what ev
     before writing, the GUI's equivalent of the CLI's `--backup-xmp` / `--no-backup-xmp`. Uncheck it
     to write in place: saving a few thousand photos otherwise leaves a full second copy of each one
     next to the original. Only do that if you have your own backup elsewhere.
+
+**Save Selected** writes on a background thread, like a generation run: the same progress bar and
+elapsed/remaining clock track the batch, the window keeps responding, and **Cancel** stops it after
+the file currently being written (the photos it never reached stay `ready` to save again). Writing a
+few thousand photos takes minutes, so the counter is how you tell it is working rather than stuck.
 
 You can edit and save a photo even without generating a proposal first: the editable fields then
 start from the existing values.

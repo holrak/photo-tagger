@@ -253,6 +253,68 @@ def keywords_to_save(
     return merge_keywords(base, edited_keywords)
 
 
+@dataclass(frozen=True, slots=True)
+class SaveOptions:
+    """
+    The state of the save toggles as one value object.
+
+    Bundling them keeps the write rules (which fields, merge or overwrite, sidecar or embedded) out
+    of the Qt shell, so :func:`build_save_job` is testable without a window.
+    """
+
+    write_title: bool = True
+    write_description: bool = True
+    write_keywords: bool = True
+    overwrite: bool = False
+    backup: bool = True
+    use_sidecar: bool = True
+
+    @property
+    def any_field(self) -> bool:
+        """Whether at least one field is picked; a save with none of them would write nothing."""
+        return self.write_title or self.write_description or self.write_keywords
+
+
+@dataclass(frozen=True, slots=True)
+class SaveJob:
+    """
+    One photo's resolved write: exactly the values ExifTool should put on the file.
+
+    Resolved on the UI thread (it reads the toggles and the edited fields) so the background writer
+    only needs these plain values, never a widget.
+    """
+
+    path: Path
+    keywords: KeywordSet
+    title: str | None
+    description: str | None
+
+    @property
+    def fields(self) -> set[str]:
+        """Which indicator fields this job puts on the file, for the Tagged column."""
+        return fields_written(self.title, self.description, self.keywords)
+
+
+def build_save_job(item: PhotoItem, options: SaveOptions) -> SaveJob:
+    """
+    Resolve what saving *item* writes: only the checked fields, the unchecked ones left untouched.
+
+    A field that is switched off becomes None (or an empty keyword set), which write_metadata leaves
+    out of its payload.
+    """
+    keywords = (
+        keywords_to_save(item.existing_keywords, item.keywords, overwrite=options.overwrite)
+        if options.write_keywords
+        else KeywordSet()
+    )
+    return SaveJob(
+        path=item.path,
+        keywords=keywords,
+        title=(item.title or None) if options.write_title else None,
+        description=(item.description or None) if options.write_description else None,
+    )
+
+
 def apply_proposal(item: PhotoItem, proposal: Proposal) -> None:
     """Fill *item*'s existing metadata and seed its editable copy from *proposal*."""
     item.existing_title = proposal.existing_title
@@ -585,6 +647,48 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
         generated=generated,
         saved=saved,
         failed=failed,
+    )
+
+
+def format_duration(seconds: float) -> str:
+    """
+    Render a duration as ``m:ss``, growing to ``h:mm:ss`` once it passes an hour.
+
+    Anything below zero clamps to ``0:00``: a long batch is timed against a monotonic clock, but a
+    caller doing its own arithmetic should never be able to print a negative countdown.
+    """
+    total = max(0, int(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def estimate_remaining(done: int, total: int, elapsed: float) -> float | None:
+    """
+    Estimate the seconds left, extrapolating from how long the finished items took.
+
+    Returns None when there is nothing honest to say: before the first item finishes there is no
+    rate yet, and once the batch is complete there is nothing left to wait for.
+    """
+    if done <= 0 or done >= total:
+        return None
+    return elapsed / done * (total - done)
+
+
+def progress_timing_text(done: int, total: int, elapsed: float) -> str:
+    """
+    Build the readout shown next to the progress bar: time spent, plus the estimate of time left.
+
+    The estimate joins in only once the first item has finished, so a run starts out showing bare
+    elapsed time. That still tells the user the program is working, which is the point.
+    """
+    spent = format_duration(elapsed)
+    remaining = estimate_remaining(done, total, elapsed)
+    if remaining is None:
+        return _("{elapsed} elapsed").format(elapsed=spent)
+    return _("{elapsed} elapsed · {remaining} left").format(
+        elapsed=spent,
+        remaining=format_duration(remaining),
     )
 
 
