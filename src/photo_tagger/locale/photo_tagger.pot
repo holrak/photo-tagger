@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photo-tagger VERSION\n"
 "Report-Msgid-Bugs-To: python@juliobs.com\n"
-"POT-Creation-Date: 2026-08-07 22:58+0200\n"
+"POT-Creation-Date: 2026-08-07 23:05+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: Julio Batista Silva <python@juliobs.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -94,7 +94,7 @@ msgid "Has keywords"
 msgstr ""
 
 #: src/photo_tagger/gui.py:300 src/photo_tagger/gui.py:2010
-#: src/photo_tagger/gui_state.py:774
+#: src/photo_tagger/gui_state.py:773
 msgid "keywords"
 msgstr ""
 
@@ -695,11 +695,11 @@ msgid ""
 "disk on a large batch (make sure you have a backup elsewhere)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2008 src/photo_tagger/gui_state.py:772
+#: src/photo_tagger/gui.py:2008 src/photo_tagger/gui_state.py:771
 msgid "title"
 msgstr ""
 
-#: src/photo_tagger/gui.py:2009 src/photo_tagger/gui_state.py:773
+#: src/photo_tagger/gui.py:2009 src/photo_tagger/gui_state.py:772
 msgid "description"
 msgstr ""
 
@@ -1186,11 +1186,26 @@ msgstr ""
 msgid "All files (*)"
 msgstr ""
 
-#: src/photo_tagger/gui_state.py:813
+#: src/photo_tagger/gui_state.py:786
+msgctxt "Tagged column letter"
+msgid "T"
+msgstr ""
+
+#: src/photo_tagger/gui_state.py:788
+msgctxt "Tagged column letter"
+msgid "D"
+msgstr ""
+
+#: src/photo_tagger/gui_state.py:790
+msgctxt "Tagged column letter"
+msgid "K"
+msgstr ""
+
+#: src/photo_tagger/gui_state.py:830
 #, python-brace-format
 msgid "Already on the file: {fields}"
 msgstr ""
 
-#: src/photo_tagger/gui_state.py:813
+#: src/photo_tagger/gui_state.py:830
 msgid "nothing"
 msgstr ""

@@ -764,15 +764,33 @@ def file_dialog_name_filters(extensions: str) -> list[str]:
 
 
 # The Tagged indicator's letter and display label per field, in display order. The letters go
-# through the catalog under this msgctxt, so a language whose field names start with other letters
-# can remap them; the tooltips below spell out whatever letters are active, so they stay clear
-# either way.
-TAGGED_LETTER_CONTEXT = "Tagged column letter"
+# through the catalog under a "Tagged column letter" msgctxt (see _tagged_letter), so a language
+# whose field names start with other letters can remap them; the tooltips below spell out whatever
+# letters are active, so they stay clear either way.
 _FIELD_LETTERS = (
     (FIELD_TITLE, "T", gettext_noop("title")),
     (FIELD_DESCRIPTION, "D", gettext_noop("description")),
     (FIELD_KEYWORDS, "K", gettext_noop("keywords")),
 )
+
+
+def _tagged_letter(letter: str) -> str:
+    """
+    Translate one Tagged column letter under the "Tagged column letter" msgctxt.
+
+    pybabel only extracts pgettext calls whose arguments are string literals, so each letter needs
+    its own literal call here instead of looping pgettext(context, letter) over _FIELD_LETTERS.
+    """
+    match letter:
+        case "T":
+            return pgettext("Tagged column letter", "T")
+        case "D":
+            return pgettext("Tagged column letter", "D")
+        case "K":
+            return pgettext("Tagged column letter", "K")
+        case _:  # pragma: no cover - _FIELD_LETTERS only ever supplies T, D, K
+            message = f"no Tagged column letter translation for {letter!r}"
+            raise ValueError(message)
 
 
 def tagged_summary(fields: set[str]) -> str:
@@ -783,7 +801,7 @@ def tagged_summary(fields: set[str]) -> str:
     tagged_legend (the header tooltip) and tagged_tooltip (the cell tooltip) spell the letters out.
     """
     letters = "".join(
-        pgettext(TAGGED_LETTER_CONTEXT, letter)
+        _tagged_letter(letter)
         for field_name, letter, _label in _FIELD_LETTERS
         if field_name in fields
     )
@@ -793,8 +811,7 @@ def tagged_summary(fields: set[str]) -> str:
 def tagged_legend() -> str:
     """Spell out every Tagged letter ("T = title, D = description, K = keywords"), localized."""
     return ", ".join(
-        f"{pgettext(TAGGED_LETTER_CONTEXT, letter)} = {_(label)}"
-        for _field_name, letter, label in _FIELD_LETTERS
+        f"{_tagged_letter(letter)} = {_(label)}" for _field_name, letter, label in _FIELD_LETTERS
     )
 
 
@@ -806,7 +823,7 @@ def tagged_tooltip(fields: set[str]) -> str:
     from the display labels rather than the raw field constants so the names are translated.
     """
     present = ", ".join(
-        f"{pgettext(TAGGED_LETTER_CONTEXT, letter)} = {_(label)}"
+        f"{_tagged_letter(letter)} = {_(label)}"
         for field_name, letter, label in _FIELD_LETTERS
         if field_name in fields
     )
