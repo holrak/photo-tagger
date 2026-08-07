@@ -137,6 +137,7 @@ ignore = [
     "ANN001",  # Cell params are marimo-injected dependencies, not annotated call arguments
     "ANN202",  # Every cell is an unannotated `def _(...)`
     "PLR0913", # A cell takes one param per dependency; marimo controls the signature
+    "PLR0917", # Same: positional dependency params, not a call-site design choice
     "PLC0415", # marimo requires imports inside a cell so it can track them reactively
     "N803",    # COLORS flows between cells as a param; the name must match its definition
     "N806",    # COLORS is a palette constant, but a marimo cell is a function
