@@ -33,7 +33,7 @@ dependencies = [
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "pillow>=12.3.0",
-    "pydantic-ai>=2.25.0",
+    "pydantic-ai>=2.27.0",
     "pydantic>=2.13.4",
     "pyexiftool>=0.5.6",
     "rawpy>=0.27.0",
@@ -51,7 +51,7 @@ dev = [
     "babel>=2.18.0",
     "bandit>=1.9.4",
     "pycroscope>=0.4.0",
-    "ruff>=0.16.1",
+    "ruff>=0.16.2",
     "zuban>=0.9.1",
 ]
 docs = [
@@ -87,9 +87,18 @@ photo-tagger-gui = "photo_tagger.gui:launch"
 
 [tool.uv]
 exclude-newer = "1 day"
+# Reviewed and trusted despite being under 1 day old; drop each entry once the window ages past it.
+[tool.uv.exclude-newer-package]
+pydantic-ai = "2026-08-08T05:00:00Z"
+pydantic-ai-slim = "2026-08-08T05:00:00Z"
+pydantic-evals = "2026-08-08T05:00:00Z"
+pydantic-graph = "2026-08-08T05:00:00Z"
+ruff = "2026-08-07T14:00:00Z"
+starlette = "2026-08-08T08:00:00Z"
+uv-build = "2026-08-07T17:00:00Z"
 
 [build-system]
-requires = ["uv_build>=0.12.1,<1.0.0"]
+requires = ["uv_build>=0.12.3,<1.0.0"]
 build-backend = "uv_build"
 
 [tool.ruff]

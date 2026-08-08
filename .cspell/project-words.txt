@@ -42,6 +42,7 @@ docstrings
 downscales
 dwLength
 EDITMSG
+evals
 excepthook
 exif
 Exif
@@ -178,6 +179,7 @@ sonarqube
 SonarQube
 sortdir
 sppci
+starlette
 stdouts
 stubjpeg
 subcontrol
