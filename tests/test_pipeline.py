@@ -3,12 +3,14 @@
 import contextlib
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
 import pytest
 from pydantic_ai import BinaryContent
 
+from photo_tagger.ai import _attach_partial_usage
 from photo_tagger.errors import BatchError
 from photo_tagger.metadata import ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
@@ -186,6 +188,41 @@ def test_process_photo_folds_token_usage_into_accumulator(tmp_path: Path) -> Non
     assert usage.output_tokens == expected_output
     assert usage.total_tokens == expected_total
     assert usage.inference_calls == expected_calls
+
+
+def test_run_model_folds_partial_usage_when_the_call_fails(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """
+    Tokens burned by attempts that ultimately failed still land in the batch's usage totals.
+
+    Regression test: _run_model only called ctx.usage.add() on success, so a run that raised
+    after billing several internally-retried attempts silently lost that cost from the summary.
+    """
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    usage = _UsageAccumulator()
+
+    def boom(**_kwargs: Any) -> InferenceResult:  # noqa: ANN401
+        exc = ValueError("model returned invalid structured output")
+        _attach_partial_usage(
+            exc,
+            SimpleNamespace(input_tokens=50, output_tokens=10, total_tokens=60),  # type: ignore[arg-type]
+        )
+        raise exc
+
+    patched_pipeline["analyze"].side_effect = boom
+    ok = execute_process(image, _ctx(usage=usage), index="1/1")
+
+    expected_input = 50
+    expected_output = 10
+    expected_total = 60
+    assert ok is False
+    assert usage.input_tokens == expected_input
+    assert usage.output_tokens == expected_output
+    assert usage.total_tokens == expected_total
+    assert usage.inference_calls == 0  # not a completed, usable call
 
 
 def test_process_photo_dry_run_skips_write_metadata(

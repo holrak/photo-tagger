@@ -180,9 +180,21 @@ class _StubAgent:
         self._output = output
         self.calls: list[dict[str, Any]] = []
 
-    def run_sync(self, prompt_parts: list[Any], *, model_settings: Any, output_type: Any) -> Any:  # noqa: ANN401
+    def run_sync(
+        self,
+        prompt_parts: list[Any],
+        *,
+        model_settings: Any,  # noqa: ANN401
+        output_type: Any,  # noqa: ANN401
+        usage: Any = None,  # noqa: ANN401
+    ) -> Any:  # noqa: ANN401
         self.calls.append(
-            {"parts": prompt_parts, "settings": model_settings, "output_type": output_type},
+            {
+                "parts": prompt_parts,
+                "settings": model_settings,
+                "output_type": output_type,
+                "usage": usage,
+            },
         )
         input_tokens, output_tokens, total_tokens = _STUB_USAGE
         return SimpleNamespace(
@@ -282,6 +294,38 @@ def test_analyze_image_survives_a_result_without_usage() -> None:
         user_prompt="p",
     )
     assert (result.input_tokens, result.output_tokens, result.total_tokens) == (0, 0, 0)
+
+
+def test_analyze_image_attaches_partial_usage_when_the_call_fails() -> None:
+    """
+    Tokens burned by attempts pydantic-ai retried internally before giving up are not lost.
+
+    Regression test: analyze_image_with_ai only ever read usage off a successful result, so a
+    run that raised after several billed-but-invalid attempts discarded their token cost entirely.
+    """
+
+    class _FailingAgent:
+        def run_sync(self, *_a: Any, usage: Any, **_kw: Any) -> Any:  # noqa: ANN401
+            # Simulates pydantic-ai folding a rejected attempt's usage into the passed-in
+            # RunUsage before ultimately giving up and raising.
+            usage.input_tokens = 50
+            usage.output_tokens = 10
+            msg = "model returned invalid structured output"
+            raise ValueError(msg)
+
+    with pytest.raises(ValueError, match="invalid structured output") as exc_info:
+        ai_module.analyze_image_with_ai(
+            image_bytes=_stub_image(),
+            agent=_FailingAgent(),  # type: ignore[arg-type]
+            user_prompt="Describe.",
+        )
+
+    assert ai_module.partial_usage_from(exc_info.value) == (50, 10, 60)
+
+
+def test_partial_usage_from_returns_none_when_nothing_was_attached() -> None:
+    """A plain exception unrelated to analyze_image_with_ai carries no partial usage."""
+    assert ai_module.partial_usage_from(ValueError("boom")) is None
 
 
 # ---------------------------------------------------------------------------

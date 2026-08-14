@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from loguru import logger
 
-from photo_tagger.ai import analyze_image_with_ai
+from photo_tagger.ai import analyze_image_with_ai, partial_usage_from
 from photo_tagger.cache import InferenceCache, content_cache_key, safe_cache_get, safe_cache_put
 from photo_tagger.config import (
     DEFAULT_DIMENSIONS,
@@ -152,6 +152,21 @@ class _UsageAccumulator:
         with self._lock:
             self.cache_hits += 1
 
+    def add_failed_usage(self, usage: tuple[int, int, int]) -> None:
+        """
+        Fold tokens burned by a call that ultimately failed into the running totals.
+
+        pydantic-ai retries invalid structured output internally before giving up; each attempt
+        is a real, billed request even though the run as a whole raises. inference_calls and
+        inference_seconds are deliberately left untouched: they count completed, usable calls,
+        and folding a failure into them would blur that meaning.
+        """
+        input_tokens, output_tokens, total_tokens = usage
+        with self._lock:
+            self.input_tokens += input_tokens
+            self.output_tokens += output_tokens
+            self.total_tokens += total_tokens
+
     def add_failure(self, kind: str) -> None:
         """Count one photo that failed for good, bucketed by coarse *kind*."""
         with self._lock:
@@ -218,15 +233,24 @@ def _run_model(image_path: Path, ctx: _BatchContext, *, contextual_prompt: str) 
         jpg_quality=ctx.options.jpeg_quality,
         max_size=ctx.options.jpeg_dimensions,
     )
-    inference = analyze_image_with_ai(
-        image_bytes=jpeg_bytes,
-        agent=ctx.agent,
-        user_prompt=contextual_prompt,
-        temperature=ctx.options.temperature,
-        max_tokens=ctx.options.max_tokens,
-        timeout_seconds=ctx.options.timeout_seconds,
-        frequency_penalty=ctx.options.frequency_penalty,
-    )
+    try:
+        inference = analyze_image_with_ai(
+            image_bytes=jpeg_bytes,
+            agent=ctx.agent,
+            user_prompt=contextual_prompt,
+            temperature=ctx.options.temperature,
+            max_tokens=ctx.options.max_tokens,
+            timeout_seconds=ctx.options.timeout_seconds,
+            frequency_penalty=ctx.options.frequency_penalty,
+        )
+    except Exception as exc:
+        # Tokens burned by attempts pydantic-ai retried internally before giving up would
+        # otherwise vanish from the batch summary: there is no successful InferenceResult to
+        # fold into ctx.usage below.
+        partial = partial_usage_from(exc)
+        if partial is not None:
+            ctx.usage.add_failed_usage(partial)
+        raise
     ctx.usage.add(inference)
     return inference
 

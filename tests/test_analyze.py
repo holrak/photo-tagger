@@ -31,6 +31,7 @@ class StubAgent:
         items: list[object],
         model_settings: ModelSettings,
         output_type: type[GeneratedMetadata],
+        usage: object = None,
     ) -> SimpleNamespace:
         """Mimic Agent.run_sync by validating the canned payload through the output schema."""
         self.calls.append(
@@ -38,15 +39,16 @@ class StubAgent:
                 "items": items,
                 "temperature": model_settings.get("temperature"),
                 "max_tokens": model_settings.get("max_tokens"),
+                "usage": usage,
             },
         )
         metadata = output_type.model_validate_json(self._payload)
-        usage = SimpleNamespace(
+        usage_result = SimpleNamespace(
             input_tokens=self._input_tokens,
             output_tokens=self._output_tokens,
             total_tokens=self._input_tokens + self._output_tokens,
         )
-        return SimpleNamespace(output=metadata, usage=usage)
+        return SimpleNamespace(output=metadata, usage=usage_result)
 
 
 def test_analyze_image_with_ai_parses_payload() -> None:
@@ -116,9 +118,10 @@ class _NoUsageAgent(StubAgent):
         items: list[object],
         model_settings: ModelSettings,
         output_type: type[GeneratedMetadata],
+        usage: object = None,
     ) -> SimpleNamespace:
         """Reuse StubAgent's parsing/recording, then drop the usage attribute."""
-        result = super().run_sync(items, model_settings, output_type)
+        result = super().run_sync(items, model_settings, output_type, usage)
         del result.usage
         return result
 

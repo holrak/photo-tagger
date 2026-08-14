@@ -1,11 +1,13 @@
 """Vision-language agent setup and inference helpers."""
 
+import contextlib
 import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic_ai import Agent, AgentRunResult, ModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.usage import RunUsage
 
 from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
@@ -88,6 +90,32 @@ def _extract_usage(usage: object | None) -> tuple[int, int, int]:
     )
 
 
+# Attribute name used to smuggle partial usage onto an exception (see _attach_partial_usage).
+# Namespaced to avoid ever colliding with an attribute the exception's own class defines.
+_PARTIAL_USAGE_ATTR = "_photo_tagger_partial_usage"
+
+
+def _attach_partial_usage(exc: BaseException, usage: RunUsage) -> None:
+    """
+    Best-effort: stash *usage*'s token counts on *exc* before it propagates.
+
+    pydantic-ai retries invalid structured output internally (up to the agent's configured retry
+    count) before giving up; each attempt is a real, billed request even though the run as a whole
+    raises. ``result.usage`` is unavailable on a raised run (there is no ``result``), so this is the
+    only way the caller can still count those tokens instead of silently losing them from the batch
+    summary.
+    """
+    # A handful of exception types use __slots__ and reject new attributes. Losing the partial
+    # count in that rare case is strictly better than crashing the failure path over it.
+    with contextlib.suppress(AttributeError):
+        exc._photo_tagger_partial_usage = _extract_usage(usage)  # type: ignore[attr-defined]  # noqa: SLF001
+
+
+def partial_usage_from(exc: BaseException) -> tuple[int, int, int] | None:
+    """Return the (input, output, total) tokens a failed analyze_image_with_ai call still burned."""
+    return getattr(exc, _PARTIAL_USAGE_ATTR, None)
+
+
 def analyze_image_with_ai(  # noqa: PLR0913 - each kwarg is a distinct sampling knob; bundling adds indirection
     image_bytes: BinaryContent,
     agent: Agent[None, GeneratedMetadata],
@@ -109,16 +137,24 @@ def analyze_image_with_ai(  # noqa: PLR0913 - each kwarg is a distinct sampling 
     started = time.perf_counter()
     prompt = user_prompt or DEFAULT_USER_PROMPT
 
-    result: AgentRunResult[GeneratedMetadata] = agent.run_sync(
-        [prompt, image_bytes],
-        model_settings=ModelSettings(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout_seconds,
-            frequency_penalty=frequency_penalty,
-        ),
-        output_type=GeneratedMetadata,
-    )
+    # Passed in (rather than left to default) so tokens from every internal attempt land here,
+    # in place, even if the run as a whole raises: see _attach_partial_usage.
+    run_usage = RunUsage()
+    try:
+        result: AgentRunResult[GeneratedMetadata] = agent.run_sync(
+            [prompt, image_bytes],
+            model_settings=ModelSettings(
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout_seconds,
+                frequency_penalty=frequency_penalty,
+            ),
+            output_type=GeneratedMetadata,
+            usage=run_usage,
+        )
+    except Exception as exc:
+        _attach_partial_usage(exc, run_usage)
+        raise
     elapsed = round(time.perf_counter() - started, 3)
     usage_obj = None
     try:
