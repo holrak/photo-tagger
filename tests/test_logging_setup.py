@@ -1,14 +1,12 @@
 """Tests for setup_logging."""
 
-from typing import TYPE_CHECKING
+import sys
+from pathlib import Path
 
+import pytest
 from loguru import logger
 
 from photo_tagger.logging_setup import setup_logging
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_setup_logging_creates_log_folder(tmp_path: Path) -> None:
@@ -20,6 +18,44 @@ def test_setup_logging_creates_log_folder(tmp_path: Path) -> None:
     assert folder.exists()
     files = list(folder.glob("*-photo_tagger.log"))
     assert files, "expected a log file to be created"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="0o600 is a POSIX permission concept; Windows ACLs do not map onto it",
+)
+def test_setup_logging_creates_the_log_file_owner_only(tmp_path: Path) -> None:
+    """
+    The log file is created 0600 so DEBUG-level records are not world-readable.
+
+    DEBUG logs carry the `extra` context (file paths, provider URLs); on a shared multi-user
+    machine, default OS permissions would let any other local user read them.
+    """
+    folder = tmp_path / "logs"
+    setup_logging(file_log_level="DEBUG", console_log_level="OFF", log_folder=folder)
+    logger.info("hello")
+    logger.complete()
+    log_file = next(iter(folder.glob("*-photo_tagger.log")))
+    expected_mode = 0o600
+    assert log_file.stat().st_mode & 0o777 == expected_mode
+
+
+def test_setup_logging_survives_chmod_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hardening the log file's permissions is best-effort: a failure must not abort setup."""
+
+    def _exploding_chmod(self: Path, *_a: object, **_k: object) -> None:
+        msg = "unsupported filesystem"
+        raise OSError(msg)
+
+    monkeypatch.setattr(Path, "chmod", _exploding_chmod)
+    folder = tmp_path / "logs"
+    setup_logging(file_log_level="DEBUG", console_log_level="OFF", log_folder=folder)  # no raise
+    logger.info("hello")
+    logger.complete()
+    assert list(folder.glob("*-photo_tagger.log"))
 
 
 def test_setup_logging_writes_json_records(tmp_path: Path) -> None:

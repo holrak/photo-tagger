@@ -67,6 +67,16 @@ def setup_logging(
             retention="10 days",
             compression="zip",
         )
+        # DEBUG-level records carry the `extra` context (file paths, provider URLs); restrict to
+        # the owner so they are not world-readable on a shared multi-user machine. add() opens
+        # (and thus creates) the file immediately, so it exists to chmod by this point. A no-op
+        # on Windows, which has no POSIX permission bits; a rotated file at 500MB does not inherit
+        # this, but this project's logs are nowhere near that size in normal use. Purely
+        # hardening, so a failure (e.g. an unsupported filesystem) must not abort logging setup.
+        try:
+            log_file.chmod(0o600)
+        except OSError as exc:
+            logger.warning("log_file_chmod_failed", file=str(log_file), error=str(exc))
     if console_log_level != "OFF":
         logger.add(
             sys.stderr,
