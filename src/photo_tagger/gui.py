@@ -3074,6 +3074,10 @@ class MainWindow(QMainWindow):
         """Report whether any photo is currently in the failed state."""
         return any(item.status == FAILED for item in self._items.values())
 
+    def _has_unsaved_proposals(self) -> bool:
+        """Report whether any photo has a generated proposal not yet written to disk."""
+        return any(item.has_proposal and item.status != SAVED for item in self._items.values())
+
     def _set_running(self, *, running: bool, total: int = 0) -> None:
         """Switch the window between idle and busy: buttons, progress bar, and the clock."""
         self._generate_button.setEnabled(not running)
@@ -3261,12 +3265,23 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override.
         """
-        Stop any in-flight generation or save before closing.
+        Confirm discarding unsaved proposals, then stop any in-flight generation or save.
 
         Asking the workers to stop first means closing mid-run only waits for the photo currently in
         flight, not the whole batch. Waiting on the threads keeps a running QThread from being
         destroyed under it.
         """
+        if self._has_unsaved_proposals():
+            reply = QMessageBox.question(
+                self,
+                _("Unsaved changes"),
+                _("Some photos have generated proposals that have not been saved. Close anyway?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         self._closing = True
         if self._worker is not None:
             self._worker.stop()

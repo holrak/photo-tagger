@@ -60,6 +60,14 @@ def window(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> Iterator[gui.
     # Adding photos kicks off the background exiftool scan for the Tagged column; keep tests
     # deterministic (and exiftool-free) by driving _on_scan_done directly where needed.
     monkeypatch.setattr(win, "_start_metadata_scan", lambda: None)
+    # The teardown close() below must never block on a real modal: most tests leave an unsaved
+    # proposal behind on purpose and are not testing the close-confirmation dialog itself. Default
+    # to "close anyway"; a test that specifically exercises the prompt overrides this again.
+    monkeypatch.setattr(
+        gui.QMessageBox,
+        "question",
+        lambda *_a, **_k: gui.QMessageBox.StandardButton.Yes,
+    )
     yield win
     win.close()
 
@@ -2080,6 +2088,76 @@ def test_close_beacon_reports_session_tagged_count_and_fields(
     assert runs[0].file_types == "jpg"
     assert runs[0].output_language == "German"
     assert runs[0].ui_language == "pt_BR"
+
+
+def test_close_asks_for_confirmation_when_proposals_are_unsaved(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    An unsaved proposal prompts for confirmation; declining keeps the window open.
+
+    Regression test: closeEvent used to discard every unsaved title/description/keyword edit with
+    no confirmation at all.
+    """
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    item = window._items[str(img)]  # noqa: SLF001
+    item.has_proposal = True
+    item.status = READY
+
+    asked: list[object] = []
+    monkeypatch.setattr(
+        gui.QMessageBox,
+        "question",
+        lambda *args, **_k: asked.append(args) or gui.QMessageBox.StandardButton.No,
+    )
+
+    assert window.close() is False  # declining keeps the window open
+    assert asked  # the confirmation dialog was shown
+
+
+def test_close_proceeds_when_user_confirms_discarding_unsaved_proposals(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Confirming the close-anyway prompt lets the window close as normal."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    item = window._items[str(img)]  # noqa: SLF001
+    item.has_proposal = True
+    item.status = READY
+    monkeypatch.setattr(
+        gui.QMessageBox,
+        "question",
+        lambda *_a, **_k: gui.QMessageBox.StandardButton.Yes,
+    )
+
+    assert window.close() is True
+
+
+def test_close_skips_confirmation_when_nothing_unsaved(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved (or never-generated) photo needs no prompt at all."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": img})
+    item = window._items[str(img)]  # noqa: SLF001
+    item.has_proposal = True
+    item.status = SAVED
+    asked: list[object] = []
+    monkeypatch.setattr(
+        gui.QMessageBox,
+        "question",
+        lambda *args, **_k: asked.append(args) or gui.QMessageBox.StandardButton.Yes,
+    )
+
+    assert window.close() is True
+    assert not asked
 
 
 # ---------------------------------------------------------------------------
