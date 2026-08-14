@@ -9,12 +9,14 @@ from unittest.mock import patch
 
 import pytest
 from pydantic_ai import BinaryContent
+from pydantic_ai.exceptions import ModelHTTPError
 
 from photo_tagger.ai import _attach_partial_usage
 from photo_tagger.errors import BatchError
 from photo_tagger.metadata import ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
 from photo_tagger.pipeline import (
+    FAILURE_MODEL_API,
     ImageOutcome,
     ProcessingOptions,
     _BatchContext,
@@ -337,6 +339,86 @@ def test_run_batch_pauses_before_the_retry_pass(
     with patch("photo_tagger.pipeline.process_photo", return_value=True):
         run_batch([image], agent=_FAKE_AGENT, options=ProcessingOptions())
     assert sleeps == []
+
+
+def test_run_batch_skips_retry_for_a_rejected_credential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A 401/403 from the provider is not retried: waiting and asking again cannot fix it.
+
+    Regression test: the retry pass used to retry every first-pass failure uniformly, so a batch
+    failing on a bad or revoked API key paid for a second full round of doomed requests before
+    reporting.
+    """
+    monkeypatch.setattr("photo_tagger.pipeline._RETRY_PASS_DELAY_SECONDS", 5.0)
+    sleeps: list[float] = []
+    monkeypatch.setattr("photo_tagger.pipeline.time.sleep", sleeps.append)
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    calls = {"n": 0}
+
+    def unauthorized(*_a: Any, **_kw: Any) -> bool:  # noqa: ANN401
+        calls["n"] += 1
+        raise ModelHTTPError(status_code=401, model_name="test-model")
+
+    received: list[Any] = []
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=unauthorized),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            [image],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            on_complete=received.append,
+        )
+
+    assert calls["n"] == 1  # never retried
+    assert sleeps == []  # no pause paid for a doomed retry
+    totals = received[0]
+    assert totals.failed_files == [str(image)]
+    assert totals.retry_successes == 0
+    assert totals.failure_kinds == {FAILURE_MODEL_API: 1}
+
+
+def test_run_batch_still_reports_on_ctrl_c_during_the_retry_pause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A Ctrl-C during the pre-retry pause still emits a BatchTotals, like one mid-pass does.
+
+    Regression test: the sleep before the retry pass sat outside any KeyboardInterrupt handling,
+    unlike the passes on either side of it, so this exact window could propagate the interrupt
+    straight out of run_batch, skipping on_complete and the summary file entirely.
+    """
+    monkeypatch.setattr("photo_tagger.pipeline._RETRY_PASS_DELAY_SECONDS", 5.0)
+
+    def interrupted_sleep(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("photo_tagger.pipeline.time.sleep", interrupted_sleep)
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+
+    received: list[Any] = []
+    with (
+        patch("photo_tagger.pipeline.process_photo", return_value=False),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            [image],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            on_complete=received.append,
+        )
+
+    assert len(received) == 1
+    totals = received[0]
+    assert totals.failed_files == [str(image)]
+    assert totals.retry_successes == 0
 
 
 def test_run_batch_calls_on_success_for_each_completed_file(tmp_path: Path) -> None:
