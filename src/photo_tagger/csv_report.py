@@ -29,6 +29,19 @@ if TYPE_CHECKING:
 # cell stays readable on its own without colliding with the CSV field separator.
 _LIST_SEP = "; "
 
+# Leading characters that Excel, LibreOffice, and Google Sheets interpret as a formula
+# introducer. A filename or a model-generated keyword can start with any of these; without
+# neutralizing them, opening the report spreadsheet executes attacker- or model-supplied
+# content instead of displaying it as text (CSV/formula injection, CWE-1236).
+_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_formula(value: str) -> str:
+    """Prefix *value* with a single quote if a spreadsheet would read it as a formula."""
+    if value.startswith(_FORMULA_TRIGGER_CHARS):
+        return f"'{value}"
+    return value
+
 
 def _format_bool(*, value: bool | None) -> str:
     """Render a tri-state flag: ``true``/``false`` when known, blank when not applicable."""
@@ -75,29 +88,31 @@ class ReportRow:
     def as_dict(self) -> dict[str, str]:
         """Render this row as a ``column -> cell`` mapping ready for :class:`csv.DictWriter`."""
         return {
-            "filename": self.filename,
-            "file": self.file,
+            "filename": _neutralize_formula(self.filename),
+            "file": _neutralize_formula(self.file),
             "status": self.status,
-            "title": self.title,
-            "description": self.description,
-            "keywords": _LIST_SEP.join(self.keywords),
-            "hierarchical_keywords": _LIST_SEP.join(self.hierarchical_keywords),
-            "existing_keywords": _LIST_SEP.join(self.existing_keywords),
-            "existing_title": self.existing_title,
-            "existing_description": self.existing_description,
-            "camera_model": self.camera_model,
-            "lens_model": self.lens_model,
-            "capture_date": self.capture_date,
-            "gps_position": self.gps_position,
-            "city": self.city,
-            "country": self.country,
+            "title": _neutralize_formula(self.title),
+            "description": _neutralize_formula(self.description),
+            "keywords": _neutralize_formula(_LIST_SEP.join(self.keywords)),
+            "hierarchical_keywords": _neutralize_formula(
+                _LIST_SEP.join(self.hierarchical_keywords),
+            ),
+            "existing_keywords": _neutralize_formula(_LIST_SEP.join(self.existing_keywords)),
+            "existing_title": _neutralize_formula(self.existing_title),
+            "existing_description": _neutralize_formula(self.existing_description),
+            "camera_model": _neutralize_formula(self.camera_model),
+            "lens_model": _neutralize_formula(self.lens_model),
+            "capture_date": _neutralize_formula(self.capture_date),
+            "gps_position": _neutralize_formula(self.gps_position),
+            "city": _neutralize_formula(self.city),
+            "country": _neutralize_formula(self.country),
             "input_tokens": str(self.input_tokens),
             "output_tokens": str(self.output_tokens),
             "total_tokens": str(self.total_tokens),
             "seconds": f"{self.seconds:.3f}",
             "from_cache": _format_bool(value=self.from_cache),
             "retry": _format_bool(value=self.retry),
-            "error": self.error,
+            "error": _neutralize_formula(self.error),
         }
 
 

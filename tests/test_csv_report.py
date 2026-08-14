@@ -71,6 +71,37 @@ def test_as_dict_renders_tristate_bool_and_numbers() -> None:
     assert blank["seconds"] == "0.000"
 
 
+def test_as_dict_neutralizes_formula_trigger_characters() -> None:
+    """
+    A cell starting with '=', '+', '-', or '@' gets a leading quote so it renders as text.
+
+    Otherwise a spreadsheet reads it as a formula (CSV/formula injection, CWE-1236). filename is
+    attacker-controlled (it is whatever the photo on disk is named); title, description, and
+    keywords are model-generated text the tool does not fully control either.
+    """
+    row = ReportRow(
+        filename="=1+1+cmd|'/bin/calc'!A0.jpg",
+        title="+SUM(1,1)",
+        description="-2+3",
+        keywords=["@mention", "Sunset"],
+        error='=HYPERLINK("http://evil")',
+    )
+    rendered = row.as_dict()
+    assert rendered["filename"] == "'=1+1+cmd|'/bin/calc'!A0.jpg"
+    assert rendered["title"] == "'+SUM(1,1)"
+    assert rendered["description"] == "'-2+3"
+    assert rendered["keywords"] == "'@mention; Sunset"
+    assert rendered["error"] == '\'=HYPERLINK("http://evil")'
+
+
+def test_as_dict_leaves_ordinary_text_unchanged() -> None:
+    """Cells that do not start with a formula trigger character are rendered as-is."""
+    row = ReportRow(filename="IMG_0001.CR3", title="Sunset over the bay")
+    rendered = row.as_dict()
+    assert rendered["filename"] == "IMG_0001.CR3"
+    assert rendered["title"] == "Sunset over the bay"
+
+
 def test_csv_report_writer_streams_header_and_rows(tmp_path: Path) -> None:
     """The streaming writer emits a header once, then one parseable row per write."""
     target = tmp_path / "report.csv"
