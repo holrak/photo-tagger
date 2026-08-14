@@ -247,7 +247,11 @@ class LogConfig:
     ] = "INFO"
     log_folder: Annotated[
         Path,
-        Parameter(name=("--log-folder",), help="Folder where log files are stored"),
+        Parameter(
+            name=("--log-folder",),
+            validator=validators.Path(file_okay=False, dir_okay=True),
+            help="Folder where log files are stored",
+        ),
     ] = field(default_factory=lambda: Path("logs"))
 
 

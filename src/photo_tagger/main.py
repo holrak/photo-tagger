@@ -600,11 +600,18 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
 
         photo-tagger -i Pictures/Mixed --skip-tagged
     """
-    setup_logging(
-        file_log_level=log.file_log_level,
-        console_log_level=log.console_log_level,
-        log_folder=log.log_folder,
-    )
+    try:
+        setup_logging(
+            file_log_level=log.file_log_level,
+            console_log_level=log.console_log_level,
+            log_folder=log.log_folder,
+        )
+    except OSError as exc:
+        # No sink is guaranteed to be active yet (setup_logging removes the default one before
+        # it can fail), so this cannot rely on the logger; write directly to stderr like the gui
+        # command's own pre-logging error path does.
+        sys.stderr.write(f"Could not set up logging at {log.log_folder}: {exc}\n")
+        raise SystemExit(1) from exc
     _apply_exiftool_path(configured_exiftool_path())
 
     with contextlib.ExitStack() as stack:

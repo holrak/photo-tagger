@@ -652,6 +652,30 @@ def test_cli_lock_file_blocks_second_run(tmp_path: Path) -> None:
     assert "image_files" not in captured
 
 
+def test_cli_log_setup_failure_exits_cleanly(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    An OSError from setup_logging (e.g. an unwritable --log-folder) exits 1 with a clean message.
+
+    Regression test: this used to propagate as a raw OSError traceback instead of the same clean
+    "log and exit 1" pattern every other pre-flight failure in this command already follows.
+    Cannot rely on the logger for the message: setup_logging removes the default sink before it
+    can fail, so nothing is guaranteed to be listening.
+    """
+    image = _make_jpeg(tmp_path / "img.cr3")
+
+    with (
+        patch.object(main_module, "setup_logging", side_effect=OSError("disk full")),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main_module.app(["--input", str(image)])
+
+    assert exc_info.value.code == 1
+    assert "disk full" in capsys.readouterr().err
+
+
 def test_cli_lock_file_open_failure_exits(tmp_path: Path) -> None:
     """An OSError while opening the lock file (e.g. unwritable dir) exits with code 1."""
     image = _make_jpeg(tmp_path / "img.cr3")
