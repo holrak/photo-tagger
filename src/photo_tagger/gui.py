@@ -2779,14 +2779,19 @@ class MainWindow(QMainWindow):
         """
         options = self._save_options()
         job = build_save_job(item, options)
-        ok = write_metadata(
-            job.path,
-            job.keywords,
-            description=job.description,
-            title=job.title,
-            backup=options.backup,
-            use_sidecar=options.use_sidecar,
-        )
+        try:
+            ok = write_metadata(
+                job.path,
+                job.keywords,
+                description=job.description,
+                title=job.title,
+                backup=options.backup,
+                use_sidecar=options.use_sidecar,
+            )
+        except Exception as exc:  # noqa: BLE001 - exiftool itself failing to start must surface
+            # as a failed save, not an uncaught exception Qt swallows into the log unseen.
+            logger.exception("gui_save_single_failed", error=str(exc), file=str(job.path))
+            ok = False
         self._apply_write_result(item, job, ok=ok)
         return ok
 

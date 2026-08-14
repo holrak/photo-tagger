@@ -948,6 +948,32 @@ def test_save_marks_failed_when_write_fails(
     assert window._items[str(img)].status == FAILED  # noqa: SLF001
 
 
+def test_save_marks_failed_when_write_raises(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    write_metadata raising (e.g. exiftool missing) fails the save instead of crashing silently.
+
+    Regression test: the single-photo save path had no try/except around write_metadata, unlike
+    the batch SaveWorker path, so this exact scenario used to propagate all the way to Qt's
+    exception hook: the click handler died mid-save with no status update and no error shown.
+    """
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+
+    def boom(*_a: object, **_k: object) -> bool:
+        message = "exiftool missing"
+        raise FileNotFoundError(message)
+
+    monkeypatch.setattr(gui, "write_metadata", boom)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+    window._save_current()  # noqa: SLF001 - must not raise
+    assert window._items[str(img)].status == FAILED  # noqa: SLF001
+
+
 def _two_ready_photos(
     window: gui.MainWindow,
     tmp_path: Path,
