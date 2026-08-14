@@ -63,6 +63,22 @@ uv run pycroscope --config-file pyproject.toml
 `bandit` scans the source for common security problems (for example, unsafe subprocess use or hard
 coded secrets). It runs as a pre-commit hook and in CI.
 
+### zizmor
+
+[`zizmor`](https://docs.zizmor.sh) audits the GitHub Actions workflows themselves, which no Python
+linter looks at. It catches the CI-specific mistakes: credentials left behind in the checkout,
+caches that a lower-privileged run could poison, untrusted input interpolated into a `run:` block,
+jobs holding more permissions than they use.
+
+```bash
+uv run zizmor .
+```
+
+It runs as a pre-commit hook on anything under `.github/workflows/`, and in the `zizmor.yml`
+workflow, which also sends its findings to the repository's Security tab. CI passes a `GH_TOKEN` so
+the audits that query the GitHub API (a referenced action being vulnerable or its tag having moved)
+are switched on; without a token those quietly skip and the local run only does offline checks.
+
 ### SonarCloud and SonarLint
 
 SonarCloud analysis runs in CI as part of the test workflow. SonarLint surfaces the same rules in
@@ -88,6 +104,7 @@ The configured hooks are:
 | ruff-format                | Formats code to the 100-column style.                         |
 | mdformat                   | Formats Markdown (a base pass plus a docs pass for `docs/`).  |
 | bandit                     | Scans for common security issues.                             |
+| zizmor                     | Audits the GitHub Actions workflows for security.             |
 | pyupgrade                  | Rewrites code to modern syntax (`--py314-plus`).              |
 | cspell                     | Spell-checks code and docs.                                   |
 | typos                      | Catches common typos.                                         |

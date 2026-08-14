@@ -52,6 +52,7 @@ dev = [
     "bandit>=1.9.4",
     "pycroscope>=0.4.0",
     "ruff>=0.16.3",
+    "zizmor>=1.29.0",
     "zuban>=0.9.1",
 ]
 docs = [

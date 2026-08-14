@@ -165,6 +165,7 @@ recompiles
 relocks
 rescan
 roundtrips
+SARIF
 scannerwork
 scriptable
 sdist
@@ -207,5 +208,7 @@ workpath
 xdist
 xkbcommon
 xmpmeta
+zizmor
+zizmorcore
 zuban
 zubanls

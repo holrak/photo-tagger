@@ -76,6 +76,12 @@ prek run -a                                            # Run all pre-commit hook
 auto-discover the config file, so always pass `--config-file pyproject.toml` when invoking it
 directly. The pre-commit hook already does this.
 
+Anything under `.github/workflows/` is audited by [`zizmor`](https://docs.zizmor.sh)
+(`uv run zizmor .`), as a pre-commit hook and in `zizmor.yml`, which also uploads SARIF to the
+Security tab. A workflow edit must keep it clean: actions pinned to a full commit SHA,
+`persist-credentials: false` on every checkout, no caching in `publish.yml`, and the narrowest
+`permissions` per job.
+
 The full local CI + SonarQube refresh pipeline lives in the `/ci` skill
 ([.claude/skills/ci.md](.claude/skills/ci.md)). Claude **may** invoke it, but should do so
 sparingly:

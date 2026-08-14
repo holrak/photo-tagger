@@ -60,6 +60,7 @@ The hooks cover a range of checks; these are the ones you will hit most often:
 | `zuban`              | Strict, mypy-compatible type checking.                |
 | `pycroscope`         | Semi-static analysis that complements zuban.          |
 | `bandit`             | Flags common security issues.                         |
+| `zizmor`             | Audits the GitHub Actions workflows for security.     |
 | `uv-lock`            | Keeps `uv.lock` in sync with `pyproject.toml`.        |
 | `check-version-sync` | Keeps the docs version in sync with `pyproject.toml`. |
 
@@ -86,6 +87,8 @@ Two GitHub Actions workflows gate every pull request:
     the unit tests, the linters, and the SonarCloud analysis.
 - [`codeql.yml`](https://github.com/jbsilva/photo-tagger/blob/main/.github/workflows/codeql.yml):
     runs CodeQL security scanning.
+- [`zizmor.yml`](https://github.com/jbsilva/photo-tagger/blob/main/.github/workflows/zizmor.yml):
+    audits the workflow files themselves. Editing anything under `.github/workflows/` will run it.
 
 Run the local checks before you push so CI does not surface anything you could have caught locally.
 
