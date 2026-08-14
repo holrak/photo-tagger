@@ -6,7 +6,7 @@ import shutil
 from http import HTTPStatus
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from rich.console import Console
 
@@ -38,7 +38,7 @@ def _patch_listing(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> 
     def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> _DummyResponse:
         return _DummyResponse(HTTPStatus.OK, payload)
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx2, "get", fake_get)
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +98,9 @@ def test_check_provider_fails_when_unreachable(monkeypatch: pytest.MonkeyPatch) 
 
     def boom(url: str, *, headers: dict[str, str], timeout: float) -> Any:  # noqa: ANN401
         msg = "refused"
-        raise httpx.ConnectError(msg)
+        raise httpx2.ConnectError(msg)
 
-    monkeypatch.setattr(httpx, "get", boom)
+    monkeypatch.setattr(httpx2, "get", boom)
     result = check_provider("ollama", "m", api_base_url="http://localhost:11434", api_key=None)
     assert result.ok is False
     assert "unreachable" in result.detail
@@ -113,7 +113,7 @@ def test_check_provider_flags_missing_api_key(monkeypatch: pytest.MonkeyPatch) -
         msg = "network must not be touched"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(httpx, "get", explode)
+    monkeypatch.setattr(httpx2, "get", explode)
     keyless = dataclasses.replace(get_backend("openai"), default_api_key=None)
     monkeypatch.setattr(diagnostics, "get_backend", lambda _name: keyless)
     result = check_provider("openai", "gpt-4o", api_base_url=None, api_key=None)

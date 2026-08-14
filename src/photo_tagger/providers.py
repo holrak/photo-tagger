@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Literal
 
-import httpx
+import httpx2
 from loguru import logger
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -95,8 +95,8 @@ def _fetch_listing(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     try:
-        response = httpx.get(url, headers=headers, timeout=_LISTING_TIMEOUT_SECONDS)
-    except httpx.HTTPError as exc:
+        response = httpx2.get(url, headers=headers, timeout=_LISTING_TIMEOUT_SECONDS)
+    except httpx2.HTTPError as exc:
         logger.error(f"{event_prefix}_error", error=str(exc), url=url)
         raise ProviderError(str(exc)) from exc
 

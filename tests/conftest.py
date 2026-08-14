@@ -42,16 +42,16 @@ def _isolate_telemetry_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
     ``main.tag`` and the GUI consult telemetry on every run, so without this the suite would read
     and write the developer's real ``~/.local/state/photo-tagger`` and be swayed by a stray
-    ``DO_NOT_TRACK`` in their shell. The ``httpx.post`` stub guarantees no beacon ever leaves the
+    ``DO_NOT_TRACK`` in their shell. The ``httpx2.post`` stub guarantees no beacon ever leaves the
     machine (the GUI test fixture closes its window, which would otherwise fire one). Tests that
-    assert on the send itself re-patch ``httpx.post`` locally, overriding this stub.
+    assert on the send itself re-patch ``httpx2.post`` locally, overriding this stub.
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "pt-state"))
     monkeypatch.delenv("PHOTO_TAGGER_NO_TELEMETRY", raising=False)
     monkeypatch.delenv("DO_NOT_TRACK", raising=False)
     # Also clear the exiftool override so a developer's exported path can't sway metadata tests.
     monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
-    monkeypatch.setattr("httpx.post", lambda *_a, **_k: None)
+    monkeypatch.setattr("httpx2.post", lambda *_a, **_k: None)
     # Never shell out to real hardware probes (sysctl, lspci, nvidia-smi) from the suite.
     from photo_tagger.hardware import HardwareInfo  # noqa: PLC0415 - keep conftest import light.
 
@@ -64,15 +64,15 @@ def _no_stray_http_get(monkeypatch: pytest.MonkeyPatch) -> None:
     Fail fast when a test reaches the network without patching it first.
 
     The provider/diagnostics code GETs http://localhost:1234/v1 and friends by default, so a test
-    that forgets its local httpx.get patch passes on a dev machine running LM Studio and hangs or
-    flakes in CI. Tests that need a GET re-patch locally, mirroring the httpx.post stub above.
+    that forgets its local httpx2.get patch passes on a dev machine running LM Studio and hangs or
+    flakes in CI. Tests that need a GET re-patch locally, mirroring the httpx2.post stub above.
     """
 
     def _refuse(*_args: object, **_kwargs: object) -> None:
-        msg = "test attempted a real httpx.get; patch httpx.get (or the caller) locally"
+        msg = "test attempted a real httpx2.get; patch httpx2.get (or the caller) locally"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("httpx.get", _refuse)
+    monkeypatch.setattr("httpx2.get", _refuse)
 
 
 @pytest.fixture(autouse=True)

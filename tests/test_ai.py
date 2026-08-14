@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import httpx
+import httpx2
 import pytest
 
 from photo_tagger import ai as ai_module
@@ -40,7 +40,7 @@ def _patch_listing(
         requests.append((url, headers))
         return _DummyResponse(HTTPStatus.OK, payload)
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx2, "get", fake_get)
     return requests
 
 
@@ -123,10 +123,10 @@ def test_create_agent_openai_without_key_fails_fast(monkeypatch: pytest.MonkeyPa
     """The hosted OpenAI backend refuses to run without a key, before any network call."""
 
     def explode(*_args: object, **_kwargs: object) -> Any:  # noqa: ANN401
-        msg = "httpx.get must not be called when the key is missing"
+        msg = "httpx2.get must not be called when the key is missing"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(httpx, "get", explode)
+    monkeypatch.setattr(httpx2, "get", explode)
     # The default key is captured from the environment at import time, so build a
     # keyless clone (frozen dataclasses copy via dataclasses.replace) and route the
     # lookup to it regardless of what OPENAI_API_KEY happens to be on this machine.

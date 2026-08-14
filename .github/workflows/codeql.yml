@@ -53,7 +53,7 @@ jobs:
           config: ${{ matrix.config }}
           # security-extended + security-and-quality: widest coverage. The quality queries overlap
           # SonarQube/ruff/zuban, but may still surface issues those miss; deep taint tracking is
-          # CodeQL's real strength here (exiftool subprocess, httpx/LLM, path traversal).
+          # CodeQL's real strength here (exiftool subprocess, httpx2/LLM, path traversal).
           queries: security-extended,security-and-quality
 
       - name: Perform CodeQL Analysis

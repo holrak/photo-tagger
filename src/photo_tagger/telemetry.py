@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import httpx
+import httpx2
 from loguru import logger
 
 from photo_tagger import __version__
@@ -360,7 +360,7 @@ def build_crash_payload(exc: BaseException, *, interface: str) -> dict[str, obje
 def _safe_post(payload: dict[str, object]) -> None:
     """POST *payload* to the collector, swallowing every error (telemetry is never load-bearing)."""
     try:
-        httpx.post(ENDPOINT, json=payload, timeout=_SEND_TIMEOUT_SECONDS)
+        httpx2.post(ENDPOINT, json=payload, timeout=_SEND_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001 - a beacon must never surface a failure to the user.
         logger.debug("telemetry_send_failed", error=str(exc))
 

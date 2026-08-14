@@ -2,7 +2,7 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #     "altair>=6.2.2",
-#     "httpx>=0.27",
+#     "httpx2>=2.10",
 #     "marimo>=0.23",
 #     "pandas>=2.3.3",
 # ]
@@ -54,11 +54,11 @@ def _():
     from contextlib import suppress
 
     import altair as alt
-    import httpx
+    import httpx2
     import marimo as mo
     import pandas as pd
 
-    return alt, httpx, mo, os, pd, re, suppress
+    return alt, httpx2, mo, os, pd, re, suppress
 
 
 @app.cell
@@ -140,7 +140,7 @@ def _(interface_filter, window):
 
 
 @app.cell
-def _(account_id, api_token, httpx, pd, re, refresh, suppress):
+def _(account_id, api_token, httpx2, pd, re, refresh, suppress):
     _ = refresh.value  # Depending on the button makes query re-run (and thus re-fetch) on click.
 
     def query(sql: str) -> pd.DataFrame:
@@ -150,13 +150,13 @@ def _(account_id, api_token, httpx, pd, re, refresh, suppress):
         sql = sql.strip().removesuffix(";")
         if not re.search(r"\bFORMAT\b", sql, flags=re.IGNORECASE):
             sql += "\nFORMAT JSON"
-        response = httpx.post(
+        response = httpx2.post(
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}/analytics_engine/sql",
             content=sql,
             headers={"Authorization": f"Bearer {api_token}"},
             timeout=30.0,
         )
-        if response.status_code != httpx.codes.OK:
+        if response.status_code != httpx2.codes.OK:
             msg = f"AE SQL API returned {response.status_code}: {response.text[:500]}"
             raise RuntimeError(msg)
         frame = pd.DataFrame(response.json().get("data", []))
