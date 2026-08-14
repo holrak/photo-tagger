@@ -23,7 +23,7 @@ _Hierarchy = Annotated[str, Field(min_length=1, max_length=_MAX_HIERARCHY_CHARS)
 
 def _clean_items(value: object, *, max_items: int, max_chars: int) -> object:
     """
-    Drop blank strings, clip over-long ones, and truncate the list to *max_items*.
+    Truncate the list to *max_items* first, then drop blank strings and clip over-long ones.
 
     Runs in a ``mode="before"`` validator so the per-item ``min_length``/``max_length`` constraints
     (which the model sees in the JSON schema, and which validate *before* any after-mode validator)
@@ -31,11 +31,17 @@ def _clean_items(value: object, *, max_items: int, max_chars: int) -> object:
     call up to ``retries`` times, and the model rarely self-corrects; cleaning is cheaper than
     burning that inference budget. Non-list values and non-string items pass through untouched so
     pydantic still reports real schema violations.
+
+    The list is sliced to *max_items* before any per-item work, not after: a model stuck in a
+    repetition loop (a known failure mode this project already guards against elsewhere via
+    ``frequency_penalty``) can return far more than *max_items* entries, and processing every one of
+    them first would let the advertised cap bound the *output* size without bounding the CPU and
+    memory cost of getting there.
     """
     if not isinstance(value, list):
         return value
     cleaned: list[object] = []
-    for item in value:
+    for item in value[:max_items]:
         if isinstance(item, str):
             stripped = item.strip()[:max_chars]
             if not stripped:
@@ -43,7 +49,7 @@ def _clean_items(value: object, *, max_items: int, max_chars: int) -> object:
             cleaned.append(stripped)
         else:
             cleaned.append(item)
-    return cleaned[:max_items]
+    return cleaned
 
 
 class GeneratedMetadata(BaseModel):
