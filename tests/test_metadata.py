@@ -240,6 +240,28 @@ def test_find_tagged_images_returns_paths_with_indicator(tmp_path: Path) -> None
     assert tagged == {a}
 
 
+def test_find_tagged_images_credits_every_image_sharing_a_sidecar(tmp_path: Path) -> None:
+    """
+    A RAW+JPEG pair with the same stem shares one sidecar; both must be reported as tagged.
+
+    IMG_0001.cr3 and IMG_0001.jpg both resolve to IMG_0001.xmp. When that shared sidecar carries an
+    indicator tag, both images count as tagged, not just whichever the target index happened to keep
+    last.
+    """
+    raw = tmp_path / "IMG_0001.cr3"
+    jpg = tmp_path / "IMG_0001.jpg"
+    sidecar = tmp_path / "IMG_0001.xmp"
+    raw.write_text("x")
+    jpg.write_text("x")
+    sidecar.write_text("x")
+
+    fake_helper = _fake_helper([{"SourceFile": str(sidecar), "XMP:Subject": ["Beach"]}])
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=fake_helper):
+        tagged = find_tagged_images([raw, jpg])
+
+    assert tagged == {raw, jpg}
+
+
 def test_find_tagged_images_returns_empty_for_empty_input() -> None:
     """An empty input list short-circuits without invoking exiftool."""
     with patch("photo_tagger.metadata.ExifToolHelper") as helper:
@@ -314,6 +336,23 @@ def test_find_field_presence_unions_image_and_sidecar(tmp_path: Path) -> None:
         presence = find_field_presence([image])
 
     assert presence[image] == {FIELD_TITLE, FIELD_KEYWORDS}
+
+
+def test_find_field_presence_credits_every_image_sharing_a_sidecar(tmp_path: Path) -> None:
+    """The shared-sidecar fix applies to field presence too, not just the tagged/untagged check."""
+    raw = tmp_path / "IMG_0001.cr3"
+    jpg = tmp_path / "IMG_0001.jpg"
+    sidecar = tmp_path / "IMG_0001.xmp"
+    raw.write_text("x")
+    jpg.write_text("x")
+    sidecar.write_text("x")
+
+    fake_helper = _fake_helper([{"SourceFile": str(sidecar), "XMP:Title": "T"}])
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=fake_helper):
+        presence = find_field_presence([raw, jpg])
+
+    assert presence[raw] == {FIELD_TITLE}
+    assert presence[jpg] == {FIELD_TITLE}
 
 
 def test_find_field_presence_empty_input_skips_exiftool() -> None:

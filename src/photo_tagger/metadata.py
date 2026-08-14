@@ -217,29 +217,36 @@ def _block_has_indicator(blocks: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _build_target_index(paths: list[Path]) -> tuple[list[str], dict[Path, Path]]:
+def _build_target_index(paths: list[Path]) -> tuple[list[str], dict[Path, list[Path]]]:
     """
-    Flatten every image's metadata targets and map each target back to its image.
+    Flatten every image's metadata targets and map each target back to its image(s).
 
     The map is keyed by ``Path``, not the string sent to exiftool: exiftool echoes ``SourceFile``
     with forward slashes, so string keys would miss every entry on Windows, where ``str(Path)`` uses
     backslashes. Path equality normalizes the separator.
+
+    A target maps to a *list* because RAW+JPEG pairs sharing a stem (``IMG_0001.CR3`` and
+    ``IMG_0001.JPG``) both resolve to the same ``IMG_0001.xmp`` sidecar; a single ``Path`` value
+    here would silently drop all but the last image sharing that sidecar.
     """
     all_targets: list[str] = []
-    target_to_image: dict[Path, Path] = {}
+    target_to_images: dict[Path, list[Path]] = {}
     for image_path in paths:
         for target in metadata_targets(image_path):
             all_targets.append(target)
-            target_to_image[Path(target)] = image_path
-    return all_targets, target_to_image
+            target_to_images.setdefault(Path(target), []).append(image_path)
+    return all_targets, target_to_images
 
 
-def _image_for_block(block: dict[str, Any], target_to_image: dict[Path, Path]) -> Path | None:
-    """Map one exiftool result block back to its source image via the target index."""
+def _images_for_block(
+    block: dict[str, Any],
+    target_to_images: dict[Path, list[Path]],
+) -> list[Path]:
+    """Map one exiftool result block back to its source image(s) via the target index."""
     source_file = block.get("SourceFile")
     if not source_file:
-        return None
-    return target_to_image.get(Path(str(source_file)))
+        return []
+    return target_to_images.get(Path(str(source_file)), [])
 
 
 def _batched_get_tags(
@@ -291,7 +298,7 @@ def find_tagged_images(
     if not paths:
         return set()
 
-    all_targets, target_to_image = _build_target_index(paths)
+    all_targets, target_to_images = _build_target_index(paths)
     if not all_targets:
         return set()
 
@@ -303,9 +310,8 @@ def find_tagged_images(
         return set()
 
     for block in blocks:
-        image_path = _image_for_block(block, target_to_image)
-        if image_path is not None and _block_has_indicator([block]):
-            tagged.add(image_path)
+        if _block_has_indicator([block]):
+            tagged.update(_images_for_block(block, target_to_images))
 
     if tagged:
         logger.debug("tagged_images_detected", count=len(tagged))
@@ -336,7 +342,7 @@ def find_field_presence(
     if not paths:
         return presence
 
-    all_targets, target_to_image = _build_target_index(paths)
+    all_targets, target_to_images = _build_target_index(paths)
     if not all_targets:
         return presence
 
@@ -348,12 +354,16 @@ def find_field_presence(
         return {}
 
     for block in blocks:
-        image_path = _image_for_block(block, target_to_image)
-        if image_path is None:
+        images = _images_for_block(block, target_to_images)
+        if not images:
             continue
-        for field_name, tags in _FIELD_PRESENCE_TAGS.items():
-            if any(_value_is_present(block.get(tag)) for tag in tags):
-                presence[image_path].add(field_name)
+        present_fields = {
+            field_name
+            for field_name, tags in _FIELD_PRESENCE_TAGS.items()
+            if any(_value_is_present(block.get(tag)) for tag in tags)
+        }
+        for image_path in images:
+            presence[image_path].update(present_fields)
     return presence
 
 
