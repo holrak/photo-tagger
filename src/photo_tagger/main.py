@@ -129,10 +129,13 @@ def doctor(
     or a model name typo from the rest of the pipeline. Honors the same config file and env vars as
     ``tag``.
     """
+    # Resolve the exiftool path (and its own warning, e.g. a CWD config redirecting the binary)
+    # before silencing loguru, or that warning never reaches the user in the one command meant
+    # to surface exactly this kind of misconfiguration.
+    _apply_exiftool_path(configured_exiftool_path())
     # Silence loguru so only the checklist reaches the terminal; failures are
     # captured in the report itself, not the logs.
     logger.remove()
-    _apply_exiftool_path(configured_exiftool_path())
     results = run_checks(provider, model, api_base_url=url, api_key=api_key)
     if not render_report(results):
         raise SystemExit(1)
