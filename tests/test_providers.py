@@ -5,7 +5,7 @@ import typing
 from http import HTTPStatus
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 from photo_tagger import providers
@@ -14,7 +14,7 @@ from photo_tagger.providers import PROVIDER_NAMES, ProviderName, get_backend
 
 
 class _DummyResponse:
-    """Minimal httpx-style response stub for listing tests."""
+    """Minimal httpx2-style response stub for listing tests."""
 
     def __init__(self, status_code: int, payload: Any) -> None:  # noqa: ANN401
         self.status_code = status_code
@@ -28,18 +28,18 @@ class _DummyResponse:
         return json.dumps(self._payload)
 
 
-def _patch_httpx_get(
+def _patch_httpx2_get(
     monkeypatch: pytest.MonkeyPatch,
     response: _DummyResponse,
 ) -> list[dict[str, Any]]:
-    """Record every httpx.get call and return *response* for each."""
+    """Record every httpx2.get call and return *response* for each."""
     calls: list[dict[str, Any]] = []
 
     def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> _DummyResponse:
         calls.append({"url": url, "headers": headers, "timeout": timeout})
         return response
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx2, "get", fake_get)
     return calls
 
 
@@ -87,7 +87,7 @@ def test_llamacpp_backend_is_openai_compatible() -> None:
 
 
 def test_validate_listing_url_rejects_missing_scheme() -> None:
-    """A non-http(s) scheme is caught up-front before httpx is invoked."""
+    """A non-http(s) scheme is caught up-front before httpx2 is invoked."""
     with pytest.raises(ProviderError):
         providers._validate_listing_url("ftp:///models", event_prefix="x")  # noqa: SLF001
 
@@ -117,16 +117,16 @@ def test_fetch_listing_handles_connection_error(monkeypatch: pytest.MonkeyPatch)
 
     def boom(url: str, *, headers: dict[str, str], timeout: float) -> Any:  # noqa: ANN401
         msg = "nope"
-        raise httpx.ConnectError(msg)
+        raise httpx2.ConnectError(msg)
 
-    monkeypatch.setattr(httpx, "get", boom)
+    monkeypatch.setattr(httpx2, "get", boom)
     with pytest.raises(ProviderError):
         providers._fetch_listing("http://host/models", None, event_prefix="x")  # noqa: SLF001
 
 
 def test_fetch_listing_handles_non_ok_response(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-OK status code is fatal."""
-    _patch_httpx_get(monkeypatch, _DummyResponse(HTTPStatus.SERVICE_UNAVAILABLE, {}))
+    _patch_httpx2_get(monkeypatch, _DummyResponse(HTTPStatus.SERVICE_UNAVAILABLE, {}))
     with pytest.raises(ProviderError):
         providers._fetch_listing("http://host/models", None, event_prefix="x")  # noqa: SLF001
 
@@ -142,16 +142,48 @@ def test_fetch_listing_handles_invalid_json(monkeypatch: pytest.MonkeyPatch) -> 
     def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> Broken:
         return Broken(HTTPStatus.OK, "not json")
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx2, "get", fake_get)
     with pytest.raises(ProviderError):
         providers._fetch_listing("http://host/models", None, event_prefix="x")  # noqa: SLF001
 
 
 def test_fetch_listing_sends_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """When an api_key is given it travels as an Authorization header."""
-    calls = _patch_httpx_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": []}))
+    calls = _patch_httpx2_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": []}))
     providers._fetch_listing("http://host/models", "secret", event_prefix="x")  # noqa: SLF001
     assert calls[0]["headers"]["Authorization"] == "Bearer secret"
+
+
+def test_redact_secret_replaces_every_occurrence() -> None:
+    """The api key is never left recoverable in a string headed for a log."""
+    text = "echo: Authorization: Bearer sk-super-secret"
+    assert "sk-super-secret" not in providers._redact_secret(text, "sk-super-secret")  # noqa: SLF001
+
+
+def test_redact_secret_passes_through_when_no_key() -> None:
+    """With no api key configured there is nothing to redact."""
+    assert providers._redact_secret("plain text", None) == "plain text"  # noqa: SLF001
+
+
+def test_fetch_listing_redacts_api_key_from_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server that echoes the Authorization header back must not leak it via ProviderError."""
+
+    class Echo(_DummyResponse):
+        @property
+        def text(self) -> str:
+            return "Bad request. Authorization: Bearer sk-super-secret"
+
+    def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> Echo:
+        return Echo(HTTPStatus.BAD_REQUEST, {})
+
+    monkeypatch.setattr(httpx2, "get", fake_get)
+    with pytest.raises(ProviderError) as exc_info:
+        providers._fetch_listing(  # noqa: SLF001
+            "http://host/models",
+            "sk-super-secret",
+            event_prefix="x",
+        )
+    assert "sk-super-secret" not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +220,7 @@ def test_ollama_model_names_handles_non_list_models() -> None:
 
 def test_lmstudio_backend_lists_models_from_v1_models(monkeypatch: pytest.MonkeyPatch) -> None:
     """The LM Studio backend queries <base>/models and parses the OpenAI shape."""
-    calls = _patch_httpx_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": [{"id": "m"}]}))
+    calls = _patch_httpx2_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": [{"id": "m"}]}))
     models = get_backend("lmstudio").list_models("http://localhost:1234/v1", None)
     assert models == ["m"]
     assert calls[0]["url"].endswith("/models")
@@ -197,7 +229,7 @@ def test_lmstudio_backend_lists_models_from_v1_models(monkeypatch: pytest.Monkey
 
 def test_ollama_backend_strips_v1_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Ollama backend rewrites a /v1 base URL to /api/tags before listing."""
-    calls = _patch_httpx_get(
+    calls = _patch_httpx2_get(
         monkeypatch,
         _DummyResponse(HTTPStatus.OK, {"models": [{"name": "vision-pro"}]}),
     )
@@ -207,7 +239,7 @@ def test_ollama_backend_strips_v1_suffix(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_validate_model_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """ProviderError is raised when the requested model id is not in the listing."""
-    _patch_httpx_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": [{"id": "other"}]}))
+    _patch_httpx2_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": [{"id": "other"}]}))
     with pytest.raises(ProviderError):
         get_backend("lmstudio").validate_model("http://localhost:1234/v1", "missing", None)
 

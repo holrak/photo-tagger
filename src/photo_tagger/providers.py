@@ -84,6 +84,13 @@ def _validate_listing_url(url: str, *, event_prefix: str) -> None:
         raise ProviderError(msg)
 
 
+def _redact_secret(text: str, secret: str | None) -> str:
+    """Replace every occurrence of *secret* in *text* so it never reaches a log or exception."""
+    if not secret:
+        return text
+    return text.replace(secret, "[REDACTED]")
+
+
 def _fetch_listing(
     url: str,
     api_key: str | None,
@@ -101,7 +108,9 @@ def _fetch_listing(
         raise ProviderError(str(exc)) from exc
 
     if response.status_code != HTTPStatus.OK:
-        body = _truncate_for_log(response.text)
+        # A misbehaving or malicious server can echo the request back, Authorization header
+        # included; redact the key we sent before it lands in a log or exception message.
+        body = _truncate_for_log(_redact_secret(response.text, api_key))
         logger.error(f"{event_prefix}_failed", status=response.status_code, url=url, body=body)
         msg = f"HTTP {response.status_code} from {url}: {body}"
         raise ProviderError(msg)
