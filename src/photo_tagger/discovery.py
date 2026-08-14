@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from itertools import chain
 from typing import TYPE_CHECKING
 
+from filelock import FileLock, Timeout
 from loguru import logger
 
 from photo_tagger.errors import DiscoveryError
@@ -314,6 +315,34 @@ def apply_skip_tagged(
     return kept
 
 
+def _read_skip_entries(skip_file: Path) -> set[str]:
+    """Read *skip_file* into a set of non-blank, non-comment lines; absence is not a warning."""
+    if not skip_file.exists():
+        return set()
+    try:
+        content = skip_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning(
+            "append_skip_file_unreadable_starting_fresh",
+            file=str(skip_file),
+            error=str(exc),
+        )
+        return set()
+    return {
+        stripped
+        for line in content.splitlines()
+        if (stripped := line.strip()) and not stripped.startswith("#")
+    }
+
+
+# How long a second process may wait for another one's hold on the skip-file lock before giving
+# up on this particular append. Bounded, not indefinite: filelock silently falls back to a marker-
+# file lock on filesystems without native flock support (some network mounts), and that fallback
+# cannot reclaim a marker left by a peer that crashed on a *different* host. An unbounded wait
+# there would hang every future run forever instead of just losing one skip-file entry.
+_SKIP_FILE_LOCK_TIMEOUT_SECONDS = 30.0
+
+
 def make_skip_list_appender(skip_file: Path | None) -> Callable[[Path], None] | None:
     """
     Build a callback that appends a file's full path to *skip_file* on each successful process.
@@ -322,36 +351,36 @@ def make_skip_list_appender(skip_file: Path | None) -> Callable[[Path], None] | 
     if it does not exist yet, so the same path can also be passed to ``--skip-from`` on later runs
     to short-circuit work that already completed.
 
-    The returned callback is safe to invoke from worker threads: a per-callback lock serializes the
-    membership check, the file write, and the seen-set update so we never get interleaved writes or
-    duplicate lines under ``--workers > 1``.
+    The returned callback is safe to invoke from worker threads (a per-callback lock serializes the
+    membership check, the file write, and the seen-set update) and from concurrent processes sharing
+    the same *skip_file* (an OS-level file lock guards the same critical section). Membership is
+    re-read from disk on every call rather than cached: appends happen once per processed photo,
+    not in a hot loop, so re-reading a small text file is cheap, and it is the only way to see
+    another process's writes without relying on filesystem mtime resolution or client-side
+    attribute caching.
     """
     if skip_file is None:
         return None
 
-    seen: set[str] = set()
-    if skip_file.exists():
-        # Preload entries already on disk so re-runs do not duplicate them. Failures are
-        # logged but non-fatal: the appender still works on a fresh in-memory set.
+    if not skip_file.exists():
+        # The cross-process lock file lives next to skip_file, so its parent must exist before
+        # the first lock acquisition, not just before the first write. Non-fatal: if this fails
+        # (e.g. permission denied), the later open("a") raises its own OSError, already handled.
         try:
-            content = skip_file.read_text(encoding="utf-8")
+            skip_file.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             logger.warning(
-                "append_skip_file_unreadable_starting_fresh",
+                "append_skip_file_parent_mkdir_failed",
                 file=str(skip_file),
                 error=str(exc),
             )
-        else:
-            seen = {
-                stripped
-                for line in content.splitlines()
-                if (stripped := line.strip()) and not stripped.startswith("#")
-            }
-    else:
-        # Touch the parent directory check; let open() handle creation lazily on first write.
         logger.info("append_skip_file_will_be_created", file=str(skip_file))
 
-    lock = threading.Lock()
+    thread_lock = threading.Lock()
+    # A blocking (but bounded) cross-process lock: unlike the top-level run lock in locking.py,
+    # two processes legitimately appending to the same skip file should wait for each other, not
+    # fail on first contention.
+    process_lock = FileLock(str(skip_file) + ".lock", timeout=_SKIP_FILE_LOCK_TIMEOUT_SECONDS)
 
     def append(image_path: Path) -> None:
         # Record the full path, not the bare name: duplicate camera filenames across folders
@@ -359,23 +388,35 @@ def make_skip_list_appender(skip_file: Path | None) -> Callable[[Path], None] | 
         # resumed recursive run silently skip photos that were never processed.
         # skip_list_matches accepts both forms, so older name-only files keep working.
         entry = str(image_path)
-        with lock:
-            # The name check keeps files written by older versions (bare names) from being
-            # re-appended as paths.
-            if entry in seen or image_path.name in seen:
-                return
-            try:
-                with skip_file.open("a", encoding="utf-8") as handle:
-                    handle.write(entry + "\n")
-            except OSError as exc:
-                logger.warning(
-                    "append_skip_file_write_failed",
-                    file=str(skip_file),
-                    entry=entry,
-                    error=str(exc),
-                )
-                return
-            seen.add(entry)
+        try:
+            with thread_lock, process_lock:
+                seen = _read_skip_entries(skip_file)
+                # The name check keeps files written by older versions (bare names) from being
+                # re-appended as paths.
+                if entry in seen or image_path.name in seen:
+                    return
+                try:
+                    with skip_file.open("a", encoding="utf-8") as handle:
+                        handle.write(entry + "\n")
+                except OSError as exc:
+                    logger.warning(
+                        "append_skip_file_write_failed",
+                        file=str(skip_file),
+                        entry=entry,
+                        error=str(exc),
+                    )
+                    return
+        except Timeout as exc:
+            # Another process is holding the lock (or, on a filesystem without native flock
+            # support, a stale marker from a peer that crashed on a different host and can never
+            # be reclaimed). Either way, skip this one entry rather than hang the run.
+            logger.warning(
+                "append_skip_file_lock_timeout",
+                file=str(skip_file),
+                entry=entry,
+                error=str(exc),
+            )
+            return
         logger.debug("appended_to_skip_file", file=str(skip_file), entry=entry)
 
     return append

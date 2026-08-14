@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 import pytest
+from filelock import Timeout
 
 from photo_tagger.discovery import (
     apply_date_filter,
@@ -284,6 +285,89 @@ def test_make_skip_list_appender_does_not_repeat_within_a_run(tmp_path: Path) ->
     appender(target)
     appender(target)
     assert skip_file.read_text(encoding="utf-8").splitlines() == [str(target)]
+
+
+def test_make_skip_list_appender_creates_missing_parent_directory(tmp_path: Path) -> None:
+    """
+    The cross-process lock file lives next to skip_file, so its parent dir must be created.
+
+    It must exist before the first append, not left for open("a") to discover it is missing.
+    """
+    skip_file = tmp_path / "nested" / "deeper" / "processed.txt"
+    appender = make_skip_list_appender(skip_file)
+    assert appender is not None
+    appender(tmp_path / "IMG_0001.CR3")
+    assert skip_file.read_text(encoding="utf-8").splitlines() == [str(tmp_path / "IMG_0001.CR3")]
+
+
+def test_make_skip_list_appender_survives_parent_mkdir_failure(tmp_path: Path) -> None:
+    """A failure creating skip_file's parent dir is logged, not raised, at construction time."""
+    skip_file = tmp_path / "nested" / "processed.txt"
+    path_cls = skip_file.__class__
+    original_mkdir = path_cls.mkdir
+
+    def _exploding_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        msg = "permission denied"
+        raise OSError(msg)
+
+    path_cls.mkdir = _exploding_mkdir  # type: ignore[method-assign]
+    try:
+        appender = make_skip_list_appender(skip_file)
+    finally:
+        path_cls.mkdir = original_mkdir  # type: ignore[method-assign]
+    assert appender is not None
+
+
+def test_make_skip_list_appender_survives_lock_timeout(tmp_path: Path) -> None:
+    """
+    Losing the race for the cross-process lock skips this one entry, never hangs or raises.
+
+    Regression test: the lock used to have no timeout at all (block forever), which on a
+    filesystem without native flock support can wait on a marker file a crashed peer on another
+    host left behind and can never prove is stale.
+    """
+    skip_file = tmp_path / "processed.txt"
+    appender = make_skip_list_appender(skip_file)
+    assert appender is not None
+
+    def _timeout(self: object) -> None:
+        raise Timeout(str(skip_file) + ".lock")
+
+    with patch("photo_tagger.discovery.FileLock.acquire", _timeout):
+        appender(tmp_path / "IMG_0001.CR3")  # must not raise or hang
+
+    assert not skip_file.exists()  # never got past the lock to write anything
+
+
+def test_make_skip_list_appender_reloads_entries_written_by_another_process(
+    tmp_path: Path,
+) -> None:
+    """
+    Two appenders sharing one file never duplicate or lose entries, even after both wrote.
+
+    Simulates two processes sharing one --append-to-skip-file. Membership is re-read from disk
+    under the lock on every call rather than cached, so neither appender's own prior activity
+    can fool it into skipping a reload and missing the other's write (a cached-mtime approach
+    would be vulnerable here: both appenders would already have a concrete, non-None mtime of
+    their own before the shared entry is written).
+    """
+    skip_file = tmp_path / "processed.txt"
+    appender_a = make_skip_list_appender(skip_file)
+    appender_b = make_skip_list_appender(skip_file)
+    assert appender_a is not None
+    assert appender_b is not None
+
+    a_entry = tmp_path / "IMG_0001.CR3"
+    b_entry = tmp_path / "IMG_0002.CR3"
+    appender_a(a_entry)  # each appender now has its own prior-write history
+    appender_b(b_entry)
+
+    shared_entry = tmp_path / "IMG_0003.CR3"
+    appender_b(shared_entry)
+    appender_a(shared_entry)  # must see appender_b's write and not duplicate it
+
+    lines = skip_file.read_text(encoding="utf-8").splitlines()
+    assert sorted(lines) == sorted(str(p) for p in (a_entry, b_entry, shared_entry))
 
 
 def _set_mtime(path: Path, when: datetime) -> None:
