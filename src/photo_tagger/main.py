@@ -581,7 +581,10 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
     - --prompt-file PATH: replace the default user prompt with the file's contents.
         Existing photo metadata (keywords, GPS, location) is still appended automatically.
 
-    Exit status: returns 1 if no inputs, no images found, or any file fails.
+    Exit status: returns 1 if no inputs are given, discovery finds no matching images, or any
+        file fails. Returns 0 if discovery finds images but every one of them is subsequently
+        excluded by --skip-from, --skip-tagged, or the date filters: that is "nothing left to
+        do", not an error, and scripted incremental reruns rely on it not failing the batch.
 
     Examples:
         photo-tagger -i ./photos/IMG_0001.CR3
