@@ -2660,6 +2660,84 @@ def test_metadata_scan_worker_emits_string_keyed_presence(
     assert results == [{"/a.jpg": {FIELD_TITLE}}]
 
 
+class _FakeScanThread:
+    """
+    Stands in for a QThread without starting one, so tests stay fast and deterministic.
+
+    Exposes only what MainWindow._stop_scan touches: quit(), wait(ms), deleteLater(), and a finished
+    signal with connect().
+    """
+
+    def __init__(self, *, finishes_in_time: bool) -> None:
+        self._finishes_in_time = finishes_in_time
+        self.quit_called = False
+        self.deleted = False
+        self.finished_slots: list[object] = []
+        self.finished = SimpleNamespace(connect=self.finished_slots.append)
+
+    def quit(self) -> None:
+        self.quit_called = True
+
+    def wait(self, _timeout_ms: int) -> bool:
+        return self._finishes_in_time
+
+    def deleteLater(self) -> None:  # noqa: N802 - Qt naming convention
+        self.deleted = True
+
+
+def test_stop_scan_deletes_immediately_when_it_finishes_in_time(
+    window: gui.MainWindow,
+) -> None:
+    """The common case (the scan finishes within the grace period) cleans up right away."""
+    fake_thread = _FakeScanThread(finishes_in_time=True)
+    window._scan_thread = fake_thread  # noqa: SLF001
+    window._scan_worker = gui.MetadataScanWorker([])  # noqa: SLF001
+
+    window._stop_scan()  # noqa: SLF001
+
+    assert window._scan_thread is None  # noqa: SLF001
+    assert window._scan_worker is None  # noqa: SLF001
+    assert fake_thread.quit_called
+    assert fake_thread.deleted
+    assert not fake_thread.finished_slots
+
+
+def test_stop_scan_detaches_instead_of_blocking_when_still_running(
+    window: gui.MainWindow,
+) -> None:
+    """
+    _stop_scan must not block the caller forever waiting on a scan that will not finish soon.
+
+    Regression test: a single batched exiftool call cannot be cancelled mid-flight, so a large
+    folder (or a hung exiftool) used to freeze closeEvent/_clear until the whole scan finished.
+    """
+    fake_thread = _FakeScanThread(finishes_in_time=False)
+    window._scan_thread = fake_thread  # noqa: SLF001
+    window._scan_worker = gui.MetadataScanWorker([])  # noqa: SLF001
+
+    window._stop_scan()  # noqa: SLF001 - must return promptly, not block for _SCAN_STOP_TIMEOUT_MS
+
+    assert window._scan_thread is None  # noqa: SLF001 - detached, not waited on further
+    assert window._scan_worker is None  # noqa: SLF001
+    assert fake_thread.quit_called
+    assert not fake_thread.deleted  # never force-deleted while still running
+    assert fake_thread.finished_slots  # cleanup deferred to whenever it actually finishes
+
+
+def test_on_scan_finished_does_not_restart_a_scan_once_closing(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scan that finishes after closeEvent already ran must not kick off a new one."""
+    started: list[object] = []
+    monkeypatch.setattr(window, "_start_metadata_scan", lambda: started.append(1))
+    window._closing = True  # noqa: SLF001
+
+    window._on_scan_finished()  # noqa: SLF001
+
+    assert not started
+
+
 def test_failed_status_is_painted_red(window: gui.MainWindow, tmp_path: Path) -> None:
     """A failed photo's Status cell turns red so it stands out in a long list."""
     img = _jpeg(tmp_path / "a.jpg")

@@ -691,6 +691,11 @@ class ThumbnailWorker(QObject):
         self.finished.emit()
 
 
+# Grace period _stop_scan gives an in-flight batched exiftool call to finish on its own before
+# detaching rather than blocking the caller. Comfortably above a normal scan's duration.
+_SCAN_STOP_TIMEOUT_MS = 3000
+
+
 class MetadataScanWorker(QObject):
     """
     Reads which metadata fields each photo already carries, off the UI thread.
@@ -1646,6 +1651,10 @@ class MainWindow(QMainWindow):
 
     def _on_scan_finished(self) -> None:
         """Tear down the scan thread and pick up photos added while it ran."""
+        if self._closing:
+            # A scan detached by _stop_scan's timeout can finish after closeEvent already moved
+            # on; the window is going away, so there is nothing left to restart a scan for.
+            return
         self._stop_scan()
         self._start_metadata_scan()
 
@@ -1653,9 +1662,17 @@ class MainWindow(QMainWindow):
         if self._scan_worker is not None:
             self._scan_worker.deleteLater()
         if self._scan_thread is not None:
-            self._scan_thread.quit()
-            self._scan_thread.wait()
-            self._scan_thread.deleteLater()
+            thread = self._scan_thread
+            thread.quit()
+            if thread.wait(_SCAN_STOP_TIMEOUT_MS):
+                thread.deleteLater()
+            else:
+                # Still running: a big folder, or a hung exiftool. pyexiftool exposes no way to
+                # cancel a batched call mid-flight, so detach instead of blocking the caller
+                # (closeEvent, _clear) indefinitely. The scan only reads metadata; losing its
+                # result is harmless. Clean up once it actually finishes, whenever that is.
+                logger.warning("gui_metadata_scan_stop_timed_out")
+                thread.finished.connect(thread.deleteLater)
             self._scan_thread = None
         self._scan_worker = None
 
