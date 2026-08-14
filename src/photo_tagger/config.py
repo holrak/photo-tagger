@@ -47,7 +47,10 @@ def _env_float(name: str, default: float) -> float:
 DEFAULT_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 DEFAULT_OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 DEFAULT_LMSTUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
-DEFAULT_LMSTUDIO_API_KEY = os.getenv("LM_STUDIO_API_KEY", os.getenv("OPENAI_API_KEY"))
+# Deliberately does not fall back to OPENAI_API_KEY: LM Studio is the default provider, and a
+# real OpenAI key sitting in the environment for unrelated tooling must never be sent, as a
+# Bearer token, to whatever host --url happens to point at.
+DEFAULT_LMSTUDIO_API_KEY = os.getenv("LM_STUDIO_API_KEY")
 # llama.cpp's llama-server speaks the OpenAI API on port 8080 by default; a key is optional
 # (only checked when the server was started with --api-key).
 DEFAULT_LLAMACPP_BASE_URL = os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1")
