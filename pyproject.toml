@@ -29,11 +29,11 @@ classifiers = [
 ]
 dependencies = [
     "cyclopts>=4.22.5",
-    "filelock>=3.32.2",
+    "filelock>=3.32.3",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "pillow>=12.3.0",
-    "pydantic-ai>=2.27.0",
+    "pydantic-ai>=2.29.0",
     "pydantic>=2.13.4",
     "pyexiftool>=0.5.6",
     "rawpy>=0.27.0",
@@ -51,17 +51,17 @@ dev = [
     "babel>=2.18.0",
     "bandit>=1.9.4",
     "pycroscope>=0.4.0",
-    "ruff>=0.16.2",
+    "ruff>=0.16.3",
     "zuban>=0.9.1",
 ]
 docs = [
-    "zensical>=0.0.53",
+    "zensical>=0.0.54",
 ]
 package = [
-    "pyinstaller>=6.21.0",
+    "pyinstaller>=6.22.0",
 ]
 test = [
-    "inline-snapshot>=0.35.3",
+    "inline-snapshot>=0.35.4",
     "pytest-cov>=7.1.0",
     "pytest-random-order>=1.2.0",
     "pytest-xdist[psutil]>=3.8.0",
@@ -87,15 +87,6 @@ photo-tagger-gui = "photo_tagger.gui:launch"
 
 [tool.uv]
 exclude-newer = "1 day"
-# Reviewed and trusted despite being under 1 day old; drop each entry once the window ages past it.
-[tool.uv.exclude-newer-package]
-pydantic-ai = "2026-08-08T05:00:00Z"
-pydantic-ai-slim = "2026-08-08T05:00:00Z"
-pydantic-evals = "2026-08-08T05:00:00Z"
-pydantic-graph = "2026-08-08T05:00:00Z"
-ruff = "2026-08-07T14:00:00Z"
-starlette = "2026-08-08T08:00:00Z"
-uv-build = "2026-08-07T17:00:00Z"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<1.0.0"]
