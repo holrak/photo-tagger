@@ -36,7 +36,7 @@ def test_parse_hierarchical_keyword_returns_empty_list_for_blank_input() -> None
 
 
 def test_parse_hierarchical_keyword_strips_trailing_gt() -> None:
-    """Stray '>' characters in model output are removed before parsing."""
+    """A trailing stray '>' with nothing after it does not add a spurious empty level."""
     hierarchical, parts = parse_hierarchical_keyword("Man<Human<Living Being>")
     assert hierarchical == "Living Being|Human|Man"
     assert parts == ["Living Being", "Human", "Man"]
@@ -47,6 +47,13 @@ def test_parse_hierarchical_keyword_reads_gt_only_chains_as_hierarchy() -> None:
     hierarchical, parts = parse_hierarchical_keyword("Green Foliage>Plant>Living Being")
     assert hierarchical == "Living Being|Plant|Green Foliage"
     assert parts == ["Living Being", "Plant", "Green Foliage"]
+
+
+def test_parse_hierarchical_keyword_handles_mixed_separators() -> None:
+    """A chain mixing '<' and '>' treats both as separators instead of fusing segments."""
+    hierarchical, parts = parse_hierarchical_keyword("Duck<Bird>Animal")
+    assert hierarchical == "Animal|Bird|Duck"
+    assert parts == ["Animal", "Bird", "Duck"]
 
 
 def test_dedupe_keywords_collapses_case_insensitive_repeats() -> None:

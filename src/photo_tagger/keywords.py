@@ -41,11 +41,11 @@ def parse_hierarchical_keyword(keyword: str) -> tuple[str, list[str]]:
     if not keyword:
         return ("", [])
 
-    # The model occasionally flips the bracket and emits "Leaf>Parent" chains. When there is no
-    # '<' at all, read '>' as the same leaf-first separator instead of mangling the chain into
-    # one flat keyword ("Green Foliage>Plant" is a hierarchy, not a keyword). With both present,
-    # '<' wins and stray '>' characters are dropped.
-    sanitized = keyword.replace(">", "<") if "<" not in keyword else keyword.replace(">", "")
+    # The model occasionally flips the bracket and emits "Leaf>Parent" chains, or even mixes both
+    # within one chain. Normalize every '>' to '<' unconditionally rather than only when '<' is
+    # absent: treating a stray '>' as noise to strip (the previous behavior) silently fused the
+    # segments on either side of it into one garbled keyword and dropped a hierarchy level.
+    sanitized = keyword.replace(">", "<")
     if "<" not in sanitized:
         return (sanitized, [sanitized])
 
