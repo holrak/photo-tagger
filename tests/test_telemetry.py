@@ -7,10 +7,12 @@ never escape to the caller.
 """
 
 import platform
+import threading
+import time
 import uuid
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 
 from photo_tagger import __version__, telemetry
@@ -395,7 +397,7 @@ def test_emit_crash_posts_when_enabled_and_respects_optout(
 ) -> None:
     """An enabled crash beacon POSTs; the config opt-out short-circuits before any network."""
     posted: list[dict[str, object]] = []
-    monkeypatch.setattr(httpx, "post", lambda _url, *, json, timeout: posted.append(json))  # noqa: ARG005 - httpx.post signature
+    monkeypatch.setattr(httpx2, "post", lambda _url, *, json, timeout: posted.append(json))  # noqa: ARG005 - httpx2.post signature
 
     assert telemetry.emit_crash(_package_exception(), interface="cli", enabled=False) is None
     assert posted == []
@@ -408,7 +410,7 @@ def test_emit_crash_posts_when_enabled_and_respects_optout(
 def test_emit_crash_is_capped_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """A crash loop cannot spam the collector: beacons stop after the per-process cap."""
     posted: list[object] = []
-    monkeypatch.setattr(httpx, "post", lambda *_a, **k: posted.append(k))
+    monkeypatch.setattr(httpx2, "post", lambda *_a, **k: posted.append(k))
     exc = _package_exception()
     sent = [telemetry.emit_crash(exc, interface="gui", enabled=True) for _ in range(5)]
     assert sum(thread is not None for thread in sent) == 3  # noqa: PLR2004 - the cap
@@ -423,7 +425,7 @@ def test_emit_returns_none_and_sends_nothing_when_disabled(
 ) -> None:
     """A disabled config short-circuits before any network attempt."""
     calls: list[object] = []
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(httpx2, "post", lambda *a, **k: calls.append((a, k)))
     assert telemetry.emit(_sample_run(), enabled=False) is None
     assert calls == []
 
@@ -438,7 +440,7 @@ def test_emit_posts_the_payload_when_enabled(monkeypatch: pytest.MonkeyPatch) ->
         captured["timeout"] = timeout
         return object()
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(httpx2, "post", fake_post)
     thread = telemetry.emit(_sample_run(), enabled=True, block=True)
     assert thread is not None
     assert captured["url"] == telemetry.ENDPOINT
@@ -447,14 +449,20 @@ def test_emit_posts_the_payload_when_enabled(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_emit_non_blocking_returns_started_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default non-blocking path returns the worker thread without waiting on it."""
-    monkeypatch.setattr(httpx, "post", lambda *_a, **_k: object())
+    monkeypatch.setattr(httpx2, "post", lambda *_a, **_k: object())
     thread = telemetry.emit(_sample_run(), enabled=True)
     assert thread is not None
     thread.join(timeout=2.0)  # tidy up so the post lands before the test ends
 
 
-def test_emit_returns_none_when_payload_build_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failure while assembling the payload is swallowed and nothing is sent."""
+def test_emit_swallows_payload_build_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A failure while assembling the payload sends nothing and never escapes to the caller.
+
+    The builder now runs inside the background thread (see
+    test_emit_does_not_block_the_caller_while_building), so emit() itself cannot know in advance
+    whether the build will fail; it still returns the started thread, not None.
+    """
 
     def boom(_run: RunInfo) -> dict[str, object]:
         msg = "platform probe blew up"
@@ -462,9 +470,39 @@ def test_emit_returns_none_when_payload_build_fails(monkeypatch: pytest.MonkeyPa
 
     posted: list[object] = []
     monkeypatch.setattr(telemetry, "build_payload", boom)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: posted.append((a, k)))
-    assert telemetry.emit(_sample_run(), enabled=True, block=True) is None
+    monkeypatch.setattr(httpx2, "post", lambda *a, **k: posted.append((a, k)))
+    thread = telemetry.emit(_sample_run(), enabled=True, block=True)
+    assert thread is not None
     assert posted == []
+
+
+def test_emit_does_not_block_the_caller_while_building(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Building the payload never happens on the caller's thread.
+
+    build_payload can shell out to probe hardware on a cache miss; the non-blocking path must return
+    immediately regardless of how long that takes, or a cold hardware-probe cache would stall the
+    tagging run right as it is about to exit.
+    """
+    finished = threading.Event()
+
+    def slow_build(_run: RunInfo) -> dict[str, object]:
+        time.sleep(0.2)
+        finished.set()
+        return {}
+
+    monkeypatch.setattr(telemetry, "build_payload", slow_build)
+    monkeypatch.setattr(httpx2, "post", lambda *_a, **_k: object())
+
+    start = time.monotonic()
+    thread = telemetry.emit(_sample_run(), enabled=True, block=False)
+    elapsed = time.monotonic() - start
+
+    assert thread is not None
+    assert elapsed < 0.1  # noqa: PLR2004 - well under slow_build's 0.2s sleep
+    assert not finished.is_set()  # the builder is still running on the background thread
+    thread.join(timeout=2.0)
+    assert finished.is_set()
 
 
 def test_emit_swallows_send_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -472,8 +510,8 @@ def test_emit_swallows_send_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def boom(*_a: object, **_k: object) -> object:
         msg = "network down"
-        raise httpx.ConnectError(msg)
+        raise httpx2.ConnectError(msg)
 
-    monkeypatch.setattr(httpx, "post", boom)
+    monkeypatch.setattr(httpx2, "post", boom)
     # block=True joins the worker; the test passes simply by not raising.
     telemetry.emit(_sample_run(), enabled=True, block=True)

@@ -41,7 +41,7 @@ from photo_tagger.hardware import hardware_info
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 # The collector endpoint (our own Cloudflare Worker). Kept as a module constant so tests can patch
@@ -365,11 +365,33 @@ def _safe_post(payload: dict[str, object]) -> None:
         logger.debug("telemetry_send_failed", error=str(exc))
 
 
-def _dispatch(payload: dict[str, object], *, block: bool) -> threading.Thread:
-    """Start the daemon send thread for *payload*, optionally waiting for the flush."""
+def _build_and_send(builder: Callable[[], dict[str, object]], *, failure_event: str) -> None:
+    """Build the payload and POST it, entirely on the calling (background) thread."""
+    try:
+        payload = builder()
+    except Exception as exc:  # noqa: BLE001 - building the payload must not crash the caller.
+        logger.debug(failure_event, error=str(exc))
+        return
+    _safe_post(payload)
+
+
+def _dispatch(
+    builder: Callable[[], dict[str, object]],
+    *,
+    block: bool,
+    failure_event: str,
+) -> threading.Thread:
+    """
+    Start the daemon thread that builds *and* sends the payload, optionally waiting for it.
+
+    The builder (which probes hardware on a cache miss, see :mod:`photo_tagger.hardware`) runs
+    inside this thread rather than before it starts: a slow or hung probe must delay the beacon,
+    never the tagging run that is about to exit.
+    """
     thread = threading.Thread(
-        target=_safe_post,
-        args=(payload,),
+        target=_build_and_send,
+        args=(builder,),
+        kwargs={"failure_event": failure_event},
         name="photo-tagger-telemetry",
         daemon=True,
     )
@@ -383,19 +405,19 @@ def emit(run: RunInfo, *, enabled: bool, block: bool = False) -> threading.Threa
     """
     Fire one telemetry beacon for *run* on a background daemon thread.
 
-    Returns the thread (or ``None`` when telemetry is disabled or the payload cannot be built). Pass
-    ``block=True`` to wait up to :data:`_FLUSH_TIMEOUT_SECONDS` for delivery. Both the CLI (which
-    exits right after the batch) and the GUI (whose process exits right after ``closeEvent``) use
-    it: a daemon thread abandoned at interpreter exit is killed mid-send and the beacon is lost.
+    Returns the thread (or ``None`` when telemetry is disabled), regardless of whether building the
+    payload later succeeds inside that thread. Pass ``block=True`` to wait up to
+    :data:`_FLUSH_TIMEOUT_SECONDS` for delivery. Both the CLI (which exits right after the batch)
+    and the GUI (whose process exits right after ``closeEvent``) use it: a daemon thread abandoned
+    at interpreter exit is killed mid-send and the beacon is lost.
     """
     if not should_send(config_enabled=enabled):
         return None
-    try:
-        payload = build_payload(run)
-    except Exception as exc:  # noqa: BLE001 - building the payload must not crash the caller.
-        logger.debug("telemetry_payload_failed", error=str(exc))
-        return None
-    return _dispatch(payload, block=block)
+    return _dispatch(
+        lambda: build_payload(run),
+        block=block,
+        failure_event="telemetry_payload_failed",
+    )
 
 
 # Crash beacons sent by this process, capped at _MAX_CRASH_BEACONS (see emit_crash).
@@ -414,15 +436,15 @@ def emit_crash(
 
     Honors the same opt-outs as :func:`emit` and defaults to ``block=True`` because the process is
     usually about to die when this is called. At most :data:`_MAX_CRASH_BEACONS` are sent per
-    process so a crash loop cannot spam the collector.
+    process so a crash loop cannot spam the collector; the cap is charged per attempt rather than
+    per successful build, so it also bounds a crash loop that fails inside the payload builder.
     """
     global _crash_beacons_sent  # noqa: PLW0603 - deliberate per-process counter.
     if _crash_beacons_sent >= _MAX_CRASH_BEACONS or not should_send(config_enabled=enabled):
         return None
-    try:
-        payload = build_crash_payload(exc, interface=interface)
-    except Exception as build_exc:  # noqa: BLE001 - crash reporting must not crash the crash path.
-        logger.debug("telemetry_crash_payload_failed", error=str(build_exc))
-        return None
     _crash_beacons_sent += 1
-    return _dispatch(payload, block=block)
+    return _dispatch(
+        lambda: build_crash_payload(exc, interface=interface),
+        block=block,
+        failure_event="telemetry_crash_payload_failed",
+    )
