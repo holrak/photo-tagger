@@ -2694,12 +2694,12 @@ def test_worker_puts_the_hint_in_that_photos_prompt(
     assert "Photographer's note" not in prompts[1]
 
 
-def test_hinted_photo_skips_the_cache_lookup_but_stores_the_correction(
+def test_hinted_photo_skips_the_cache_lookup(
     qapp: QApplication,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A hint forces a fresh model call; the corrected answer then serves hint-less runs."""
+    """A hint forces a fresh model call instead of replaying whatever is already cached."""
     _stub_generation(monkeypatch)
     img = _jpeg(tmp_path / "a.jpg")
     cache_file = tmp_path / "cache.sqlite"
@@ -2728,18 +2728,55 @@ def test_hinted_photo_skips_the_cache_lookup_but_stores_the_correction(
     assert corrected[0].title == "Deer"  # the stale "T" was not replayed
     assert corrected[0].from_cache is False
 
-    def boom(**_k: object) -> object:
-        msg = "the model was called although the corrected result is cached"
-        raise AssertionError(msg)
 
-    monkeypatch.setattr(gui, "analyze_image_with_ai", boom)
-    third = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
+def test_hinted_photo_does_not_poison_the_shared_cache(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A hint is a one-off correction; it must never become the cached "generic" answer.
+
+    Regression test: a hinted result used to be stored under the same content-only cache key a
+    hint-less run reads from, so a later hint-less regeneration of the same photo silently
+    replayed someone's one-time correction as if it were the model's generic read.
+    """
+    _stub_generation(monkeypatch)
+    img = _jpeg(tmp_path / "a.jpg")
+    cache_file = tmp_path / "cache.sqlite"
+
+    monkeypatch.setattr(
+        gui,
+        "analyze_image_with_ai",
+        lambda **_k: InferenceResult(title="Deer", description="D", keywords=["Deer"]),
+    )
+    first = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [img],
+        cache_file=cache_file,
+        hints={str(img): "The animal is a deer"},
+    )
+    corrected: list[Proposal] = []
+    first.file_done.connect(corrected.append)
+    first.run()
+    assert corrected[0].title == "Deer"
+
+    monkeypatch.setattr(
+        gui,
+        "analyze_image_with_ai",
+        lambda **_k: InferenceResult(title="Generic Animal", description="D", keywords=[]),
+    )
+    second = gui.GenerateWorker("lmstudio", "m", None, [img], cache_file=cache_file)
     replayed: list[Proposal] = []
-    third.file_done.connect(replayed.append)
-    third.run()
+    second.file_done.connect(replayed.append)
+    second.run()
 
-    assert replayed[0].title == "Deer"  # hint-less runs now replay the correction
-    assert replayed[0].from_cache is True
+    # The hinted "Deer" answer was never cached, so the hint-less run calls the model again
+    # instead of silently replaying someone's one-off correction.
+    assert replayed[0].title == "Generic Animal"
+    assert replayed[0].from_cache is False
 
 
 def test_worker_cache_survives_metadata_rewrites(

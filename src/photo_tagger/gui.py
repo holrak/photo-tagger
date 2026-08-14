@@ -555,19 +555,19 @@ class GenerateWorker(QObject):
         # Keying and I/O go through the same swallow-and-degrade helpers as the CLI pipeline,
         # so a broken cache entry (or unhashable format) costs a model call, never the photo.
         content_key = content_cache_key(path, context.content_hash) if cache is not None else None
-        # A hint means the cached answer was wrong for this photo, so skip the lookup and call
-        # the model; the corrected result is stored under the same key below, and hint-less runs
-        # replay it from then on.
-        cached = (
-            safe_cache_get(cache, content_key, file_name=path.name)
-            if cache is not None and content_key is not None and not hint
-            else None
-        )
+        # The cache key is keyed on image content only, not on the hint text, and the CLI's
+        # equivalent --hint folds into the run's cache *namespace* instead (one hint for the whole
+        # run). Neither applies here: a GUI hint is per-photo and one-off. Skip both the lookup
+        # and the write when hinted, or a hint-biased answer would be stored under the same key a
+        # later hint-less regeneration of this photo reads from, silently replaying someone else's
+        # correction (or last week's) as if it were the model's generic read.
+        skip_cache = cache is None or content_key is None or hint
+        cached = None if skip_cache else safe_cache_get(cache, content_key, file_name=path.name)
         inference = cached
         if inference is None:
             jpeg = prepare_image_for_agent(path, max_size=_PREVIEW_MAX)
             inference = analyze_image_with_ai(image_bytes=jpeg, agent=agent, user_prompt=prompt)
-            if cache is not None and content_key is not None:
+            if not skip_cache:
                 safe_cache_put(cache, content_key, inference, file_name=path.name)
         else:
             logger.info("gui_cache_hit", file=path.name)
