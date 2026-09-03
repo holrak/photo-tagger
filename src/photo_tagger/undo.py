@@ -178,13 +178,26 @@ class UndoJournal:
         """Return how many writes have been recorded."""
         return self._entries
 
-    def record(self, image_path: Path, target: Path, *, created: bool) -> None:
+    def record(
+        self,
+        image_path: Path,
+        target: Path,
+        *,
+        created: bool,
+        backed_up: bool = True,
+    ) -> None:
         """
         Record that *target* was written for *image_path*.
 
-        *created* says the target did not exist before the write, which is what tells undo to
-        delete the file rather than look for a backup. The backup is discovered here rather than
-        passed in: whether ExifTool made one depends on the write, not on the request.
+        *created* says the target did not exist before the write, which is what tells undo to delete
+        the file rather than look for a backup.
+
+        *backed_up* says the write was allowed to make one. Without it ExifTool is passed
+        ``-overwrite_original`` and writes no ``*_original`` at all, so any file sitting under that
+        name belongs to an earlier run or to the user's own ExifTool use. Adopting it would point
+        undo at content this run never wrote, and restoring it would destroy every edit made in
+        between. With backups on, ExifTool refuses to write over an existing ``*_original``, so the
+        write fails and nothing is recorded; a backup found here is therefore this write's own.
         """
         if self._broken:
             return
@@ -198,7 +211,7 @@ class UndoJournal:
             image=str(image_path),
             target=str(target),
             created=created,
-            backup=str(backup) if backup.exists() else None,
+            backup=str(backup) if backed_up and backup.exists() else None,
             size=stat.st_size,
             mtime=stat.st_mtime,
         )

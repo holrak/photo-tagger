@@ -82,6 +82,25 @@ def test_journal_records_an_exiftool_backup_when_one_exists(tmp_path: Path) -> N
     assert json.loads(journal.path.read_text(encoding="utf-8"))["backup"] == str(backup)
 
 
+def test_journal_ignores_a_stale_backup_when_the_write_made_none(tmp_path: Path) -> None:
+    """
+    A write with backups off must never adopt an ``*_original`` it did not create.
+
+    ExifTool gets ``-overwrite_original`` and writes no backup, so a file under that name is left
+    over from an earlier run or from the user's own ExifTool use. Recording it would point undo at
+    content this run never wrote, and restoring it would destroy every edit made since.
+    """
+    target = tmp_path / "a.xmp"
+    target.write_text("written now")
+    stale = tmp_path / ("a.xmp" + BACKUP_SUFFIX)
+    stale.write_text("from some run months ago")
+
+    journal = UndoJournal(tmp_path / "run.jsonl")
+    journal.record(tmp_path / "a.cr3", target, created=False, backed_up=False)
+
+    assert json.loads(journal.path.read_text(encoding="utf-8"))["backup"] is None
+
+
 def test_journal_skips_a_target_it_cannot_stat(tmp_path: Path) -> None:
     """A vanished target records nothing rather than a half-truth."""
     journal = UndoJournal(tmp_path / "run.jsonl")

@@ -631,7 +631,12 @@ def _write_pending(
         et=et,
     )
     if written and ctx.journal is not None:
-        ctx.journal.record(image_path, target, created=not existed)
+        ctx.journal.record(
+            image_path,
+            target,
+            created=not existed,
+            backed_up=options.backup_xmp,
+        )
     return written
 
 

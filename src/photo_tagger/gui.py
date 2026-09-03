@@ -757,7 +757,12 @@ class SaveWorker(QObject):
                 logger.exception("gui_save_failed", file=job.path.name, error=str(exc))
                 ok = False
             if ok and self._journal is not None:
-                self._journal.record(job.path, target, created=not existed)
+                self._journal.record(
+                    job.path,
+                    target,
+                    created=not existed,
+                    backed_up=self._backup,
+                )
             self._emitted += 1
             self.file_done.emit(str(job.path), ok)
 
@@ -3372,7 +3377,7 @@ class MainWindow(QMainWindow):
             logger.exception("gui_save_single_failed", error=str(exc), file=str(job.path))
             ok = False
         if ok and journal is not None:
-            journal.record(job.path, target, created=not existed)
+            journal.record(job.path, target, created=not existed, backed_up=options.backup)
         self._apply_write_result(item, job, ok=ok)
         return ok
 
