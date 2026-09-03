@@ -366,6 +366,25 @@ def test_load_vocabulary_rejects_an_oversized_file(
         load_vocabulary(path)
 
 
+def test_load_vocabulary_refuses_a_huge_file_without_reading_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The limit exists so the wrong file never reaches memory, so check the size first."""
+    monkeypatch.setattr("photo_tagger.vocabulary._MAX_FILE_CHARS", 10)
+    path = tmp_path / "disk-image.bin"
+    path.write_bytes(b"x" * 500)
+
+    def refuse_read(*_args: object, **_kwargs: object) -> str:
+        message = "the file must be rejected on its size, before any read"
+        raise AssertionError(message)
+
+    monkeypatch.setattr(Path, "read_text", refuse_read)
+
+    with pytest.raises(VocabularyError, match="larger than"):
+        load_vocabulary(path)
+
+
 @pytest.mark.parametrize(
     ("plural", "expected"),
     [

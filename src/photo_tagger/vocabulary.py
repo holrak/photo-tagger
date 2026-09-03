@@ -50,6 +50,8 @@ class VocabularyError(PhotoTaggerError):
 # keywords, and refusing one of those would be refusing the very catalog a vocabulary is for.
 # Whatever the limit, checking it early beats reading a gigabyte of something else into memory.
 _MAX_FILE_CHARS = 5_000_000
+# What the on-disk size has to be divided by before it can be compared with a character count.
+_UTF8_MAX_BYTES_PER_CHAR = 4
 
 # Similarity a fuzzy candidate must reach to count as the same term, and the rule that it must
 # start with the same letter. Both exist to absorb typos and spacing variants ("Ospray",
@@ -559,6 +561,14 @@ def load_vocabulary(path: Path, *, output_language: str = DEFAULT_OUTPUT_LANGUAG
     match an English catalog whatever the matcher does.
     """
     try:
+        # Size before contents, which is what makes the limit below worth having: len(text) can
+        # only be measured once the whole file is in memory, and pointing --vocabulary at a disk
+        # image should not cost a gigabyte of it. UTF-8 never spends more than four bytes on a
+        # character, so a file this big cannot be within the character limit either.
+        if path.stat().st_size > _MAX_FILE_CHARS * _UTF8_MAX_BYTES_PER_CHAR:
+            logger.error("vocabulary_file_too_large", file=str(path), bytes=path.stat().st_size)
+            msg = f"Vocabulary file {path} is larger than {_MAX_FILE_CHARS} characters"
+            raise VocabularyError(msg)
         # utf-8-sig, not utf-8: Notepad and Excel write a BOM, and read as plain UTF-8 it becomes
         # part of the first keyword. That term then matches loosely and is written back to the
         # photos with an invisible character in front of it, which is a near-duplicate of the very
