@@ -2729,7 +2729,11 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _clear(self) -> None:
-        if self._thread is not None:
+        """Empty the list, unless a run is still working through it."""
+        if self._busy():
+            # A save writes from its own job list, so clearing under it would keep writing photos
+            # the window no longer knows about and then report every one of them as unsaved.
+            self._status.setText(_("Cancel the run in flight before clearing the list."))
             return
         self._stop_thumbs()
         self._stop_scan()

@@ -387,6 +387,30 @@ def test_clear_empties_everything(window: gui.MainWindow, tmp_path: Path) -> Non
     assert window._tree.topLevelItemCount() == 0  # noqa: SLF001
 
 
+@pytest.mark.parametrize("attribute", ["_thread", "_save_thread"])
+def test_clear_is_refused_while_a_run_is_in_flight(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    attribute: str,
+) -> None:
+    """
+    Neither run may have the list pulled out from under it.
+
+    A save keeps writing from its own job list, so clearing mid-save wrote photos the window no
+    longer knew about and then reported "Saved 0" for every one of them.
+    """
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    setattr(window, attribute, SimpleNamespace())  # a run is in flight
+    try:
+        window._clear()  # noqa: SLF001
+
+        assert window._items != {}  # noqa: SLF001
+        assert window._tree.topLevelItemCount() == 1  # noqa: SLF001
+    finally:
+        # Put it back before the fixture's close(), which would call quit() on the stand-in.
+        setattr(window, attribute, None)
+
+
 def test_row_index_covers_every_folder_and_leaf(window: gui.MainWindow, tmp_path: Path) -> None:
     """Both lookups read an index built during the rebuild, nested folders included."""
     nested = tmp_path / "sub"
