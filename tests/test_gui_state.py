@@ -1284,3 +1284,51 @@ def test_harmonize_sessions_skips_a_shoot_with_nothing_generated(tmp_path: Path)
     result = harmonize_sessions({photo: []}, gap_minutes=30)
 
     assert (result.sessions, result.keywords) == (1, {})
+
+
+def test_keywords_to_save_keeps_the_vocabulary_spelling_verbatim() -> None:
+    """A catalog that writes its keywords in lower case means it, merge step or not."""
+    vocabulary = Vocabulary.from_entries(["gegenlicht"])
+
+    written = keywords_to_save(
+        KeywordSet(),
+        ["gegenlicht"],
+        overwrite=False,
+        verbatim=vocabulary.exact,
+    )
+
+    assert written.subject == ["gegenlicht"]
+    # Without the vocabulary there is nobody to defer to, so the merge step capitalizes as before.
+    assert keywords_to_save(KeywordSet(), ["gegenlicht"], overwrite=False).subject == ["Gegenlicht"]
+
+
+def test_build_save_job_writes_the_declared_spelling() -> None:
+    """The save toggles carry the vocabulary through to what ExifTool is handed."""
+    vocabulary = Vocabulary.from_entries(["gegenlicht"])
+    item = PhotoItem(path=Path("/a.jpg"), keywords=["gegenlicht"])
+
+    job = build_save_job(item, SaveOptions(verbatim=vocabulary.exact))
+
+    assert job.keywords.subject == ["gegenlicht"]
+
+
+def test_keyword_previews_show_what_the_save_will_write() -> None:
+    """The diff and the tree must not promise a spelling the save then changes."""
+    vocabulary = Vocabulary.from_entries(["landschaft|gegenlicht"])
+    edited = ["gegenlicht<landschaft"]
+
+    diff = keyword_diff(KeywordSet(), edited, overwrite=False, verbatim=vocabulary.exact)
+    tree = hierarchy_preview(KeywordSet(), edited, overwrite=False, verbatim=vocabulary.exact)
+
+    assert [keyword for keyword, _state in diff] == ["landschaft", "gegenlicht"]
+    assert tree == "landschaft\n└─ gegenlicht"
+
+
+def test_report_row_uses_the_declared_spelling(tmp_path: Path) -> None:
+    """The CSV reports what a save writes, so it follows the vocabulary too."""
+    vocabulary = Vocabulary.from_entries(["gegenlicht"])
+    item = PhotoItem(path=tmp_path / "a.jpg", keywords=["gegenlicht"], has_proposal=True)
+
+    row = photo_item_to_report_row(item, overwrite=False, verbatim=vocabulary.exact)
+
+    assert row.keywords == ["gegenlicht"]

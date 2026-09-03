@@ -264,6 +264,7 @@ def keywords_to_save(
     edited_keywords: list[str],
     *,
     overwrite: bool,
+    verbatim: Mapping[str, str] | None = None,
 ) -> KeywordSet:
     """
     Build the :class:`KeywordSet` to write from the edited keywords.
@@ -271,9 +272,14 @@ def keywords_to_save(
     Merges with the existing keywords unless *overwrite* is set, in which case the existing keywords
     are dropped first. Hierarchical entries (``Duck<Bird<Animal``) are parsed by
     :func:`merge_keywords` exactly as the CLI does.
+
+    *verbatim* carries the controlled vocabulary's own spelling of each term (its ``exact`` index),
+    which the merge step must not touch: a catalog that keeps its keywords in lower case means it,
+    and title-casing "gegenlicht" on the way out would write the near-duplicate the vocabulary
+    exists to prevent. The CLI's own write path passes the same index.
     """
     base = KeywordSet() if overwrite else existing
-    return merge_keywords(base, edited_keywords)
+    return merge_keywords(base, edited_keywords, verbatim=verbatim)
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +297,9 @@ class SaveOptions:
     overwrite: bool = False
     backup: bool = True
     use_sidecar: bool = True
+    # The active vocabulary's own spelling of each term, keyed by casefolded term. None when no
+    # vocabulary is in force, which is the only time the merge step may capitalize freely.
+    verbatim: Mapping[str, str] | None = None
 
     @property
     def any_field(self) -> bool:
@@ -326,7 +335,12 @@ def build_save_job(item: PhotoItem, options: SaveOptions) -> SaveJob:
     out of its payload.
     """
     keywords = (
-        keywords_to_save(item.existing_keywords, item.keywords, overwrite=options.overwrite)
+        keywords_to_save(
+            item.existing_keywords,
+            item.keywords,
+            overwrite=options.overwrite,
+            verbatim=options.verbatim,
+        )
         if options.write_keywords
         else KeywordSet()
     )
@@ -360,7 +374,12 @@ def apply_proposal(item: PhotoItem, proposal: Proposal) -> None:
     item.error = ""
 
 
-def photo_item_to_report_row(item: PhotoItem, *, overwrite: bool) -> ReportRow:
+def photo_item_to_report_row(
+    item: PhotoItem,
+    *,
+    overwrite: bool,
+    verbatim: Mapping[str, str] | None = None,
+) -> ReportRow:
     """
     Flatten a GUI :class:`PhotoItem` into a CSV :class:`ReportRow`.
 
@@ -369,7 +388,12 @@ def photo_item_to_report_row(item: PhotoItem, *, overwrite: bool) -> ReportRow:
     Save action. The EXIF and token columns are whatever was captured at generation time, and stay
     blank for a photo that was added but never generated.
     """
-    to_write = keywords_to_save(item.existing_keywords, item.keywords, overwrite=overwrite)
+    to_write = keywords_to_save(
+        item.existing_keywords,
+        item.keywords,
+        overwrite=overwrite,
+        verbatim=verbatim,
+    )
     model, lens, captured = select_camera_fields(item.camera_info)
     city, country = select_location(item.location_tags)
     return ReportRow(
@@ -601,10 +625,16 @@ def hierarchy_preview(
     edited_keywords: list[str],
     *,
     overwrite: bool,
+    verbatim: Mapping[str, str] | None = None,
 ) -> str:
     """Render the keyword tree that saving the edited keywords would produce."""
     return hierarchy_tree_text(
-        keywords_to_save(existing, edited_keywords, overwrite=overwrite).hierarchical,
+        keywords_to_save(
+            existing,
+            edited_keywords,
+            overwrite=overwrite,
+            verbatim=verbatim,
+        ).hierarchical,
     )
 
 
@@ -619,6 +649,7 @@ def keyword_diff(
     edited_keywords: list[str],
     *,
     overwrite: bool,
+    verbatim: Mapping[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """
     Compare existing flat keywords to the result of saving the edited keywords.
@@ -627,7 +658,12 @@ def keyword_diff(
     :data:`UNCHANGED`. The keywords that will be written come first in write order, then any that
     would be dropped (only possible with *overwrite*). Comparison is case-insensitive.
     """
-    result = keywords_to_save(existing, edited_keywords, overwrite=overwrite).subject
+    result = keywords_to_save(
+        existing,
+        edited_keywords,
+        overwrite=overwrite,
+        verbatim=verbatim,
+    ).subject
     existing_folds = {kw.casefold() for kw in existing.subject}
     result_folds = {kw.casefold() for kw in result}
     diff = [(kw, UNCHANGED if kw.casefold() in existing_folds else ADDED) for kw in result]

@@ -3833,3 +3833,24 @@ def test_undo_waits_for_a_run_in_progress(
 
     assert a.with_suffix(".xmp").exists()
     assert "Wait for the run in progress" in window._undo_details.toPlainText()  # noqa: SLF001
+
+
+def test_saving_writes_the_vocabulary_spelling_verbatim(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lower-case catalog must survive the save, or the window seeds the duplicate it prevents."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": photo})
+    window._load_vocabulary(_keyword_file(tmp_path, "gegenlicht\n"))  # noqa: SLF001
+    captured = _capture_write(monkeypatch)
+    _select(window, window._leaf_for(photo))  # noqa: SLF001
+    window._keywords.setPlainText("gegenlicht")  # noqa: SLF001
+
+    window._save_current()  # noqa: SLF001
+
+    keywords = captured["keywords"]
+    assert keywords is not None
+    assert keywords.subject == ["gegenlicht"]

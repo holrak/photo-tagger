@@ -2806,8 +2806,10 @@ class MainWindow(QMainWindow):
         # Fold any unsaved edits in the open photo into its row before exporting.
         self._commit_current()
         overwrite = self._overwrite.isChecked()
+        verbatim = self._verbatim_spellings()
         rows = [
-            photo_item_to_report_row(item, overwrite=overwrite) for item in self._items.values()
+            photo_item_to_report_row(item, overwrite=overwrite, verbatim=verbatim)
+            for item in self._items.values()
         ]
         try:
             write_report(target, rows)
@@ -3163,9 +3165,10 @@ class MainWindow(QMainWindow):
         edited = parse_keyword_lines(self._keywords.toPlainText())
         overwrite = self._overwrite.isChecked()
         existing = self._current.existing_keywords
-        paths = hierarchy_preview(existing, edited, overwrite=overwrite)
+        verbatim = self._verbatim_spellings()
+        paths = hierarchy_preview(existing, edited, overwrite=overwrite, verbatim=verbatim)
         self._hierarchy.setPlainText(paths or _(_NONE))
-        diff = keyword_diff(existing, edited, overwrite=overwrite)
+        diff = keyword_diff(existing, edited, overwrite=overwrite, verbatim=verbatim)
         self._diff.setHtml(_diff_html(diff))
         # A collapsed section still tells the user whether saving changes anything.
         added = sum(1 for _kw, state in diff if state == ADDED)
@@ -3212,7 +3215,18 @@ class MainWindow(QMainWindow):
             overwrite=self._overwrite.isChecked(),
             backup=self._backup.isChecked(),
             use_sidecar=not self._embed.isChecked(),
+            verbatim=self._verbatim_spellings(),
         )
+
+    def _verbatim_spellings(self) -> dict[str, str] | None:
+        """
+        Return the vocabulary's own spelling of every term, or None when there is no vocabulary.
+
+        A save merges keywords through the same step the CLI does, which title-cases anything fully
+        lower case. A catalog that writes "gegenlicht" means it, so its spellings are handed over
+        untouched; without this the window would write the near-duplicate the vocabulary prevents.
+        """
+        return self._vocabulary.exact if self._vocabulary else None
 
     def _write_fields_chosen(self) -> bool:
         """Report whether at least one write toggle (Title/Description/Keywords) is on."""
