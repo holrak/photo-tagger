@@ -443,8 +443,10 @@ photo-tagger watch -i ~/Pictures/Inbox --recursive --skip-tagged
 ```
 
 Photos already in the folder are tagged first, then each new one as it lands. Every flag the tagging
-command takes works here too and applies to each batch, with a single agent, cache, CSV/NDJSON file,
-and undo journal shared by the whole session. Stop it with Ctrl-C.
+command takes works here too and applies to each batch, with a single agent, cache, and CSV/NDJSON
+file shared by the whole session. Each batch records its own undo journal, so
+[`photo-tagger undo`](#undoing-a-run) puts back the last import rather than everything since the
+watch started. Stop it with Ctrl-C.
 
 | Flag             | Default | Description                                            |
 | ---------------- | ------- | ------------------------------------------------------ |

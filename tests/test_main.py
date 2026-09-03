@@ -25,7 +25,7 @@ from photo_tagger import (
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.errors import BatchError, ProviderError
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
-from photo_tagger.undo import UndoError
+from photo_tagger.undo import UndoError, UndoJournal
 from photo_tagger.vocabulary_build import KeywordCensus, TrimResult
 from photo_tagger.vocabulary_organize import OrganizeStats
 
@@ -1789,6 +1789,61 @@ def test_watch_tags_each_batch_with_one_shared_setup(tmp_path: Path) -> None:
 
     assert calls == [[first], [inbox / "b.cr3"]]
     assert setups[0] is setups[1]
+
+
+def test_watch_records_one_undo_journal_per_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A week-long watch must not fold every import into one journal to undo."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _settled_photo(inbox / "a.cr3")
+    journals: list[UndoJournal | None] = []
+
+    def fake_process(image_files: list[Path], setup: Any) -> None:  # noqa: ANN401 - the run setup
+        journals.append(setup.journal)
+        if len(journals) == 1:
+            _settled_photo(inbox / "b.cr3")
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "_process_batch", side_effect=fake_process),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox)])
+
+    first_journal, second_journal = journals
+    assert first_journal is not None
+    assert second_journal is not None
+    assert first_journal.path != second_journal.path
+
+
+def test_watch_records_nothing_when_the_undo_log_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--no-undo-log holds for every batch, not just the first."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _settled_photo(inbox / "a.cr3")
+    journals: list[UndoJournal | None] = []
+
+    def fake_process(image_files: list[Path], setup: Any) -> None:  # noqa: ANN401 - the run setup
+        journals.append(setup.journal)
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "_process_batch", side_effect=fake_process),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox), "--no-undo-log"])
+
+    assert journals == [None]
 
 
 def _bounded_watch(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 - passthrough shim

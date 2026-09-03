@@ -958,9 +958,12 @@ class _RunSetup:
     The collaborators a tagging run builds once and reuses for every batch it processes.
 
     ``tag`` processes exactly one batch, ``watch`` processes a new one whenever photos land, and
-    both want the same agent, cache, report writers, and undo journal for the whole invocation:
-    reopening them per batch would repeat the CSV header, re-prune the cache, and scatter one
-    session's writes across several journals.
+    both want the same agent, cache, and report writers for the whole invocation: reopening them per
+    batch would repeat the CSV header and re-prune the cache.
+
+    The undo journal is the exception. A watch can run for days, and one journal for all of it would
+    make "undo the import" mean every photo since Tuesday; each batch is its own run, so
+    :meth:`start_journal` opens one per batch. ``tag`` has a single batch and never calls it.
     """
 
     options: ProcessingOptions
@@ -978,6 +981,22 @@ class _RunSetup:
     on_image_result: Callable[[ImageOutcome], None] | None = None
     on_success: Callable[[Path], None] | None = None
     journal: UndoJournal | None = None
+    # Whether writes are recorded at all, so a rotated journal knows to stay switched off.
+    journal_enabled: bool = True
+
+    def start_journal(self) -> None:
+        """Open a journal for the batch about to run, reporting what the previous one recorded."""
+        self._report_journal()
+        self.journal = open_journal(datetime.now(tz=UTC), enabled=self.journal_enabled)
+
+    def _report_journal(self) -> None:
+        """Log the journal's path once it holds something, so the user can name it to undo."""
+        if self.journal is not None and self.journal.entries:
+            logger.info(
+                "undo_journal_written",
+                file=str(self.journal.path),
+                entries=self.journal.entries,
+            )
 
     def close(self) -> None:
         """Release everything the run opened, in the order it was opened."""
@@ -985,12 +1004,7 @@ class _RunSetup:
             self.cache.close()
         if self.csv_writer is not None:
             self.csv_writer.close()
-        if self.journal is not None and self.journal.entries:
-            logger.info(
-                "undo_journal_written",
-                file=str(self.journal.path),
-                entries=self.journal.entries,
-            )
+        self._report_journal()
 
 
 def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one.
@@ -1061,6 +1075,7 @@ def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
             datetime.now(tz=UTC),
             enabled=artifacts.undo_log and not output.dry_run,
         ),
+        journal_enabled=artifacts.undo_log and not output.dry_run,
     )
 
 
@@ -1261,8 +1276,10 @@ def watch(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group
     ``--interval`` seconds, which behaves the same on every platform and over network shares.
 
     Every flag ``photo-tagger`` itself takes works here too and applies to each batch, with one
-    agent, cache, report file, and undo journal shared by the whole session. A batch where some
-    photo fails is logged and the watch continues; the failure does not stop the loop.
+    agent, cache, and report file shared by the whole session. Each batch records its own undo
+    journal, so ``photo-tagger undo`` puts back the last import rather than every import since the
+    watch started. A batch where some photo fails is logged and the watch continues; the failure
+    does not stop the loop.
 
     Examples:
         photo-tagger watch -i ~/Pictures/Inbox
@@ -1361,6 +1378,9 @@ def _watch_forever(  # noqa: PLR0913 - mirrors watch()'s flag groups one-for-one
                 continue
             batches += 1
             tagged += len(image_files)
+            # Each batch is its own run to undo: a watch left running all week must not fold a
+            # month of imports into one journal.
+            setup.start_journal()
             try:
                 _process_batch(image_files, setup)
             except BatchError as exc:

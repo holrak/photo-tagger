@@ -88,8 +88,9 @@ All notable changes to this project are documented here. The format is based on
   `--settle` seconds old), so a photo still being copied is left alone. Scanning is a plain
   directory listing every `--interval` seconds, so it behaves the same on every platform and over
   network shares, with no new dependency. Every tagging flag applies to each batch, and one agent,
-  cache, report file, and undo journal are shared by the whole session; a batch with failures is
-  logged and the watch continues.
+  cache, and report file are shared by the whole session, while each batch records an undo journal
+  of its own so `photo-tagger undo` puts back the last import and not every import since the watch
+  started; a batch with failures is logged and the watch continues.
 
 - GUI: all five of the above, without a terminal.
 
