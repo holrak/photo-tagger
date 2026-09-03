@@ -22,7 +22,9 @@ from photo_tagger.vocabulary_build import (
     render_drop_report,
     render_vocabulary,
     trim,
+    vocabulary_header,
 )
+from photo_tagger.vocabulary_organize import OrganizeStats
 
 
 def _census(**uses: int) -> KeywordCensus:
@@ -180,3 +182,44 @@ def test_render_drop_report_lists_every_drop_with_its_reason() -> None:
     lines = report.splitlines()
     assert lines[0] == "keyword,uses,reason,detail"
     assert lines[1] == "Fluke,1,rare,used 1x"
+
+
+def test_census_merge_adds_up_two_sources() -> None:
+    """An export and the photos themselves are two counts of one library, so they add up."""
+    photos = KeywordCensus()
+    photos.add(["Animal", "Bird"], weight=3)
+    photos.photos = 12
+    export = KeywordCensus()
+    export.add(["Animal", "Bird"], weight=2)
+    export.add(["Sunset"], weight=4)
+
+    export.merge(photos)
+
+    assert dict(export.uses) == {"Animal": 5, "Bird": 5, "Sunset": 4}
+    assert export.best_chain("Bird") == ("Animal", "Bird")
+    assert export.photos == photos.photos
+
+
+def test_vocabulary_header_reports_the_source_and_the_rules() -> None:
+    """The generated file says where it came from, so its thresholds can be revisited."""
+    header = vocabulary_header("410 photo(s)", 120, 8, TrimRules(min_uses=3, max_terms=500))
+
+    assert header.startswith("# photo-tagger vocabulary: 120 keywords kept, 8 dropped.\n")
+    assert "# Source: 410 photo(s).\n" in header
+    assert "used at least 3x, at most 500 terms, digits dropped" in header
+    assert header.endswith("{braces} for a synonym. A line starting with '# ' is a comment.\n")
+
+
+def test_vocabulary_header_names_an_uncapped_list() -> None:
+    """No cap reads as words, not as a stray None."""
+    header = vocabulary_header("an export", 3, 0, TrimRules(max_terms=None, allow_digits=True))
+    assert "at most no cap terms, digits kept" in header
+
+
+def test_vocabulary_header_records_what_the_model_organized() -> None:
+    """The organize pass invents parent keywords, so the file lists them."""
+    stats = OrganizeStats(model_name="qwen-vl", categories=["Animal", "Place"], grouped=4)
+    header = vocabulary_header("410 photo(s)", 120, 8, TrimRules(), stats)
+
+    assert "# Organized by qwen-vl: 4 keyword(s) folded into a synonym" in header
+    assert "# Categories (written to your photos as parents): Animal, Place." in header

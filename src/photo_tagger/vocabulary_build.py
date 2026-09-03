@@ -48,6 +48,10 @@ if TYPE_CHECKING:
 
     from photo_tagger.models import KeywordSet
 
+    # Annotation only: vocabulary_organize imports this module, so the runtime dependency has to
+    # stay one-way. Python 3.14 evaluates annotations lazily, so the name is never needed at import.
+    from photo_tagger.vocabulary_organize import OrganizeStats
+
 
 # Photos read per exiftool call. Large enough that the IPC cost disappears into the read, small
 # enough that a command line stays well inside every platform's argument limit.
@@ -115,6 +119,19 @@ class KeywordCensus:
         # Ties break on the longer chain, then alphabetically, so the same census always renders
         # the same file.
         return max(seen, key=lambda chain: (seen[chain], len(chain), chain))
+
+    def merge(self, other: KeywordCensus) -> None:
+        """
+        Fold *other*'s counts into this census.
+
+        Lets one build read both a keyword export and the photos themselves: two censuses of the
+        same library, counted differently, added up before the rules run.
+        """
+        for term, count in other.uses.items():
+            self.uses[term] += count
+        for term, chains in other.chains.items():
+            self.chains.setdefault(term, Counter()).update(chains)
+        self.photos += other.photos
 
 
 def _split_chain(entry: str) -> list[str]:
@@ -352,6 +369,44 @@ def render_vocabulary(result: TrimResult, *, header: str = "", flat: bool = Fals
     # reads top-down.
     body = "\n".join(dict.fromkeys(sorted(lines, key=lambda line: (line.casefold(), line))))
     return f"{header}\n{body}\n" if header else f"{body}\n"
+
+
+def vocabulary_header(
+    source: str,
+    kept: int,
+    dropped: int,
+    rules: TrimRules,
+    stats: OrganizeStats | None = None,
+) -> str:
+    """
+    Explain at the top of the generated file where it came from and how to change it.
+
+    Rendered here rather than in the command, so a file built from the desktop GUI carries the same
+    provenance as one built from the CLI.
+    """
+    cap = rules.max_terms if rules.max_terms is not None else "no cap"
+    lines = [
+        f"# photo-tagger vocabulary: {kept} keywords kept, {dropped} dropped.",
+        f"# Source: {source}.",
+        (
+            f"# Rules: used at least {rules.min_uses}x, at most {cap} terms, "
+            f"digits {'kept' if rules.allow_digits else 'dropped'}."
+        ),
+    ]
+    if stats is not None:
+        lines += [
+            (
+                f"# Organized by {stats.model_name}: {stats.grouped} keyword(s) folded into a "
+                f"synonym, {stats.categorized} filed under a category."
+            ),
+            f"# Categories (written to your photos as parents): {', '.join(stats.categories)}.",
+        ]
+    lines += [
+        "#",
+        "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a",
+        "# tree, {braces} for a synonym. A line starting with '# ' is a comment.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def render_drop_report(result: TrimResult) -> str:

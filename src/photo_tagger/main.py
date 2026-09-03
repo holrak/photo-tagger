@@ -21,7 +21,6 @@ import os
 import sys
 import tempfile
 import threading
-from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,12 +86,12 @@ from photo_tagger.undo import (
 from photo_tagger.vocabulary import load_vocabulary, prompt_with_vocabulary
 from photo_tagger.vocabulary_build import (
     KeywordCensus,
-    TrimRules,
     census_from_export,
     census_from_photos,
     render_drop_report,
     render_vocabulary,
     trim,
+    vocabulary_header,
 )
 from photo_tagger.vocabulary_organize import OrganizeStats, organize
 from photo_tagger.watch import (
@@ -210,39 +209,6 @@ def gui() -> None:
     raise SystemExit(gui_module.launch())
 
 
-def _vocabulary_header(
-    source: str,
-    kept: int,
-    dropped: int,
-    rules: TrimRules,
-    stats: OrganizeStats | None = None,
-) -> str:
-    """Explain at the top of the generated file where it came from and how to change it."""
-    cap = rules.max_terms if rules.max_terms is not None else "no cap"
-    lines = [
-        f"# photo-tagger vocabulary: {kept} keywords kept, {dropped} dropped.",
-        f"# Source: {source}.",
-        (
-            f"# Rules: used at least {rules.min_uses}x, at most {cap} terms, "
-            f"digits {'kept' if rules.allow_digits else 'dropped'}."
-        ),
-    ]
-    if stats is not None:
-        lines += [
-            (
-                f"# Organized by {stats.model_name}: {stats.grouped} keyword(s) folded into a "
-                f"synonym, {stats.categorized} filed under a category."
-            ),
-            f"# Categories (written to your photos as parents): {', '.join(stats.categories)}.",
-        ]
-    lines += [
-        "#",
-        "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a",
-        "# tree, {braces} for a synonym. A line starting with '# ' is a comment.",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def _build_census(
     inputs: list[Path] | None,
     from_export: Path | None,
@@ -254,16 +220,12 @@ def _build_census(
     census = KeywordCensus()
     sources: list[str] = []
     if from_export is not None:
-        census = census_from_export(from_export.read_text(encoding="utf-8"))
+        census.merge(census_from_export(from_export.read_text(encoding="utf-8")))
         sources.append(f"keyword export {from_export.name} (counts are tree occurrences)")
     if inputs:
         image_files = resolve_image_batch(inputs, image_extensions, recursive=recursive)
         photo_census = census_from_photos(image_files)
-        for term, count in photo_census.uses.items():
-            census.uses[term] += count
-        for term, chains in photo_census.chains.items():
-            census.chains.setdefault(term, Counter()).update(chains)
-        census.photos = photo_census.photos
+        census.merge(photo_census)
         sources.append(f"{photo_census.photos} photo(s)")
     return census, " and ".join(sources)
 
@@ -369,7 +331,7 @@ def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all
             console.print(f"[red]{exc}[/red]")
             raise SystemExit(1) from exc
 
-    header = _vocabulary_header(source, len(result.kept), len(result.dropped), rules, stats)
+    header = vocabulary_header(source, len(result.kept), len(result.dropped), rules, stats)
     try:
         output.write_text(
             render_vocabulary(result, header=header, flat=build.flat),

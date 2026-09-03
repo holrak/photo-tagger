@@ -116,3 +116,65 @@ def test_watch_sleeps_between_polls(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     list(watch_batches([tmp_path], "jpg", interval_seconds=7.5, max_polls=3))
 
     assert slept == [7.5, 7.5]
+
+
+def test_watch_stops_when_asked(tmp_path: Path) -> None:
+    """A caller with a Stop button ends the watch at the next poll instead of running forever."""
+    _make_photo(tmp_path / "a.jpg")
+    stopped: list[bool] = []
+
+    seen: list[list[Path]] = []
+    # No max_polls: only the predicate ends this loop, which is how the GUI runs it.
+    for batch in watch_batches(
+        [tmp_path],
+        "jpg",
+        interval_seconds=0,
+        should_stop=lambda: bool(stopped),
+    ):
+        seen.append(batch)
+        stopped.append(True)
+
+    assert seen == [[tmp_path / "a.jpg"]]
+
+
+def test_watch_cuts_the_wait_short_when_asked_to_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wait is taken in slices, so stopping does not have to sit out a whole interval."""
+    _make_photo(tmp_path / "a.jpg")
+    slept: list[float] = []
+    stop = False
+
+    def fake_sleep(seconds: float) -> None:
+        nonlocal stop
+        slept.append(seconds)
+        stop = True  # asked to stop one slice into the wait
+
+    monkeypatch.setattr("photo_tagger.watch.time.sleep", fake_sleep)
+
+    list(watch_batches([tmp_path], "jpg", interval_seconds=30.0, should_stop=lambda: stop))
+
+    assert slept == [0.2]  # one slice, not the full 30 seconds
+
+
+def test_watch_waits_the_whole_interval_while_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A watcher nobody has stopped still sleeps the full interval, one slice at a time."""
+    _make_photo(tmp_path / "a.jpg")
+    slept: list[float] = []
+    monkeypatch.setattr("photo_tagger.watch.time.sleep", slept.append)
+
+    list(
+        watch_batches(
+            [tmp_path],
+            "jpg",
+            interval_seconds=0.5,
+            max_polls=2,
+            should_stop=lambda: False,
+        ),
+    )
+
+    assert slept == [0.2, 0.2, pytest.approx(0.1)]

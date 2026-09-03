@@ -20,7 +20,7 @@ from photo_tagger.discovery import parse_extensions, resolve_image_files
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 # finished. Two polls plus the age check is a cheap, portable stand-in for "the writer closed it".
 DEFAULT_INTERVAL_SECONDS = 5.0
 DEFAULT_SETTLE_SECONDS = 2.0
+
+# The wait between polls is taken in slices no longer than this, so a caller that asks to stop is
+# not held for a whole interval. The CLI stops on Ctrl-C and never passes a predicate; the GUI does,
+# because closing a window that takes ten seconds to react reads as a freeze.
+_STOP_CHECK_SECONDS = 0.2
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,6 +96,18 @@ def _settled_files(
     return ready
 
 
+def _sleep_between_polls(seconds: float, should_stop: Callable[[], bool] | None) -> None:
+    """Wait *seconds* before the next poll, cutting the wait short once *should_stop* says so."""
+    if should_stop is None:
+        time.sleep(seconds)
+        return
+    remaining = seconds
+    while remaining > 0 and not should_stop():
+        nap = min(_STOP_CHECK_SECONDS, remaining)
+        time.sleep(nap)
+        remaining -= nap
+
+
 def watch_batches(  # noqa: PLR0913 - each kwarg is a distinct, independent knob.
     inputs: list[Path],
     image_extensions: str,
@@ -99,6 +116,7 @@ def watch_batches(  # noqa: PLR0913 - each kwarg is a distinct, independent knob
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
     settle_seconds: float = DEFAULT_SETTLE_SECONDS,
     max_polls: int | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> Iterator[list[Path]]:
     """
     Yield each batch of new, finished photos found under *inputs*, forever.
@@ -110,13 +128,19 @@ def watch_batches(  # noqa: PLR0913 - each kwarg is a distinct, independent knob
     Polls with nothing to report yield nothing at all, so the caller's loop body runs only when
     there is work. *max_polls* bounds the loop for tests; production passes None and stops on
     Ctrl-C.
+
+    *should_stop* ends the watch at the next poll boundary, and is checked while waiting too, so a
+    caller with a Stop button does not have to wait out an interval. The CLI leaves it None.
     """
     extensions = parse_extensions(image_extensions)
     state = _PollState()
     polls = 0
     while max_polls is None or polls < max_polls:
         if polls:
-            time.sleep(interval_seconds)
+            _sleep_between_polls(interval_seconds, should_stop)
+        if should_stop is not None and should_stop():
+            logger.info("watch_stopped", polls=polls, waiting=len(state.fingerprints))
+            return
         polls += 1
         candidates = [
             path
