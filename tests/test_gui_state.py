@@ -477,7 +477,10 @@ def test_navigation_shortcuts_follow_the_platform() -> None:
 def test_location_crumb_names_a_folder_by_itself() -> None:
     """A folder's crumb is its own name, and the full path when it has none."""
     assert location_crumb(_folder_at("/pics/Shoot 1")) == "Shoot 1"
-    assert location_crumb(_folder_at("/")) == "/"
+    # A filesystem root has no name, so the crumb falls back to the path. Windows renders that
+    # root as "\", hence str() rather than a "/" literal.
+    root = Path("/")
+    assert location_crumb(Location(path=root, is_dir=True)) == str(root)
 
 
 def test_rank_vision_models_surfaces_likely_first_without_dropping_any() -> None:
