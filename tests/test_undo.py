@@ -118,8 +118,23 @@ def test_open_journal_names_the_file_after_the_run(
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     journal = open_journal(_STARTED_AT)
     assert journal is not None
-    assert journal.path.name.startswith("20260501090000-")
+    # Microseconds included: one process can open two journals inside a second (the GUI opens one
+    # per save), and a shared name would merge two runs into one undo.
+    assert journal.path.name.startswith("20260501090000000000-")
     assert journal.path.suffix == ".jsonl"
+
+
+def test_two_journals_opened_in_the_same_second_do_not_collide(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Undoing one batch must not put back the batch saved a moment before it."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    first = open_journal(_STARTED_AT)
+    second = open_journal(_STARTED_AT.replace(microsecond=500))
+    assert first is not None
+    assert second is not None
+    assert first.path != second.path
 
 
 def test_list_and_latest_journal_are_newest_first(

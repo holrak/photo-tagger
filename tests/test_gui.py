@@ -3854,3 +3854,57 @@ def test_saving_writes_the_vocabulary_spelling_verbatim(
     keywords = captured["keywords"]
     assert keywords is not None
     assert keywords.subject == ["gegenlicht"]
+
+
+def test_photo_by_photo_saves_share_one_journal(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Saving one photo at a time is one session, not one run per click.
+
+    Journals are pruned to the fifty most recent, so a journal per click would push every command-
+    line run out of the undo list during an ordinary review session.
+    """
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+
+    def fake_write(path: Path, *_a: object, **_k: object) -> bool:
+        path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    for path in (a, b):
+        _select(window, window._leaf_for(path))  # noqa: SLF001
+        window._save_current()  # noqa: SLF001
+
+    journals = list_journals()
+    assert len(journals) == 1
+    assert len(read_journal(journals[0])) == 2  # noqa: PLR2004 - one entry per saved photo
+
+
+def test_a_batch_save_gets_its_own_journal(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch is a run, so undoing it puts back that batch and nothing else."""
+    photo = _jpeg(tmp_path / "single.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"single": photo})
+    window._items[str(photo)].has_proposal = True  # noqa: SLF001
+    window._items[str(photo)].title = "T"  # noqa: SLF001
+
+    def fake_write(path: Path, *_a: object, **_k: object) -> bool:
+        path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    _stub_save_helper(monkeypatch)
+    _select(window, window._leaf_for(photo))  # noqa: SLF001
+    window._save_current()  # noqa: SLF001 - one photo by hand first
+
+    window._save_selected()  # noqa: SLF001 - then the batch
+    _drain_save(window)
+
+    assert len(list_journals()) == 2  # noqa: PLR2004 - the session's single saves, and the batch

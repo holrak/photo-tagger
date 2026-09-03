@@ -836,8 +836,10 @@ def harmonize_summary(result: HarmonizeResult) -> str:
     ).format(shoots=shoots, n=changed)
 
 
-# The filename a run's undo journal takes: a fixed-width UTC timestamp, then the pid.
-_JOURNAL_TIME_FORMAT = "%Y%m%d%H%M%S"
+# How to read the timestamp a journal's filename starts with, by its width. The shorter one is a
+# journal written before the stamp carried microseconds. Width decides, because strptime is happy
+# to read the second-only stamp under the longer format and land on the wrong time.
+_JOURNAL_STAMP_FORMATS = {20: "%Y%m%d%H%M%S%f", 14: "%Y%m%d%H%M%S"}
 
 # What each undo outcome is called in the window. The module's own constants are log-facing
 # identifiers; these are the phrases a user reads next to a file name.
@@ -856,10 +858,12 @@ UNDO_OK_ACTIONS = frozenset({RESTORED, DELETED})
 
 def journal_time(path: Path) -> datetime | None:
     """Parse a journal's start time out of its filename, or None when the name is not ours."""
+    stamp = path.name.split("-", 1)[0]
+    time_format = _JOURNAL_STAMP_FORMATS.get(len(stamp))
+    if time_format is None:
+        return None
     try:
-        return datetime.strptime(path.name.split("-", 1)[0], _JOURNAL_TIME_FORMAT).replace(
-            tzinfo=UTC,
-        )
+        return datetime.strptime(stamp, time_format).replace(tzinfo=UTC)
     except ValueError:
         return None
 

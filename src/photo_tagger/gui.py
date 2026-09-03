@@ -1198,6 +1198,8 @@ class MainWindow(QMainWindow):
         # The undo journal the batch in flight is recording into. None while idle, or when
         # recording is switched off in Settings.
         self._save_journal: UndoJournal | None = None
+        # The one journal every photo-by-photo save of this session shares, opened on the first.
+        self._session_journal: UndoJournal | None = None
         # When the run in flight started, for the elapsed/remaining readout. None while idle.
         self._run_started: float | None = None
         self._thumb_thread: QThread | None = None
@@ -3238,16 +3240,32 @@ class MainWindow(QMainWindow):
 
     def _open_undo_journal(self) -> UndoJournal | None:
         """
-        Open a journal for the save about to run, or None when recording is switched off.
+        Open a journal for the batch about to be written, or None when recording is switched off.
 
-        One journal per save, the way the CLI writes one per run: undoing then puts back exactly the
-        batch you regret rather than everything this window has ever written. The file is only
+        One journal per batch, the way the CLI writes one per run: undoing then puts back exactly
+        the batch you regret rather than everything this window has ever written. The file is only
         created once something is actually recorded.
         """
         return open_journal(
             datetime.now(tz=UTC),
             enabled=self._undo_log_action.isChecked(),
         )
+
+    def _single_save_journal(self) -> UndoJournal | None:
+        """
+        Return the journal that photo-by-photo saves share, opening it on the first one.
+
+        A batch save is a run and gets a journal of its own, but clicking Save on one photo at a
+        time is not fifty runs: journals are pruned to the fifty most recent, so a session spent
+        reviewing photo by photo would push every command-line run out of the undo list. All of a
+        session's single saves therefore land in one journal, which is also what "undo what I did
+        just now" means when that is how you were working.
+        """
+        if not self._undo_log_action.isChecked():
+            return None
+        if self._session_journal is None:
+            self._session_journal = self._open_undo_journal()
+        return self._session_journal
 
     def _write_item(self, item: PhotoItem) -> bool:
         """
@@ -3258,7 +3276,7 @@ class MainWindow(QMainWindow):
         """
         options = self._save_options()
         job = build_save_job(item, options)
-        journal = self._open_undo_journal()
+        journal = self._single_save_journal()
         # Whether the target exists decides how undo reverts this write, and only holds before it.
         target = write_target(job.path, use_sidecar=options.use_sidecar)
         existed = target.exists()

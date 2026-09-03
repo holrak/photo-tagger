@@ -1188,6 +1188,20 @@ def test_journal_time_parses_the_run_start_from_the_name() -> None:
     assert journal_time(Path("not-a-journal.jsonl")) is None
 
 
+def test_journal_time_reads_a_microsecond_stamp() -> None:
+    """Journals now carry microseconds so two runs in one second stay apart; both widths read."""
+    assert journal_time(Path("20260501143005123456-4242.jsonl")) == datetime(
+        2026,
+        5,
+        1,
+        14,
+        30,
+        5,
+        123456,
+        tzinfo=UTC,
+    )
+
+
 def test_journal_label_names_the_run_and_its_size() -> None:
     """One row per recorded run: when it ran, and how much it wrote."""
     label = journal_label(Path("20260501143005-4242.jsonl"), 128)

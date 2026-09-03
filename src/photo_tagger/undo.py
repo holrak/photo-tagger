@@ -89,8 +89,14 @@ def runs_dir() -> Path:
 
 
 def _journal_name(started_at: datetime) -> str:
-    """Name a journal after its start time and pid, so two runs cannot collide."""
-    return f"{started_at.strftime('%Y%m%d%H%M%S')}-{os.getpid()}{_JOURNAL_SUFFIX}"
+    """
+    Name a journal after its start time and pid, so two runs cannot collide.
+
+    The timestamp carries microseconds because one process can start two runs inside a second: the
+    desktop GUI opens a journal per save, and two quick batches would otherwise share a name and be
+    undone as one. Fixed width either way, so sorting by name still sorts by time.
+    """
+    return f"{started_at.strftime('%Y%m%d%H%M%S%f')}-{os.getpid()}{_JOURNAL_SUFFIX}"
 
 
 def list_journals(directory: Path | None = None) -> list[Path]:
