@@ -1188,6 +1188,8 @@ def test_journal_time_parses_the_run_start_from_the_name() -> None:
         tzinfo=UTC,
     )
     assert journal_time(Path("not-a-journal.jsonl")) is None
+    # Right width, impossible date: still not one of ours.
+    assert journal_time(Path("99999999999999-1.jsonl")) is None
 
 
 def test_journal_time_reads_a_microsecond_stamp() -> None:
