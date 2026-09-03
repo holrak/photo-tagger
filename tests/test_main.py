@@ -1465,6 +1465,21 @@ def test_vocabulary_command_reads_an_export_saved_with_a_bom(tmp_path: Path) -> 
     assert output.read_text(encoding="utf-8").splitlines()[-2:] == ["Animal", "Animal|Bird"]
 
 
+def test_vocabulary_command_exits_1_on_an_export_it_cannot_decode(tmp_path: Path) -> None:
+    """A UTF-16 export (or a binary file picked by mistake) is a bad input, not a traceback."""
+    export = tmp_path / "keywords.txt"
+    export.write_bytes("Osprey\nBird\n".encode("utf-16"))
+    output = tmp_path / "vocabulary.txt"
+
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.app(
+            ["vocabulary", "--from-export", str(export), "--output", str(output)],
+        )
+
+    assert exit_info.value.code == 1
+    assert not output.exists()
+
+
 def test_vocabulary_command_exits_1_without_a_source(tmp_path: Path) -> None:
     """Neither photos nor an export means there is nothing to count."""
     with pytest.raises(SystemExit) as exit_info:

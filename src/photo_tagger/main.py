@@ -305,8 +305,12 @@ def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all
             image_extensions=image_extensions,
             recursive=recursive,
         )
-    except (DiscoveryError, OSError) as exc:
+    except (DiscoveryError, OSError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError is a ValueError, not an OSError: a keyword export saved as UTF-16
+        # (or a binary file chosen by mistake) is a bad input, not a crash. --vocabulary has
+        # always said so through VocabularyError; this says it the same way.
         logger.error("vocabulary_source_unreadable", error=str(exc))
+        console.print(f"[red]Could not read the keyword source: {exc}[/red]")
         raise SystemExit(1) from exc
 
     if not census.uses:
