@@ -1042,6 +1042,31 @@ def test_read_capture_times_survives_an_exiftool_error(tmp_path: Path) -> None:
         assert read_capture_times([photo]) == {}
 
 
+def test_read_capture_times_survives_a_missing_exiftool_binary(tmp_path: Path) -> None:
+    """No exiftool on PATH degrades to "no timestamps", so --session-gap falls back to mtime."""
+    photo = tmp_path / "a.cr3"
+    photo.write_text("x")
+    helper = _fake_helper()
+    # What pyexiftool raises when it cannot find the binary at all.
+    helper.get_tags.side_effect = FileNotFoundError('"exiftool" is not found, on path')
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        assert read_capture_times([photo]) == {}
+
+
+def test_write_metadata_reports_a_missing_exiftool_binary(tmp_path: Path) -> None:
+    """A write with no exiftool on PATH returns False instead of raising into the caller."""
+    photo = tmp_path / "a.cr3"
+    photo.write_text("x")
+    helper = _fake_helper()
+    helper.set_tags.side_effect = FileNotFoundError('"exiftool" is not found, on path')
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        written = write_metadata(photo, title="T", description="D", keywords=KeywordSet())
+
+    assert written is False
+
+
 def test_read_keyword_sets_merges_image_and_sidecar_keywords(tmp_path: Path) -> None:
     """Every keyword view of a photo comes back in one batched read, sidecar included."""
     image = tmp_path / "a.cr3"

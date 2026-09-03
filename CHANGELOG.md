@@ -48,6 +48,9 @@ All notable changes to this project are documented here. The format is based on
 - Tagging a batch that turns out to be empty no longer truncates the previous `--csv-file` report.
 - `--log-folder` is validated when the flags are parsed, and a logging failure exits cleanly.
 - `photo-tagger doctor` reports its warning about a redirected ExifTool binary.
+- A missing `exiftool` binary no longer raises a bare traceback out of a metadata read or write.
+  Reads degrade with a logged warning, as they always did for other ExifTool errors, and a write
+  reports the photo as failed.
 - The first run no longer stalls on exit while telemetry probes the hardware.
 - GUI: removing a folder from a large list, quitting the window, and the first drag-and-drop no
   longer crash.

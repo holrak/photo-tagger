@@ -33,8 +33,11 @@ from photo_tagger.models import KeywordSet
 
 
 # Exception types that pyexiftool raises on bad inputs or subprocess failures.
-# Centralized here to avoid seven copies of the same three-element tuple.
-_EXIFTOOL_ERRORS = (ValueError, TypeError, ExifToolExecuteError)
+# Centralized here to avoid seven copies of the same tuple. FileNotFoundError belongs with them:
+# it is what pyexiftool raises when the binary itself is missing, which is the most basic way for
+# an exiftool call to fail. Without it every read here raised a bare traceback instead of logging
+# and degrading, and every write raised instead of reporting the photo as failed.
+_EXIFTOOL_ERRORS = (FileNotFoundError, ValueError, TypeError, ExifToolExecuteError)
 
 # Tag and api option that make exiftool hash the image data only, skipping metadata. The result
 # comes back under the "File:" group, hence the separate key constant.
