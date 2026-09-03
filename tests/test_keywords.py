@@ -1,6 +1,7 @@
 """Regression tests for keyword utilities and contextual prompt helpers."""
 
 from photo_tagger.keywords import (
+    _capitalize_segment,
     _collect_cumulative_entries,
     _normalize_chain_parts,
     _process_new_keywords,
@@ -205,3 +206,37 @@ def test_merge_keywords_does_not_mutate_input() -> None:
     original_subject = list(existing.subject)
     merge_keywords(existing, ["B"])
     assert existing.subject == original_subject
+
+
+def test_merge_keywords_keeps_a_vocabulary_spelling_verbatim() -> None:
+    """A catalog that writes its keywords in lower case means it, in any script."""
+    verbatim = {"gegenlicht": "gegenlicht", "птица": "птица", "животное": "животное"}
+
+    merged = merge_keywords(
+        KeywordSet(),
+        ["gegenlicht", "птица<животное"],
+        verbatim=verbatim,
+    )
+
+    assert merged.subject == ["gegenlicht", "животное", "птица"]
+    assert merged.hierarchical == ["животное|птица"]
+
+
+def test_merge_keywords_still_capitalizes_what_the_vocabulary_does_not_cover() -> None:
+    """Only declared terms are left alone; the model's own wording is normalized as before."""
+    merged = merge_keywords(
+        KeywordSet(),
+        ["gegenlicht", "golden hour"],
+        verbatim={
+            "gegenlicht": "gegenlicht",
+        },
+    )
+
+    assert merged.subject == ["gegenlicht", "Golden Hour"]
+
+
+def test_capitalize_segment_prefers_the_declared_spelling() -> None:
+    """The verbatim map wins over the lowercase-only capitalization rule."""
+    assert _capitalize_segment("b&w", {"b&w": "b&w"}) == "b&w"
+    # Without it, the lowercase rule applies and str.capitalize() lowercases the rest.
+    assert _capitalize_segment("b&w") == "B&w"

@@ -1330,3 +1330,22 @@ def test_apply_exiftool_path_bridges_to_env_without_overriding(
     monkeypatch.delenv("PHOTO_TAGGER_EXIFTOOL", raising=False)
     main_module._apply_exiftool_path(None)  # noqa: SLF001
     assert "PHOTO_TAGGER_EXIFTOOL" not in os.environ
+
+
+def test_cli_vocabulary_follows_the_output_language(tmp_path: Path) -> None:
+    """--lang decides whether the vocabulary index folds English plurals."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    vocabulary = tmp_path / "keywords.txt"
+    vocabulary.write_text("Alle\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(
+            ["--input", str(image), "--vocabulary", str(vocabulary), "--lang", "German"],
+        )
+
+    options = captured["options"]
+    assert options.output_language == "German"
+    assert options.vocabulary.fold_plurals is False
+    assert options.vocabulary.match("Alles") is None

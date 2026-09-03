@@ -13,11 +13,14 @@ All notable changes to this project are documented here. The format is based on
   Lightroom's *Metadata > Export Keywords*, the `.txt` (indented, with `{synonyms}`) and the `.csv`
   (the same list behind four option columns), or a plain list of terms and `Animal|Bird|Osprey`
   paths. A comment needs a space after the hash, so a keyword such as `#Diversity` stays a keyword.
-  Matching ignores case, punctuation, and plurals, with a conservative fuzzy pass for typos, and
-  every match is rewritten to the file's own spelling **and** hierarchy. The vocabulary is also
-  listed in the prompt, so the model prefers those terms in the first place; that listing is part of
-  the cache namespace, so swapping files starts a fresh cache slice. Past 5,000 terms the run warns
-  that the fuzzy pass is off and the prompt listing is truncated.
+  Matching ignores case and punctuation, with a conservative fuzzy pass for typos, and every match
+  is rewritten to the file's own spelling **and** hierarchy, including a catalog that keeps its
+  keywords in lower case. Plural folding uses English rules, so it applies only to English output;
+  every other language matches on case, punctuation, synonyms, and the fuzzy pass, which still
+  unifies longer inflections (`Landschaften` with `Landschaft`). The vocabulary is also listed in
+  the prompt, so the model prefers those terms in the first place; that listing is part of the cache
+  namespace, so swapping files starts a fresh cache slice. Past 5,000 terms the run warns that the
+  fuzzy pass is off and the prompt listing is truncated.
 - `--vocabulary-strict`: drop generated keywords the vocabulary does not cover instead of writing
   them as-is. The run summary gains `vocabulary_mapped` (how many keywords were rewritten) and
   `vocabulary_dropped` (each rejected term and how often it came up), so the vocabulary can grow on
@@ -26,8 +29,10 @@ All notable changes to this project are documented here. The format is based on
   mtime) and harmonize each one, so forty frames of the same bird stop landing in the catalog as
   `Osprey`, `Ospreys`, `Bird|Osprey`, and `Wildlife|Raptor|Osprey`. A session is analyzed in full
   before anything is written; its own output then becomes its vocabulary, with the majority spelling
-  and the majority hierarchy winning. Deriving it from the finished results rather than nudging the
-  model keeps it deterministic: the same batch harmonizes the same way at any `--workers` setting.
+  and the majority hierarchy winning, and close-enough variants (`Закаты` and `Закат`,
+  `Landschaften` and `Landschaft`) folded onto the form the shoot used most. Deriving it from the
+  finished results rather than nudging the model keeps it deterministic: the same batch harmonizes
+  the same way at any `--workers` setting.
 
 ## [0.7.0] - 2026-08-08
 

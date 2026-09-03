@@ -591,6 +591,7 @@ def to_processing_options(
         max_new_keywords=output.max_keywords,
         vocabulary=vocabulary,
         vocabulary_strict=output.vocabulary_strict,
+        output_language=inference.output_language,
     )
 
 

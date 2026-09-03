@@ -121,13 +121,36 @@ Animal
 Landscape
 ```
 
-Every generated keyword is matched against the file, ignoring case, punctuation, and plurals, with a
-conservative fuzzy pass for typos. A match is rewritten to the file's own spelling **and
-hierarchy**, so `ospreys`, `Sea Hawk`, and `Osprey<Raptor<Wildlife` all land as
-`Animal|Bird|Osprey`. Keywords the file does not cover pass through untouched unless
-`--vocabulary-strict` is set, in which case they are dropped and reported: the run summary's
+Every generated keyword is matched against the file, ignoring case and punctuation, with a
+conservative fuzzy pass for typos and longer variants. A match is rewritten to the file's own
+spelling **and hierarchy**, so `ospreys`, `Sea Hawk`, and `Osprey<Raptor<Wildlife` all land as
+`Animal|Bird|Osprey`. The file's spelling is used exactly as written, so a catalog that keeps its
+keywords in lower case stays that way. Keywords the file does not cover pass through untouched
+unless `--vocabulary-strict` is set, in which case they are dropped and reported: the run summary's
 `vocabulary_dropped` names every rejected term and how often it came up, which is the list to work
 from when growing the vocabulary. `vocabulary_mapped` counts the rewrites.
+
+#### Languages other than English
+
+Write the vocabulary in the same language you generate in ([`--output-language`](#inference)); a
+German run cannot match an English catalog whatever the matcher does.
+
+Matching itself is language-neutral except in one place: folding a plural onto its singular
+(`Ospreys` → `Osprey`) uses English rules, so it is applied for English output and skipped for every
+other language. Applying it to German would merge `Alles` into `Alle`, and it can say nothing at all
+about `птицы`. Everything else works in any script: case folding (including `Straße` and `Strasse`),
+punctuation and spacing, and the fuzzy pass, which still unifies longer inflections such as
+`Landschaften` with `Landschaft` or `Закаты` with `Закат`.
+
+For the short inflected forms no ratio can safely catch, declare them in the file with the synonym
+syntax, which is exact and needs no guessing:
+
+```text
+Животное
+	Птица
+	{птицы}
+	{птиц}
+```
 
 The vocabulary is listed in the prompt as well, so the model prefers your terms in the first place
 instead of being corrected afterwards. That listing is part of the cache namespace: swapping
@@ -143,7 +166,12 @@ Lightroom then shows four keywords where there is one subject.
 wherever the capture time (EXIF `DateTimeOriginal`, falling back to file mtime) jumps by more than
 the given gap. Every photo in a shoot is analyzed first, then the session's own output becomes its
 vocabulary: the spelling most of the session used wins, and so does the hierarchy most of it used.
-Only then is anything written.
+Only then is anything written. It reads `--output-language` for the same reason the vocabulary file
+does, so a German or Russian shoot is harmonized under that language's rules rather than English
+ones, and it folds close-enough variants together on top of that: a shoot that said `Закаты` twice
+and `Закат` once writes `Закаты` throughout, and one that said `Landschaften` and `Landschaft`
+settles on one of them. Short words are never folded this way, so `Alle` and `Alles` stay two
+keywords.
 
 ```bash
 photo-tagger -i ~/Pictures/Trip -r --session-gap 60

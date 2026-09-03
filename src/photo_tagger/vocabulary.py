@@ -11,7 +11,15 @@ Two things build a :class:`Vocabulary`: :func:`load_vocabulary` reads the user's
 agree with each other. Both then run through the same matcher.
 
 Matching is deliberately layered, cheapest first: exact (case-insensitive), then a loose key that
-ignores punctuation and a trailing plural, then a bounded fuzzy pass for typos and small variants.
+ignores punctuation and spacing, then a bounded fuzzy pass for typos and small variants. Only the
+first two tiers are language-specific, and only in one place: folding an English plural onto its
+singular. That folding is applied for English output and skipped for every other language, because
+its rules are wrong elsewhere (German "Alles" would collapse onto "Alle") and useless in a script
+they cannot even see (Russian "птицы"). Everything else here is language-neutral: case folding,
+punctuation, and the fuzzy ratio work the same on any script.
+
+Languages that inflect more than English get less unification for free, so the vocabulary file's
+``{synonym}`` syntax is the reliable way to declare that "птицы" is "Птица".
 """
 
 import csv
@@ -23,6 +31,7 @@ from typing import TYPE_CHECKING, Self
 
 from loguru import logger
 
+from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.errors import PhotoTaggerError
 from photo_tagger.keywords import parse_hierarchical_keyword
 
@@ -51,6 +60,14 @@ _MAX_FILE_CHARS = 5_000_000
 # ("Eagle" and "Beagle" score 0.91).
 _FUZZY_CUTOFF = 0.82
 
+# Shortest the longer of two keys must be before the fuzzy pass will compare them at all. A short
+# word has too few characters for the ratio to mean much: German "Alles" and "Alle" score 0.89, as
+# would any short word next to itself plus a letter. Long words are where the ratio earns its keep,
+# and that holds in any language ("Landschaften" and "Landschaft" score 0.91, "Закаты" and "Закат"
+# 0.91). The measure is the pair, not the query: which of the two is being looked up says nothing
+# about how much signal they carry between them.
+_FUZZY_MIN_CHARS = 6
+
 # difflib compares against every candidate, so a huge vocabulary would pay O(terms) per keyword.
 # Past this size only the exact and loose lookups run, which are dict hits.
 _FUZZY_MAX_TERMS = 5000
@@ -69,27 +86,67 @@ _NON_ALPHANUMERIC_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
-def loose_key(term: str) -> str:
+def fuzzy_key_match(key: str, candidates: Iterable[str]) -> str | None:
     """
-    Return a comparison key that ignores case, punctuation, spacing, and a trailing plural.
+    Return the candidate closest to *key*, or None when none is close enough to trust.
+
+    Both inputs are loose keys (see :func:`loose_key`). Shared by the vocabulary lookup and by
+    session clustering so "close enough" means one thing, tuned in one place.
+    """
+    pool = [
+        other
+        for other in candidates
+        if other[:1] == key[:1] and max(len(key), len(other)) >= _FUZZY_MIN_CHARS
+    ]
+    close = difflib.get_close_matches(key, pool, n=1, cutoff=_FUZZY_CUTOFF)
+    return close[0] if close else None
+
+
+def folds_plurals(output_language: str) -> bool:
+    """
+    Report whether *output_language* is one this module knows how to singularize.
+
+    English only, and deliberately so: :func:`_singularize` encodes English morphology, which is
+    wrong for other languages rather than merely unhelpful. The name is matched loosely because
+    ``--output-language`` is free text ("English", "british english", "en").
+
+    Examples:
+        >>> folds_plurals("English"), folds_plurals("en")
+        (True, True)
+        >>> folds_plurals("German"), folds_plurals("Русский")
+        (False, False)
+    """
+    normalized = output_language.strip().casefold()
+    return "english" in normalized or normalized in ("en", "eng")
+
+
+def loose_key(term: str, *, fold_plurals: bool = True) -> str:
+    """
+    Return a comparison key that ignores case, punctuation, and spacing.
+
+    With *fold_plurals* (English output) a trailing plural is folded too. Case folding is Unicode
+    aware, so this is as useful for "ПТИЦА" or "STRASSE" as for "Osprey".
 
     Examples:
         >>> loose_key("Bird-of-Prey")
         'bird of prey'
         >>> loose_key("Ospreys")
         'osprey'
+        >>> loose_key("Alles", fold_plurals=False)
+        'alles'
     """
     cleaned = _NON_ALPHANUMERIC_RE.sub(" ", term.casefold())
     cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
-    return _singularize(cleaned)
+    return _singularize(cleaned) if fold_plurals else cleaned
 
 
 def _singularize(text: str) -> str:
     """
     Strip a naive English plural ending from the last word of *text*.
 
-    Only ever used to build comparison keys, never to produce output, so an over-eager strip on a
-    non-English term costs nothing unless the vocabulary happens to contain the stripped form too.
+    Only ever used to build comparison keys, never to produce output. Callers must gate it on
+    :func:`folds_plurals`: applied to German these rules turn "Alles" into "Alle" and "Gras" into
+    "Gra", which merges words that are not the same word.
 
     Examples:
         >>> _singularize("berries")
@@ -278,6 +335,9 @@ class Vocabulary:
 
     Build it with :meth:`from_entries` (or :func:`load_vocabulary`); the fields are derived indexes
     and are not meant to be assembled by hand.
+
+    ``fold_plurals`` is fixed at build time because it shapes the loose index, so a lookup has to
+    use the same setting the index was built with. See :func:`folds_plurals`.
     """
 
     terms: tuple[str, ...] = ()
@@ -285,11 +345,17 @@ class Vocabulary:
     chains: dict[str, list[str]] = field(default_factory=dict)
     # Exact casefolded term or synonym to the canonical term.
     exact: dict[str, str] = field(default_factory=dict)
-    # Punctuation- and plural-insensitive key to the canonical term.
+    # Punctuation-insensitive (and, for English, plural-insensitive) key to the canonical term.
     loose: dict[str, str] = field(default_factory=dict)
+    fold_plurals: bool = True
 
     @classmethod
-    def from_entries(cls, entries: Iterable[str | _Entry]) -> Self:
+    def from_entries(
+        cls,
+        entries: Iterable[str | _Entry],
+        *,
+        fold_plurals: bool = True,
+    ) -> Self:
         """
         Build a vocabulary from paths, plain terms, or already-parsed entries.
 
@@ -297,6 +363,8 @@ class Vocabulary:
         segment of a path becomes a term of its own, because Lightroom stores each level as a
         keyword. The first spelling seen for a term wins, so callers control canonical casing by
         ordering their input.
+
+        Pass ``fold_plurals=False`` for any language other than English (see :func:`folds_plurals`).
         """
         terms: list[str] = []
         chains: dict[str, list[str]] = {}
@@ -308,7 +376,7 @@ class Vocabulary:
             if (canonical := exact.get(key)) is not None:
                 return canonical
             exact[key] = term
-            loose.setdefault(loose_key(term), term)
+            loose.setdefault(loose_key(term, fold_plurals=fold_plurals), term)
             terms.append(term)
             return term
 
@@ -325,9 +393,18 @@ class Vocabulary:
                 # Synonyms only ever alias an existing term; they are not terms themselves, so a
                 # generated "Sea Hawk" comes back as the catalog's "Osprey".
                 exact.setdefault(synonym.casefold(), canonical_chain[-1])
-                loose.setdefault(loose_key(synonym), canonical_chain[-1])
+                loose.setdefault(
+                    loose_key(synonym, fold_plurals=fold_plurals),
+                    canonical_chain[-1],
+                )
 
-        return cls(terms=tuple(terms), chains=chains, exact=exact, loose=loose)
+        return cls(
+            terms=tuple(terms),
+            chains=chains,
+            exact=exact,
+            loose=loose,
+            fold_plurals=fold_plurals,
+        )
 
     def __bool__(self) -> bool:
         """Report whether the vocabulary holds any term."""
@@ -349,14 +426,13 @@ class Vocabulary:
             return None
         if (hit := self.exact.get(stripped.casefold())) is not None:
             return hit
-        key = loose_key(stripped)
+        key = loose_key(stripped, fold_plurals=self.fold_plurals)
         if (hit := self.loose.get(key)) is not None:
             return hit
-        if not key or len(self.terms) > _FUZZY_MAX_TERMS:
+        if len(self.terms) > _FUZZY_MAX_TERMS:
             return None
-        candidates = [other for other in self.loose if other[:1] == key[:1]]
-        close = difflib.get_close_matches(key, candidates, n=1, cutoff=_FUZZY_CUTOFF)
-        return self.loose[close[0]] if close else None
+        close = fuzzy_key_match(key, self.loose)
+        return self.loose[close] if close is not None else None
 
     def chain_for(self, term: str) -> list[str] | None:
         """Return the canonical root-to-leaf chain whose leaf is *term*, if it has one."""
@@ -467,14 +543,18 @@ def _entry_from_string(raw: str) -> _Entry | None:
     return _Entry([term], synonyms) if term else None
 
 
-def load_vocabulary(path: Path) -> Vocabulary:
+def load_vocabulary(path: Path, *, output_language: str = DEFAULT_OUTPUT_LANGUAGE) -> Vocabulary:
     """
-    Read a vocabulary file and index it.
+    Read a vocabulary file and index it for keywords written in *output_language*.
 
     Accepts either Lightroom keyword-list export, ``.txt`` or ``.csv`` (see
     :func:`_lightroom_csv_keywords`), or a plain list of terms and paths (see :func:`_parse_lines`).
     Raises :class:`VocabularyError` when the file cannot be read or holds no usable term, because
     silently continuing with an empty vocabulary would drop every keyword in strict mode.
+
+    The language decides one thing only: whether plurals are folded onto their singular (see
+    :func:`folds_plurals`). Keep the file in the same language you generate in; a German run cannot
+    match an English catalog whatever the matcher does.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -496,7 +576,10 @@ def load_vocabulary(path: Path) -> Vocabulary:
         logger.debug("vocabulary_csv_export_detected", file=str(path))
         text = keyword_column
 
-    vocabulary = Vocabulary.from_entries(_parse_lines(text))
+    vocabulary = Vocabulary.from_entries(
+        _parse_lines(text),
+        fold_plurals=folds_plurals(output_language),
+    )
     if not vocabulary:
         logger.error("vocabulary_empty", file=str(path))
         msg = f"Vocabulary file {path} contains no keywords"
@@ -507,6 +590,7 @@ def load_vocabulary(path: Path) -> Vocabulary:
         file=str(path),
         terms=len(vocabulary.terms),
         hierarchies=len(vocabulary.chains),
+        fold_plurals=vocabulary.fold_plurals,
     )
     if len(vocabulary.terms) > _FUZZY_MAX_TERMS:
         # Both limits are silent by design, which is fine at a few hundred terms and misleading at

@@ -166,9 +166,11 @@ Key options:
 - `--max-keywords N` – cap how many AI-generated keywords are kept per photo before merging
 - `--vocabulary PATH` – restrict generated keywords to the terms in a Lightroom keyword-list export
   (either the `.txt` or the `.csv` shape of _Metadata > Export Keywords_, or a plain list of terms
-  and `Animal|Bird|Osprey` paths). Matching ignores case, punctuation, and plurals, and every match
-  is rewritten to the file's own spelling and hierarchy. Add `--vocabulary-strict` to drop keywords
-  the file does not cover; the run summary then lists every dropped term and how often it came up
+  and `Animal|Bird|Osprey` paths). Matching ignores case and punctuation, and every match is
+  rewritten to the file's own spelling and hierarchy. Works in any language: write the file in the
+  language you generate in (see `--output-language`), and use the `{synonym}` syntax for inflected
+  forms. Add `--vocabulary-strict` to drop keywords the file does not cover; the run summary then
+  lists every dropped term and how often it came up
 - `--session-gap MINUTES` – group photos into shoots separated by this much idle time (by capture
   time, falling back to mtime) and make each shoot's keywords agree with itself: the spelling and
   hierarchy most of the session used win for all of it. Nothing in a session is written until every

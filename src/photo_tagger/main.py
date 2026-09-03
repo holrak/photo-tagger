@@ -679,7 +679,11 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
     # Raises VocabularyError (a PhotoTaggerError) on an unusable file, which `tag` turns into a
     # clean exit 1. Loading it up front means a typo in the path fails before any model call.
-    vocabulary = load_vocabulary(output.vocabulary) if output.vocabulary is not None else None
+    vocabulary = (
+        load_vocabulary(output.vocabulary, output_language=inference.output_language)
+        if output.vocabulary is not None
+        else None
+    )
     options = to_processing_options(output, inference, vocabulary=vocabulary)
     newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
     older_than = _parse_filter_date(filter_.older_than, flag="--older-than")

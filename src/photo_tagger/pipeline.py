@@ -17,6 +17,7 @@ from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
     DEFAULT_JPEG_QUALITY,
     DEFAULT_MAX_TOKENS,
+    DEFAULT_OUTPUT_LANGUAGE,
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_USER_PROMPT,
@@ -133,6 +134,9 @@ class ProcessingOptions:
     # model's own wording alone; vocabulary_strict additionally drops what the vocabulary lacks.
     vocabulary: Vocabulary | None = None
     vocabulary_strict: bool = False
+    # The language the keywords are in. The pipeline itself does not generate text, but session
+    # harmonization has to know which morphology rules may be applied when matching terms.
+    output_language: str = DEFAULT_OUTPUT_LANGUAGE
 
 
 @contextlib.contextmanager
@@ -587,8 +591,11 @@ def _write_pending(
     options = ctx.options
     # An empty set when keywords are disabled, so write_metadata emits no keyword tags and
     # leaves whatever is already on the file untouched (e.g. refresh only title/description).
+    # The user's vocabulary spelled its own terms; the session vocabulary only mirrors what the
+    # model said, so only the former overrides the merge step's capitalization.
+    verbatim = options.vocabulary.exact if options.vocabulary else None
     merged_keywords = (
-        merge_keywords(pending.existing, pending.keywords)
+        merge_keywords(pending.existing, pending.keywords, verbatim=verbatim)
         if options.write_keywords
         else KeywordSet()
     )
@@ -1003,7 +1010,10 @@ def _flush_session(
     if not collected:
         return [], []
 
-    vocabulary = build_session_vocabulary(pending.keywords for pending in collected.values())
+    vocabulary = build_session_vocabulary(
+        (pending.keywords for pending in collected.values()),
+        output_language=ctx.options.output_language,
+    )
     if ctx.session_plan is not None:
         ctx.session_plan.remember(index, vocabulary)
     logger.info(

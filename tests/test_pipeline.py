@@ -1893,3 +1893,60 @@ def test_run_batch_session_interrupt_stops_after_the_session_in_flight(
     # success; only the session that never started is reported as pending.
     assert totals.success == 1
     assert totals.failed_files == [str(second)]
+
+
+def test_process_photo_writes_the_vocabulary_spelling_verbatim(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """A lower-case catalog term reaches the file as the catalog spelled it."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["ПТИЦА", "gegenlicht"],
+    )
+    vocabulary = Vocabulary.from_entries(["птица", "gegenlicht"], fold_plurals=False)
+
+    assert process_photo(image, _ctx(options=ProcessingOptions(vocabulary=vocabulary))) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == ["птица", "gegenlicht"]
+
+
+def test_run_batch_harmonizes_a_session_in_the_configured_language(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Session harmonization uses the run's output language, not English by default."""
+    first = tmp_path / "a.cr3"
+    second = tmp_path / "b.cr3"
+    for path in (first, second):
+        path.write_text("x")
+    by_file = {
+        first: InferenceResult(title="T", description="D", keywords=["Alle"]),
+        second: InferenceResult(title="T", description="D", keywords=["Alles"]),
+    }
+    written: dict[Path, KeywordSet] = {}
+    current = [first]
+
+    patched_pipeline["analyze"].side_effect = lambda **_kw: by_file[current[0]]
+    patched_pipeline["write"].side_effect = lambda path, keywords, **_kw: bool(
+        written.setdefault(path, keywords) or True,
+    )
+
+    def process(path: Path, ctx: _BatchContext, **kwargs: Any) -> bool:  # noqa: ANN401
+        current[0] = path
+        return _real_process_photo(path, ctx, **kwargs)
+
+    with patch("photo_tagger.pipeline.process_photo", side_effect=process):
+        run_batch(
+            [first, second],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(output_language="German"),
+            session_plan=_session_plan([first, second]),
+        )
+
+    assert written[first].subject == ["Alle"]
+    assert written[second].subject == ["Alles"]

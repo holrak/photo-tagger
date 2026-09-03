@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.keywords import parse_hierarchical_keyword
 from photo_tagger.metadata import read_capture_times
-from photo_tagger.vocabulary import Vocabulary, loose_key
+from photo_tagger.vocabulary import Vocabulary, folds_plurals, fuzzy_key_match, loose_key
 
 
 if TYPE_CHECKING:
@@ -137,13 +138,20 @@ def plan_sessions(
 
 def _count_keywords(
     keyword_lists: Iterable[Iterable[str]],
+    *,
+    fold_plurals: bool,
 ) -> tuple[Counter[str], dict[str, Counter[str]], dict[str, Counter[tuple[str, ...]]]]:
     """
     Tally how a session used each concept.
 
-    Returns per-concept totals, the spellings seen for each concept, and the hierarchies seen for
-    each concept. A concept is a loose key (case-, punctuation-, and plural-insensitive), so
-    "Reflections" and "reflection" are counted as one thing with two spellings.
+    Returns per-concept totals (leaves only, which is what orders the output), the spellings seen
+    for each concept, and the hierarchies seen for each leaf concept. A concept is a loose key
+    (case- and punctuation-insensitive, plus plurals for English), so "Reflections" and "reflection"
+    are counted as one thing with two spellings.
+
+    Hierarchies are counted as chains *of concepts*, not of spellings. Counting the spellings would
+    split one shoot's vote between "Птица<Животное" and "птица<Животное" and let a third, genuinely
+    rarer parent win on the tie-break.
     """
     totals: Counter[str] = Counter()
     spellings: dict[str, Counter[str]] = {}
@@ -151,16 +159,15 @@ def _count_keywords(
     for keywords in keyword_lists:
         for keyword in keywords:
             _, parts = parse_hierarchical_keyword(keyword)
-            if not parts:
+            concepts = [loose_key(part, fold_plurals=fold_plurals) for part in parts]
+            if not parts or not all(concepts):
                 continue
-            leaf = parts[-1]
-            concept = loose_key(leaf)
-            if not concept:
-                continue
-            totals[concept] += 1
-            spellings.setdefault(concept, Counter())[leaf] += 1
+            for part, concept in zip(parts, concepts, strict=True):
+                # Every segment, not just the leaf: a parent needs a canonical spelling too.
+                spellings.setdefault(concept, Counter())[part] += 1
+            totals[concepts[-1]] += 1
             if len(parts) > 1:
-                chains.setdefault(concept, Counter())[tuple(parts)] += 1
+                chains.setdefault(concepts[-1], Counter())[tuple(concepts)] += 1
     return totals, spellings, chains
 
 
@@ -169,7 +176,8 @@ def _most_common_spelling(counter: Counter[str]) -> str:
     Return the spelling used most often, breaking ties alphabetically.
 
     Ties are the norm in a short session (two photos, two spellings), so they cannot be left to
-    insertion order if the run is to be reproducible.
+    insertion order if the run is to be reproducible. The order itself is by code point, which is
+    arbitrary but stable in any script.
     """
     return min(counter.items(), key=lambda item: (-item[1], item[0]))[0]
 
@@ -179,25 +187,75 @@ def _most_common_chain(counter: Counter[tuple[str, ...]]) -> tuple[str, ...]:
     return max(counter.items(), key=lambda item: (item[1], len(item[0]), item[0]))[0]
 
 
-def build_session_vocabulary(keyword_lists: Iterable[Iterable[str]]) -> Vocabulary:
+def _spell(concepts: Iterable[str], spellings: dict[str, Counter[str]]) -> list[str]:
+    """Render a chain of concepts with each segment's majority spelling."""
+    return [_most_common_spelling(spellings[concept]) for concept in concepts]
+
+
+def _variant_map(spellings: dict[str, Counter[str]]) -> dict[str, str]:
+    """
+    Map each concept onto the busier concept it is merely a variant of, if there is one.
+
+    This is what unifies inflected forms in a language whose morphology nothing here knows:
+    "Закаты" folds into "Закат" and "Landschaften" into "Landschaft" because they are close enough
+    as strings, and because the more frequent one is settled first. Concepts too short for that
+    judgement stand on their own (see
+    :func:`~photo_tagger.vocabulary.fuzzy_key_match`), so "Alle" never swallows "Alles".
+
+    A concept whose spellings differ only in case is already one concept by this point; this pass
+    is strictly about wording that the loose key alone cannot equate. Every concept takes part,
+    parents included, so a hierarchy converges the same way its leaves do.
+    """
+    mentions = Counter({concept: counter.total() for concept, counter in spellings.items()})
+    canonical: dict[str, str] = {}
+    accepted: list[str] = []
+    for concept, _count in mentions.most_common():
+        target = fuzzy_key_match(concept, accepted)
+        if target is None:
+            accepted.append(concept)
+            canonical[concept] = concept
+        else:
+            canonical[concept] = target
+            # The variant's spellings join the winner's tally, so a session that says "Закаты"
+            # twice and "Закат" once still writes the form it used most.
+            spellings[target].update(spellings[concept])
+    return canonical
+
+
+def build_session_vocabulary(
+    keyword_lists: Iterable[Iterable[str]],
+    *,
+    output_language: str = DEFAULT_OUTPUT_LANGUAGE,
+) -> Vocabulary:
     """
     Derive one session's vocabulary from the keywords its photos generated.
 
     For every concept the session mentioned, the spelling used most often becomes the canonical one
-    and the hierarchy used most often becomes its chain. Concepts are emitted in descending
-    frequency so that when two of them share a parent, the busier one's spelling of that parent
-    wins.
+    and the hierarchy used most often becomes its chain, with every segment of that chain rendered
+    in its own majority spelling.
+
+    What counts as "the same concept" depends on *output_language* exactly as it does for a
+    vocabulary file: singular and plural are one concept in English, two in a language whose
+    plurals this code cannot read (see :func:`~photo_tagger.vocabulary.folds_plurals`). Whatever
+    the language, :func:`_variant_map` then folds the close-enough leftovers together, which is how
+    a Russian or German shoot converges without anyone teaching this module those languages.
     """
-    totals, spellings, chains = _count_keywords(keyword_lists)
+    fold_plurals = folds_plurals(output_language)
+    totals, spellings, chains = _count_keywords(keyword_lists, fold_plurals=fold_plurals)
+    canonical = _variant_map(spellings)
+
+    merged_chains: dict[str, Counter[tuple[str, ...]]] = {}
+    for leaf, seen in chains.items():
+        target = merged_chains.setdefault(canonical[leaf], Counter())
+        for chain, count in seen.items():
+            target[tuple(canonical[segment] for segment in chain)] += count
+
     entries: list[str] = []
     for concept, _count in totals.most_common():
-        leaf = _most_common_spelling(spellings[concept])
-        if (seen := chains.get(concept)) is not None:
-            chain = list(_most_common_chain(seen))
-            # The chain carries whatever spelling of the leaf came with it, which is not
-            # necessarily the session's majority one.
-            chain[-1] = leaf
-            entries.append("|".join(chain))
+        if canonical[concept] != concept:
+            continue  # Folded into another concept, which carries its spellings already.
+        if (seen := merged_chains.get(concept)) is not None:
+            entries.append("|".join(_spell(_most_common_chain(seen), spellings)))
         else:
-            entries.append(leaf)
-    return Vocabulary.from_entries(entries)
+            entries.append(_most_common_spelling(spellings[concept]))
+    return Vocabulary.from_entries(entries, fold_plurals=fold_plurals)

@@ -15,7 +15,7 @@ from photo_tagger.models import KeywordSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
 
 def parse_hierarchical_keyword(keyword: str) -> tuple[str, list[str]]:
@@ -80,26 +80,38 @@ def dedupe_keywords(keywords: Iterable[str]) -> list[str]:
     return out
 
 
-def _capitalize_segment(segment: str) -> str:
+def _capitalize_segment(segment: str, verbatim: Mapping[str, str] | None = None) -> str:
     """
-    Title-case *segment* only when it is fully lowercase.
+    Title-case *segment* only when it is fully lowercase and nobody has spelled it for us.
 
     Mixed or upper case is deliberate (``NYC``, ``iPhone``) and must survive untouched;
     ``str.title()`` would corrupt it (``Nyc``) and also capitalizes after apostrophes
     (``Bird'S Nest``), so lowercase segments capitalize per whitespace-separated word instead.
+
+    *verbatim* maps casefolded terms to the exact spelling a controlled vocabulary declared for
+    them. Those win outright: a catalog that writes its keywords in lower case ("gegenlicht",
+    "птица") means it, and capitalizing them would seed the very near-duplicates the vocabulary
+    exists to prevent.
 
     Examples:
         >>> _capitalize_segment("bird's nest")
         "Bird's Nest"
         >>> _capitalize_segment("NYC")
         'NYC'
+        >>> _capitalize_segment("gegenlicht", {"gegenlicht": "gegenlicht"})
+        'gegenlicht'
     """
+    if verbatim is not None and (exact := verbatim.get(segment.casefold())) is not None:
+        return exact
     if segment != segment.lower():
         return segment
     return " ".join(word.capitalize() for word in segment.split())
 
 
-def _normalize_chain_parts(parts: Iterable[str]) -> list[str]:
+def _normalize_chain_parts(
+    parts: Iterable[str],
+    verbatim: Mapping[str, str] | None = None,
+) -> list[str]:
     """
     Return capitalized chain segments, skipping blanks.
 
@@ -108,7 +120,9 @@ def _normalize_chain_parts(parts: Iterable[str]) -> list[str]:
         ['Duck', 'Bird']
     """
     return [
-        _capitalize_segment(segment.strip()) for segment in parts if segment and segment.strip()
+        _capitalize_segment(segment.strip(), verbatim)
+        for segment in parts
+        if segment and segment.strip()
     ]
 
 
@@ -146,12 +160,14 @@ def _seed_longest_from_existing(hierarchical_keywords: Iterable[str]) -> dict[st
     return registry
 
 
-def _process_new_keywords(
+def _process_new_keywords(  # noqa: PLR0913 - accumulators the caller owns, passed in explicitly.
     new_keywords: list[str],
     subject_seen: set[str],
     subject_acc: list[str],
     weighted_acc: list[str],
     chain_registry: dict[str, list[str]],
+    *,
+    verbatim: Mapping[str, str] | None = None,
 ) -> list[str]:
     """
     Append new flat keywords and update the longest-chain registry.
@@ -164,6 +180,7 @@ def _process_new_keywords(
         subject_acc: Accumulates unique subjects (root-to-leaf order).
         weighted_acc: Parallel accumulator kept in sync with subject_acc.
         chain_registry: Maps casefolded leaf to longest observed chain (root-to-leaf list).
+        verbatim: Exact spellings a controlled vocabulary declared, keyed by casefolded term.
 
     Returns:
         Subjects appended during this call, in append order.
@@ -171,7 +188,7 @@ def _process_new_keywords(
     added_subjects: list[str] = []
     for keyword in new_keywords:
         _, parts = parse_hierarchical_keyword(keyword)
-        normalized = _normalize_chain_parts(parts)
+        normalized = _normalize_chain_parts(parts, verbatim)
         if not normalized:
             continue
         for flat_kw in normalized:
@@ -224,6 +241,8 @@ def _collect_cumulative_entries(
 def merge_keywords(
     existing_kw: KeywordSet,
     new_keywords: list[str],
+    *,
+    verbatim: Mapping[str, str] | None = None,
 ) -> KeywordSet:
     """
     Merge new AI-generated keywords with existing keywords, preserving hierarchy.
@@ -231,6 +250,8 @@ def merge_keywords(
     Args:
         existing_kw: Existing keywords read off the photo (via read_image_context).
         new_keywords: List of new keywords from AI (may include hierarchical format).
+        verbatim: Exact spellings to keep as-is, keyed by casefolded term. A controlled
+            vocabulary passes its own index here so the catalog's capitalization survives.
 
     Returns:
         A new :class:`KeywordSet` with merged views:
@@ -269,6 +290,7 @@ def merge_keywords(
         existing_subject,
         existing_weighted,
         chain_registry,
+        verbatim=verbatim,
     )
     new_hierarchical = _collect_cumulative_entries(chain_registry, hierarchical_seen)
 

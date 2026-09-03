@@ -175,6 +175,9 @@ python_executable = ".venv/bin/python"
 [tool.typos.default.extend-words]
 # PyInstaller's Analysis(...) parameter is literally named "datas"; not a typo for "data".
 datas = "datas"
+# German words used as examples of what the English plural rules must not do to other languages.
+Alle = "Alle"
+alle = "alle"
 
 [tool.typos.files]
 # Translation catalogs are not English; the checker would flag every Portuguese word.

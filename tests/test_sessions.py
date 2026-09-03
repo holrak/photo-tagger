@@ -166,3 +166,96 @@ def test_most_common_chain_is_deterministic_for_equal_depth_ties() -> None:
         {("Wildlife", "Osprey"): 1, ("Animal", "Osprey"): 1},
     )
     assert _most_common_chain(counter) == ("Wildlife", "Osprey")
+
+
+def test_build_session_vocabulary_folds_plurals_only_for_english() -> None:
+    """A session in German must not treat an s-suffixed word as the plural of another."""
+    photos = [["Alle"], ["Alles"]]
+
+    german = build_session_vocabulary(photos, output_language="German")
+    assert sorted(german.terms) == ["Alle", "Alles"]
+
+    english = build_session_vocabulary(photos)
+    assert english.terms == ("Alle",)
+
+
+def test_build_session_vocabulary_harmonizes_a_cyrillic_session() -> None:
+    """Case and hierarchy still converge in a script the plural rules cannot read."""
+    photos = [
+        ["Птица<Животное"],
+        ["птица<Животное"],
+        ["Птица<Природа"],
+    ]
+
+    vocabulary = build_session_vocabulary(photos, output_language="Русский")
+
+    assert vocabulary.chain_for("Птица") == ["Животное", "Птица"]
+    assert [vocabulary.snap(keywords).keywords for keywords in photos] == [
+        ["Птица<Животное"],
+        ["Птица<Животное"],
+        ["Птица<Животное"],
+    ]
+
+
+def test_build_session_vocabulary_counts_hierarchies_by_concept() -> None:
+    """Two spellings of one chain are one vote, not two that a rarer parent can outrank."""
+    photos = [
+        ["Osprey<Bird<Animal"],
+        ["osprey<bird<animal"],
+        ["Osprey<Raptor<Wildlife"],
+    ]
+
+    vocabulary = build_session_vocabulary(photos)
+
+    assert vocabulary.chain_for("Osprey") == ["Animal", "Bird", "Osprey"]
+
+
+def test_build_session_vocabulary_spells_parents_by_majority_too() -> None:
+    """A parent's canonical spelling comes from the whole session, not from one chain."""
+    photos = [
+        ["Osprey<bird"],
+        ["Mallard<Bird"],
+        ["Heron<Bird"],
+    ]
+
+    vocabulary = build_session_vocabulary(photos)
+
+    assert vocabulary.chain_for("Osprey") == ["Bird", "Osprey"]
+
+
+def test_build_session_vocabulary_folds_inflected_variants_onto_the_majority() -> None:
+    """A shoot converges on the form it used most, in a language nothing here knows."""
+    assert build_session_vocabulary(
+        [["Закаты"], ["Закаты"], ["Закат"]],
+        output_language="Русский",
+    ).terms == ("Закаты",)
+
+    assert build_session_vocabulary(
+        [["Закат"], ["Закат"], ["Закаты"]],
+        output_language="Русский",
+    ).terms == ("Закат",)
+
+    assert build_session_vocabulary(
+        [["Landschaften"], ["Landschaften"], ["Landschaft"]],
+        output_language="German",
+    ).terms == ("Landschaften",)
+
+    # With no majority the merged tally is tie-broken by code point, not by which arrived first.
+    for photos in ([["Landschaften"], ["Landschaft"]], [["Landschaft"], ["Landschaften"]]):
+        assert build_session_vocabulary(photos, output_language="German").terms == ("Landschaft",)
+
+
+def test_build_session_vocabulary_leaves_short_words_alone() -> None:
+    """Two short words are not variants of each other just because they score well."""
+    vocabulary = build_session_vocabulary([["Alle"], ["Alles"]], output_language="German")
+    assert sorted(vocabulary.terms) == ["Alle", "Alles"]
+
+
+def test_build_session_vocabulary_folds_variants_inside_a_hierarchy() -> None:
+    """A parent spelled two ways converges too, so the chain does not fork."""
+    vocabulary = build_session_vocabulary(
+        [["Птица<Животные"], ["Птица<Животные"], ["Птица<Животное"]],
+        output_language="Русский",
+    )
+
+    assert vocabulary.chain_for("Птица") == ["Животные", "Птица"]

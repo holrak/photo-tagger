@@ -11,6 +11,8 @@ from photo_tagger.vocabulary import (
     _lightroom_csv_keywords,
     _parse_lines,
     _singularize,
+    folds_plurals,
+    fuzzy_key_match,
     load_vocabulary,
     loose_key,
 )
@@ -383,3 +385,85 @@ def test_loose_key_normalizes_punctuation_and_case() -> None:
     """Punctuation, spacing, and case never distinguish two terms."""
     assert loose_key("Bird-of-Prey") == loose_key("bird of prey")
     assert loose_key("Bird's Nest") == "bird s nest"
+
+
+# ---------------------------------------------------------------------------
+# Languages other than English
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        ("English", True),
+        ("english", True),
+        ("British English", True),
+        ("en", True),
+        ("German", False),
+        ("Brazilian Portuguese", False),
+        ("Русский", False),
+        ("", False),
+    ],
+)
+def test_folds_plurals_recognizes_english_only(language: str, *, expected: bool) -> None:
+    """The plural rules are English morphology, so only English opts into them."""
+    assert folds_plurals(language) is expected
+
+
+def test_german_keeps_words_the_english_plural_rules_would_merge() -> None:
+    """German "Alles" is not the plural of "Alle", so the two must stay apart."""
+    german = Vocabulary.from_entries(["Alle", "Gras"], fold_plurals=False)
+
+    assert german.match("Alles") is None
+    assert german.match("ALLE") == "Alle"
+    assert german.match("gras") == "Gras"
+
+    # The same catalog read with the English rules folds a different word onto "Alle".
+    english = Vocabulary.from_entries(["Alle", "Gras"])
+    assert english.match("Alles") == "Alle"
+
+
+def test_cyrillic_matches_on_case_and_declared_synonyms() -> None:
+    """Case folding is script-neutral; inflections come from the file's own synonyms."""
+    russian = Vocabulary.from_entries(
+        _parse_lines("Животное\n\tПтица\n\t{птицы}\n\t{птиц}\n"),  # noqa: RUF001
+        fold_plurals=False,
+    )
+
+    assert russian.match("ПТИЦА") == "Птица"
+    assert russian.match("птицы") == "Птица"
+    assert russian.match("птиц") == "Птица"
+    assert russian.snap(["птицы"]).keywords == ["Птица<Животное"]
+
+
+def test_loose_key_skips_the_plural_fold_when_asked() -> None:
+    """Punctuation and case are still normalized; only the English fold is dropped."""
+    assert loose_key("Alles", fold_plurals=False) == "alles"
+    assert loose_key("Alles") == "alle"
+    # casefold() maps ß to ss, which is Unicode's rule and the useful one here: it unifies the
+    # two spellings German itself allows.
+    assert loose_key("Straße", fold_plurals=False) == loose_key("Strasse", fold_plurals=False)
+
+
+def test_load_vocabulary_folds_plurals_only_for_english(tmp_path: Path) -> None:
+    """The output language decides how the file is indexed, and is recorded on the result."""
+    path = tmp_path / "keywords.txt"
+    path.write_text("Alle\nAlles\n", encoding="utf-8")
+
+    german = load_vocabulary(path, output_language="German")
+    assert german.fold_plurals is False
+    assert german.match("Alles") == "Alles"
+
+    english = load_vocabulary(path)
+    assert english.fold_plurals is True
+
+
+def test_fuzzy_match_measures_the_pair_not_the_query() -> None:
+    """Which side is looked up cannot change whether two words are variants."""
+    assert fuzzy_key_match("закаты", ["закат"]) == "закат"
+    assert fuzzy_key_match("закат", ["закаты"]) == "закаты"
+    # Both short: no amount of similarity makes that a safe call.
+    assert fuzzy_key_match("alles", ["alle"]) is None
+    assert fuzzy_key_match("alle", ["alles"]) is None
+    # A different first letter is out regardless of length.
+    assert fuzzy_key_match("beagle", ["eagle"]) is None
