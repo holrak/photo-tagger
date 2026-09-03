@@ -62,6 +62,7 @@ Gerar
 getpid
 getpixel
 gpgconf
+headerless
 headlessly
 hostnames
 httpx
@@ -124,6 +125,7 @@ nvidia
 ollama
 Ollama
 OLLAMA
+Ospray
 pacman
 palavras
 parentless
