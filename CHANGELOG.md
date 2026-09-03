@@ -196,6 +196,12 @@ All notable changes to this project are documented here. The format is based on
   the tree then freed those rows without telling it, and the next removal read the freed memory.
   Rows are now indexed by path, which also removes the stall the walk caused on folders of a few
   thousand photos.
+- GUI: clicking away from a folder that is still loading no longer freezes the window until the
+  thumbnail in flight finishes decoding (seconds, for a big RAW); unchecking a subfolder now
+  repaints the folders above it instead of leaving them showing a full check; Clear List is refused
+  while a save is running, which used to empty the list under the writer and then report every photo
+  it did write as unsaved; and a metadata scan left running past its grace period no longer tears
+  down the scan started after it.
 - The `gui` command only suggests installing the `[gui]` extra when PySide6/shiboken6 is actually
   missing; other import errors surface as themselves.
 - A failed cache initialization no longer leaks its SQLite connection.
