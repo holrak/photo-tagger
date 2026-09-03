@@ -289,6 +289,9 @@ class _Applied:
     aliased: dict[str, str] = field(default_factory=dict)
     invented: int = 0
     refused_groups: int = 0
+    # The chunk's request failed outright, as opposed to succeeding with nothing to group. The two
+    # look identical from the outside (no synonyms, no chains), and only this tells them apart.
+    failed: bool = False
 
 
 def _claim_synonyms(
@@ -433,7 +436,7 @@ def organize(  # noqa: PLR0913 - provider credentials plus the list to organize.
     def run_chunk(chunk: list[str]) -> _Applied:
         replies = _organize_chunk(chat_model, chunk, categories)
         if replies is None:
-            return _Applied(invented=0)
+            return _Applied(failed=True)
         return _apply_groups(replies.groups, chunk, categories)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -452,9 +455,7 @@ def organize(  # noqa: PLR0913 - provider credentials plus the list to organize.
 
     stats.grouped = len(aliased)
     stats.categorized = sum(1 for chain in chains.values() if len(chain) > 1)
-    stats.failed_chunks = sum(
-        1 for applied in applied_chunks if not applied.synonyms and not applied.chains
-    )
+    stats.failed_chunks = sum(1 for applied in applied_chunks if applied.failed)
 
     kept = [term for term in result.kept if term not in aliased]
     dropped = [
@@ -471,6 +472,7 @@ def organize(  # noqa: PLR0913 - provider credentials plus the list to organize.
         categorized=stats.categorized,
         invented=stats.invented,
         refused_groups=stats.refused_groups,
+        failed_chunks=stats.failed_chunks,
     )
     return (
         TrimResult(

@@ -208,6 +208,26 @@ def test_organize_leaves_the_list_alone_when_the_model_fails() -> None:
     assert render_vocabulary(result) == "Bird\nOsprey\n"
 
 
+def test_a_chunk_the_model_answered_with_no_groups_is_not_a_failure() -> None:
+    """
+    Nothing to group is a result, not an error.
+
+    failed_chunks used to be inferred from "produced no synonyms and no chains", which is exactly
+    what a chunk the model answered correctly with every keyword standing alone looks like. That
+    made the count useless for telling a provider outage from a tidy catalog.
+    """
+    with _no_provider(), _fake_replies([], []):
+        _result_out, stats = organize(
+            _result("Bird", "Osprey"),
+            provider_name="lmstudio",
+            model_name="test-model",
+            api_base_url=None,
+            api_key=None,
+        )
+
+    assert stats.failed_chunks == 0
+
+
 def test_organize_with_nothing_to_organize_does_not_call_the_model() -> None:
     """An empty list short-circuits before the provider handshake."""
     with patch("photo_tagger.vocabulary_organize.build_chat_model") as build:

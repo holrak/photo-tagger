@@ -411,6 +411,13 @@ def vocabulary_header(
             ),
             f"# Categories (written to your photos as parents): {', '.join(stats.categories)}.",
         ]
+        if stats.failed_chunks:
+            # Otherwise a run where the model went away mid-pass reads as a catalog that simply
+            # had nothing to group, and the missing hierarchy looks like the tool's verdict.
+            lines.append(
+                f"# {stats.failed_chunks} chunk(s) failed: those keywords were left ungrouped. "
+                f"Re-run --organize to fill them in.",
+            )
     lines += [
         "#",
         "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a",
