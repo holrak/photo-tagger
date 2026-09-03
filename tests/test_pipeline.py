@@ -1720,6 +1720,57 @@ def test_run_batch_session_write_failure_is_final(
     assert sorted(totals.failed_files) == sorted(str(f) for f in files)
 
 
+def test_run_batch_session_progress_reports_the_write_not_the_analysis(
+    two_photo_session: dict[str, Any],
+) -> None:
+    """
+    In session mode a photo is finished when it is written, so that is when the bar moves.
+
+    Ticking at analysis time reported a photo as done and successful while its write was still to
+    come, which for a write that then failed is a green bar over a failed run.
+    """
+    files = two_photo_session["files"]
+    ticks: list[tuple[Path, bool]] = []
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
+        patch("photo_tagger.pipeline.write_metadata", return_value=False),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan(files),
+            progress=lambda path, ok: ticks.append((path, ok)),
+        )
+
+    # Once per photo, and each one says the write failed.
+    assert ticks == [(files[0], False), (files[1], False)]
+
+
+def test_run_batch_session_progress_ticks_once_per_written_photo(
+    two_photo_session: dict[str, Any],
+) -> None:
+    """The bar still reaches 100% on a healthy session, without overshooting."""
+    files = two_photo_session["files"]
+    ticks: list[tuple[Path, bool]] = []
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
+        patch("photo_tagger.pipeline.write_metadata", return_value=True),
+    ):
+        run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan(files),
+            progress=lambda path, ok: ticks.append((path, ok)),
+        )
+
+    assert ticks == [(files[0], True), (files[1], True)]
+
+
 def test_run_batch_session_retry_reuses_the_session_vocabulary(
     tmp_path: Path,
     patched_pipeline: dict[str, Any],

@@ -820,7 +820,9 @@ def _run_pass_serial(
         # at any point, or any outcome in the retry pass. A first-pass failure
         # is still pending retry, so it must not tick yet (otherwise the bar
         # would overshoot once the retry pass also ticks).
-        if ctx.progress is not None and (ok or retry):
+        # A session's photos are not finished when they analyze: the flush writes them and
+        # reports each one with the result of its write.
+        if ctx.progress is not None and (ok or retry) and ctx.pending is None:
             ctx.progress(image_file, ok)
     return successes, failed, False
 
@@ -890,7 +892,8 @@ def _run_pass_concurrent(
                     logger.warning("file_queued_for_retry", file=image_file.name)
                     failed.append(image_file)
                 # See _run_pass_serial: tick only when this file is finally done.
-                if ctx.progress is not None and (ok or retry):
+                # Silent during a session's analysis; the flush reports those photos.
+                if ctx.progress is not None and (ok or retry) and ctx.pending is None:
                     ctx.progress(image_file, ok)
         except KeyboardInterrupt:
             interrupted = True
@@ -1043,6 +1046,10 @@ def _flush_session(
         pending.keywords = vocabulary.snap(pending.keywords).keywords
         ok = _write_pending(image_file, pending, ctx, et=et)
         _emit_outcome(ctx.on_image_result, image_file, pending.scratch, success=ok, retry=False)
+        if ctx.progress is not None:
+            # The photo is finished only now, and a write that failed is final: there is no retry
+            # pass for it, so the bar must show it as the failure it is.
+            ctx.progress(image_file, ok)
         if ok:
             written.append(image_file)
             _notify_success(ctx, image_file)
