@@ -190,6 +190,12 @@ All notable changes to this project are documented here. The format is based on
   generation no longer leaves the window stuck in the running state; removing photos prunes the
   visible grid and thumbnail cache; bulk actions no longer kick you out of the photo or folder being
   reviewed.
+- GUI: removing a folder from a large list no longer crashes the window (a hard SIGBUS, not a Python
+  traceback). Looking a row up used to walk the tree with a `QTreeWidgetItemIterator`, which PySide
+  never destroys, so every lookup left one registered with Qt's model pointing at a row; emptying
+  the tree then freed those rows without telling it, and the next removal read the freed memory.
+  Rows are now indexed by path, which also removes the stall the walk caused on folders of a few
+  thousand photos.
 - The `gui` command only suggests installing the `[gui]` extra when PySide6/shiboken6 is actually
   missing; other import errors surface as themselves.
 - A failed cache initialization no longer leaks its SQLite connection.

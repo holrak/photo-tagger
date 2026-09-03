@@ -186,6 +186,7 @@ sdist
 Selecionadas
 selftest
 shiboken
+SIGBUS
 smartsymbols
 smolvlm
 sonarcloud
