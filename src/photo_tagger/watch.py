@@ -108,7 +108,7 @@ def _sleep_between_polls(seconds: float, should_stop: Callable[[], bool] | None)
         remaining -= nap
 
 
-def watch_batches(  # noqa: PLR0913 - each kwarg is a distinct, independent knob.
+def watch_batches(  # noqa: PLR0913 - every kwarg is one independent knob.
     inputs: list[Path],
     image_extensions: str,
     *,

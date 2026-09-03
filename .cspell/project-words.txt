@@ -83,6 +83,7 @@ IPTC
 iptc
 isort
 jbsilva
+kwarg
 LANCZOS
 Landschaft
 Landschaften
@@ -127,6 +128,7 @@ nixpkgs
 noconfirm
 noheader
 noite
+noqa
 NOSONAR
 numprocesses
 nvidia

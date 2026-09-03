@@ -56,6 +56,8 @@ version string. `scripts/check_version_sync.py` guards the hand-maintained docs 
   to test), refactor before adding more to it. Extract helpers, split responsibilities.
 - SonarQube has many false positives. Silence with `# NOSONAR` (and a one-line reason) only when the
   finding clearly does not apply. Default is to fix, not silence.
+- Write the reason after a `# noqa` code without a comma. Ruff ignores the text, but SonarQube reads
+  it as more codes and reports rule S7632. Example: `# noqa: PLR0913 - every kwarg is one knob.`
 - **GUI code is special.** Put testable GUI logic in `gui_state.py` (plain Python, covered
   normally). `gui.py` is the Qt shell: it is excluded from coverage (`[tool.coverage.run].omit` plus
   `sonar.coverage.exclusions`, so SonarQube does not count its untested-in-CI lines against new-code

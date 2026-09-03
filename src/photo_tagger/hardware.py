@@ -118,7 +118,7 @@ def _memory_gb(system: str) -> int:
 def _windows_memory_gb() -> int:
     """Read total physical RAM via GlobalMemoryStatusEx; 0 off Windows or on failure."""
     try:
-        import ctypes  # noqa: PLC0415 - Windows-only import, keep it out of the module path.
+        import ctypes  # noqa: PLC0415 - a Windows-only import kept out of the module path.
 
         class _MemoryStatusEx(ctypes.Structure):
             _fields_ = [

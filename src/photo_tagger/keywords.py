@@ -160,7 +160,7 @@ def _seed_longest_from_existing(hierarchical_keywords: Iterable[str]) -> dict[st
     return registry
 
 
-def _process_new_keywords(  # noqa: PLR0913 - accumulators the caller owns, passed in explicitly.
+def _process_new_keywords(  # noqa: PLR0913 - the caller owns each accumulator and passes it in.
     new_keywords: list[str],
     subject_seen: set[str],
     subject_acc: list[str],

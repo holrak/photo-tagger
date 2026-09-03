@@ -197,7 +197,9 @@ def gui() -> None:
         # Only a genuinely missing Qt module earns the install hint. Anything else (a broken
         # shiboken build, an import error inside our own gui code) must surface as itself, or the
         # hint sends the user reinstalling an extra that is not the problem.
-        missing = (exc.name or "").split(".")[0]
+        # NOSONAR S1110 - the parentheses are needed. Without them the "or" takes the split
+        # result, and the name arrives whole.
+        missing = (exc.name or "").split(".")[0]  # NOSONAR
         if missing not in ("PySide6", "shiboken6"):
             raise
         sys.stderr.write(
@@ -233,7 +235,7 @@ def _build_census(
 
 
 @app.command
-def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all distinct concerns.
+def vocabulary(  # noqa: PLR0913 - every parameter is a separate concern of the command.
     inputs: Annotated[
         list[Path] | None,
         Parameter(

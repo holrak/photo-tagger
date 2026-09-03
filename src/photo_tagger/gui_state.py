@@ -1113,7 +1113,8 @@ def _tagged_letter(letter: str) -> str:
     """
     match letter:
         case "T":
-            return pgettext("Tagged column letter", "T")
+            # NOSONAR S1192 - the repeated context is what pybabel extracts
+            return pgettext("Tagged column letter", "T")  # NOSONAR
         case "D":
             return pgettext("Tagged column letter", "D")
         case "K":
