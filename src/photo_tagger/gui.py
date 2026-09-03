@@ -90,7 +90,6 @@ from PySide6.QtWidgets import (
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
-    QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -1127,6 +1126,7 @@ class MainWindow(QMainWindow):
         self._preview_cache: dict[str, QPixmap] = {}
         self._thumb_cache: dict[str, QPixmap] = {}
         self._grid_items: dict[str, QListWidgetItem] = {}
+        self._init_tree_row_index()
         self._init_grid_view_state()
         self._current: PhotoItem | None = None
         self._init_worker_state()
@@ -1238,6 +1238,22 @@ class MainWindow(QMainWindow):
         # What the vocabulary did over the run in flight, for its closing summary line.
         self._vocabulary_mapped = 0
         self._vocabulary_dropped: dict[str, int] = {}
+
+    def _init_tree_row_index(self) -> None:
+        """
+        Seed the path -> tree row lookup the whole window reads.
+
+        Walking the tree for a row is not an option: the only widget-side walker,
+        QTreeWidgetItemIterator, is never destroyed by PySide, so each walk leaves an iterator
+        registered with QTreeModel pointing at whatever row it stopped on. The next teardown frees
+        that row and the removal after it dereferences the dangling pointer. An index also turns
+        the per-photo status refresh from a full walk into a dict hit.
+
+        _rebuild_tree owns both dicts and drops them before it empties the tree, so no row is
+        reachable from Python while Qt is tearing it down.
+        """
+        self._folder_rows: dict[str, QTreeWidgetItem] = {}
+        self._leaf_rows: dict[str, QTreeWidgetItem] = {}
 
     def _init_grid_view_state(self) -> None:
         """
@@ -2839,6 +2855,8 @@ class MainWindow(QMainWindow):
         # Build with sorting off so items do not shuffle on every insert; re-enabling at the
         # end re-applies whatever column/direction the header is currently set to.
         self._tree.setSortingEnabled(False)
+        self._folder_rows.clear()
+        self._leaf_rows.clear()
         self._tree.clear()
         for node in build_tree([item.path for item in self._items.values()]):
             self._add_folder_node(self._tree, node)
@@ -2856,13 +2874,10 @@ class MainWindow(QMainWindow):
 
     def _select_tree_entry(self, path: str, *, is_dir: bool) -> None:
         """Re-highlight the tree row for *path* (callers hold ``_syncing``)."""
-        iterator = QTreeWidgetItemIterator(self._tree)
-        while iterator.value():
-            entry = iterator.value()
-            if bool(entry.data(0, _IS_DIR_ROLE)) == is_dir and entry.data(0, _PATH_ROLE) == path:
-                self._tree.setCurrentItem(entry)
-                return
-            iterator += 1
+        rows = self._folder_rows if is_dir else self._leaf_rows
+        entry = rows.get(path)
+        if entry is not None:
+            self._tree.setCurrentItem(entry)
 
     def _add_folder_node(self, parent: object, node: FolderNode) -> None:
         folder_item = _SortableTreeItem(parent, [node.label, ""])
@@ -2870,6 +2885,7 @@ class MainWindow(QMainWindow):
         folder_item.setData(0, _IS_DIR_ROLE, _DIR_MARK)
         folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         folder_item.setExpanded(True)
+        self._folder_rows[str(node.path)] = folder_item
         for sub in node.folders:
             self._add_folder_node(folder_item, sub)
         for path in node.files:
@@ -2882,6 +2898,7 @@ class MainWindow(QMainWindow):
             # Files leave _IS_DIR_ROLE unset (None), which reads as "not a folder".
             leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             leaf.setCheckState(0, _checked(item.selected))
+            self._leaf_rows[str(path)] = leaf
             self._render_status_cells(leaf, item)
         self._sync_folder_check(folder_item)
 
@@ -4729,14 +4746,8 @@ class MainWindow(QMainWindow):
         self._tree.sortItems(header.sortIndicatorSection(), header.sortIndicatorOrder())
 
     def _leaf_for(self, path: Path) -> QTreeWidgetItem | None:
-        target = str(path)
-        iterator = QTreeWidgetItemIterator(self._tree)
-        while iterator.value():
-            item = iterator.value()
-            if not bool(item.data(0, _IS_DIR_ROLE)) and item.data(0, _PATH_ROLE) == target:
-                return item
-            iterator += 1
-        return None
+        """Return the tree row for the photo at *path*, or None when it is not listed."""
+        return self._leaf_rows.get(str(path))
 
     def _selected_count(self) -> int:
         """How many photos are currently checked (used in deselect feedback)."""

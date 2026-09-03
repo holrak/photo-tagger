@@ -369,6 +369,50 @@ def test_clear_empties_everything(window: gui.MainWindow, tmp_path: Path) -> Non
     assert window._tree.topLevelItemCount() == 0  # noqa: SLF001
 
 
+def test_row_index_covers_every_folder_and_leaf(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Both lookups read an index built during the rebuild, nested folders included."""
+    nested = tmp_path / "sub"
+    nested.mkdir()
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(nested / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+    assert set(window._leaf_rows) == {str(a), str(b)}  # noqa: SLF001
+    assert set(window._folder_rows) == {str(tmp_path), str(nested)}  # noqa: SLF001
+    window._select_tree_entry(str(nested), is_dir=True)  # noqa: SLF001
+    assert window._tree.currentItem() is window._folder_rows[str(nested)]  # noqa: SLF001
+
+
+def test_a_rebuild_replaces_every_indexed_row(window: gui.MainWindow, tmp_path: Path) -> None:
+    """A rebuild swaps in fresh rows: the index holds no leftovers from the previous tree."""
+    from shiboken6 import isValid  # noqa: PLC0415 - only importable with the [gui] extra
+
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+    stale_folder = window._folder_rows[str(tmp_path)]  # noqa: SLF001
+    stale_leaf = window._leaf_rows[str(b)]  # noqa: SLF001
+
+    window._remove_items([str(a)])  # noqa: SLF001
+
+    assert set(window._leaf_rows) == {str(b)}  # noqa: SLF001
+    assert window._leaf_rows[str(b)] is not stale_leaf  # noqa: SLF001
+    assert window._folder_rows[str(tmp_path)] is not stale_folder  # noqa: SLF001
+    # The rows the index dropped were destroyed with the old tree, not orphaned.
+    assert not isValid(stale_folder)
+    assert not isValid(stale_leaf)
+
+
+def test_gui_does_not_use_the_tree_item_iterator() -> None:
+    """
+    QTreeWidgetItemIterator is banned here: PySide never destroys one.
+
+    Python does not own the C++ iterator, so it stays registered with QTreeModel forever with a
+    pointer to whatever row it stopped on. The next teardown frees that row, and the removal after
+    it dereferences the dangling pointer inside QTreeModel::beginRemoveItems.
+    """
+    assert not hasattr(gui, "QTreeWidgetItemIterator")
+
+
 # ---------------------------------------------------------------------------
 # Tree sorting (click a header to sort by name or status)
 # ---------------------------------------------------------------------------
