@@ -801,6 +801,10 @@ _SCAN_STOP_TIMEOUT_MS = 3000
 _WATCH_STOP_TIMEOUT_MS = 3000
 # And for a vocabulary build, which has no stop hook at all: its model calls run to completion.
 _BUILD_STOP_TIMEOUT_MS = 3000
+# Shorter for the grid thumbnails: _stop_thumbs runs on every navigation, so this is the longest
+# the window may sit still when the user clicks away from a folder that is still loading. One
+# decode is uninterruptible, and a big RAW takes seconds, so the wait usually times out.
+_THUMB_STOP_TIMEOUT_MS = 250
 
 
 class MetadataScanWorker(QObject):
@@ -3068,14 +3072,18 @@ class MainWindow(QMainWindow):
             self._tree.setCurrentItem(leaf)  # routes to the detail page
 
     def _on_thumb_ready(self, path: str, data: bytes) -> None:
+        item = self._items.get(path)
+        if item is None:
+            # Removed from the list while it was decoding, which a detached job makes likelier.
+            # Caching it would strand a pixmap that nothing prunes.
+            return
         pixmap = QPixmap()
         pixmap.loadFromData(data)
         if pixmap.isNull():
             return
         self._thumb_cache[path] = pixmap
         grid_item = self._grid_items.get(path)
-        item = self._items.get(path)
-        if grid_item is not None and item is not None:
+        if grid_item is not None:
             self._update_grid_item(item, grid_item)
 
     def _start_thumbs(self, paths: list[Path]) -> None:
@@ -3089,14 +3097,33 @@ class MainWindow(QMainWindow):
         self._thumb_worker.finished.connect(self._thumb_thread.quit)
         self._thumb_thread.start()
 
-    def _stop_thumbs(self) -> None:
+    def _stop_thumbs(self, *, blocking: bool = False) -> None:
+        """
+        Ask the thumbnail job to stop, waiting only briefly for it.
+
+        The worker checks the stop flag between photos, so a decode already under way has to finish
+        first: seconds, for a big RAW. Waiting that out froze the window on every click that leaves
+        a loading folder, and with the Untagged filter on, every metadata scan batch re-enters here.
+        Detach instead, the way _stop_scan does. A detached job only feeds _on_thumb_ready, which
+        keys everything by path, so a late thumbnail is still the right thumbnail.
+
+        closeEvent passes ``blocking``: the window owns the QThread, so leaving one running past the
+        teardown would destroy it mid-run.
+        """
         if self._thumb_worker is not None:
             self._thumb_worker.stop()
             self._thumb_worker.deleteLater()
         if self._thumb_thread is not None:
-            self._thumb_thread.quit()
-            self._thumb_thread.wait()
-            self._thumb_thread.deleteLater()
+            thread = self._thumb_thread
+            thread.quit()
+            if blocking:
+                thread.wait()
+                thread.deleteLater()
+            elif thread.wait(_THUMB_STOP_TIMEOUT_MS):
+                thread.deleteLater()
+            else:
+                logger.debug("gui_thumbnail_stop_detached")
+                thread.finished.connect(thread.deleteLater)
             self._thumb_thread = None
         self._thumb_worker = None
 
@@ -4802,7 +4829,7 @@ class MainWindow(QMainWindow):
             self._save_worker.stop()
         if self._watch_worker is not None:
             self._watch_worker.stop()
-        self._stop_thumbs()
+        self._stop_thumbs(blocking=True)
         self._stop_scan()
         self._teardown_thread()
         self._teardown_save_thread()

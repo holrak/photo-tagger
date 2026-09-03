@@ -12,6 +12,7 @@ see an unresolved-import error here.
 """
 
 import os
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -1610,6 +1611,65 @@ def test_on_thumb_ready_sets_icon_and_caches(
     _select(window, window._tree.topLevelItem(0))  # noqa: SLF001
     window._on_thumb_ready(str(a), a.read_bytes())  # noqa: SLF001
     assert str(a) in window._thumb_cache  # noqa: SLF001
+
+
+def test_a_thumbnail_for_a_removed_photo_is_dropped(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A detached job outlives the list it was started for; its late results are not cached."""
+    a = _jpeg(tmp_path / "a.jpg")
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, {"a": a, "b": _jpeg(tmp_path / "b.jpg")})
+    window._remove_items([str(a)])  # noqa: SLF001
+
+    window._on_thumb_ready(str(a), a.read_bytes())  # noqa: SLF001
+
+    assert str(a) not in window._thumb_cache  # noqa: SLF001
+
+
+# Generous next to the 250 ms _stop_thumbs allows, but far under the 10 s decode the test holds
+# open: the assertion is "it detached", not a timing measurement.
+_STOP_THUMBS_BUDGET_S = 2.0
+
+
+def test_stopping_thumbnails_does_not_block_on_a_slow_decode(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Navigation must not wait out the decode in flight.
+
+    The worker only checks its stop flag between photos, so _stop_thumbs detaches rather than
+    blocking the UI thread for however long one photo takes.
+    """
+    decoding = threading.Event()
+    release = threading.Event()
+
+    def slow_decode(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        decoding.set()
+        release.wait(10.0)
+        return SimpleNamespace(data=b"")
+
+    monkeypatch.setattr(gui, "prepare_image_for_agent", slow_decode)
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - opens the grid, starts the job
+    assert window._thumb_thread is not None  # noqa: SLF001
+    detached = window._thumb_thread  # noqa: SLF001
+    # The stop flag is only read between photos, so the freeze needs a decode already running.
+    assert decoding.wait(5.0), "the worker never reached the decode"
+
+    started = time.monotonic()
+    try:
+        window._stop_thumbs()  # noqa: SLF001
+        elapsed = time.monotonic() - started
+        assert elapsed < _STOP_THUMBS_BUDGET_S, f"_stop_thumbs blocked for {elapsed:.1f}s"
+        assert window._thumb_thread is None  # noqa: SLF001
+    finally:
+        release.set()
+        detached.wait(5000)
 
 
 def _grid_order(window: gui.MainWindow) -> list[str]:
