@@ -84,6 +84,7 @@ from photo_tagger.gui_state import (
     photo_sort_key,
     progress_timing_text,
     rank_vision_models,
+    record_dropped_terms,
     reveal_command,
     reveal_label,
     sort_photos,
@@ -104,6 +105,7 @@ from photo_tagger.gui_state import (
 from photo_tagger.i18n import activate
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
+from photo_tagger.pipeline import MAX_TRACKED_DROPPED_TERMS
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
 from photo_tagger.undo import CHANGED, DELETED, RESTORED, UndoResult
 from photo_tagger.vocabulary import Vocabulary
@@ -1346,3 +1348,17 @@ def test_report_row_uses_the_declared_spelling(tmp_path: Path) -> None:
     row = photo_item_to_report_row(item, overwrite=False, verbatim=vocabulary.exact)
 
     assert row.keywords == ["gegenlicht"]
+
+
+def test_record_dropped_terms_counts_and_stops_at_the_cap() -> None:
+    """The tally names the busiest rejects; a run against the wrong file cannot grow it forever."""
+    tally: dict[str, int] = {}
+
+    record_dropped_terms(tally, ["Tractor", "Barn", "Tractor"])
+    assert tally == {"Tractor": 2, "Barn": 1}
+
+    record_dropped_terms(tally, [f"Term{index}" for index in range(MAX_TRACKED_DROPPED_TERMS)])
+    assert len(tally) == MAX_TRACKED_DROPPED_TERMS
+    # A term already counted still counts, cap or no cap.
+    record_dropped_terms(tally, ["Tractor"])
+    assert tally["Tractor"] == 3  # noqa: PLR2004 - two, then one more

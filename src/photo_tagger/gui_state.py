@@ -30,6 +30,7 @@ from photo_tagger.metadata import (
     select_location,
 )
 from photo_tagger.models import KeywordSet
+from photo_tagger.pipeline import MAX_TRACKED_DROPPED_TERMS
 from photo_tagger.sessions import build_session_vocabulary, plan_sessions
 from photo_tagger.undo import (
     CHANGED,
@@ -711,6 +712,21 @@ def apply_vocabulary(
         mapped=len(result.mapped),
         dropped=list(result.dropped),
     )
+
+
+def record_dropped_terms(tally: dict[str, int], dropped: Iterable[str]) -> None:
+    """
+    Fold one photo's rejected keywords into the run's tally, counting how often each came up.
+
+    New terms stop being recorded past :data:`~photo_tagger.pipeline.MAX_TRACKED_DROPPED_TERMS`,
+    the same bound the CLI keeps: a run against the wrong vocabulary rejects thousands of distinct
+    keywords, and the summary only ever names the busiest few of them anyway.
+    """
+    for term in dropped:
+        if term in tally:
+            tally[term] += 1
+        elif len(tally) < MAX_TRACKED_DROPPED_TERMS:
+            tally[term] = 1
 
 
 def load_vocabulary_file(

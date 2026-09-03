@@ -263,6 +263,7 @@ class OutputConfig:
         float,
         Parameter(
             name=("--session-gap",),
+            validator=validators.Number(gte=0),
             help=(
                 "Group photos into shoots separated by this many idle minutes (by capture time, "
                 "falling back to file mtime) and make each shoot's keywords agree with itself: "

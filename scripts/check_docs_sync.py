@@ -111,7 +111,9 @@ def _missing_flags(parameters: list[tuple[str, ...]]) -> list[str]:
     return [
         f"{FLAG_REFERENCE}: {names[0]} is not documented"
         for names in parameters
-        if not any(re.search(rf"{re.escape(name)}\b", text) for name in names)
+        # Not \b: it sits between "--vocabulary" and the "-strict" of a longer flag, so
+        # documenting only --vocabulary-strict would have counted for --vocabulary too.
+        if not any(re.search(rf"{re.escape(name)}(?![\w-])", text) for name in names)
     ]
 
 

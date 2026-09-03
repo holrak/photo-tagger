@@ -352,7 +352,9 @@ def _build_chain(
         seen.add(parent)
         chain.insert(0, parent)
     if (category := category_of.get(chain[0])) is not None and category != chain[0]:
-        chain.insert(0, category)
+        # The category is a level like any other, so the broadest parent gives way to it rather
+        # than the chain growing past the cap.
+        return (category, *chain[: _MAX_DEPTH - 1])
     return tuple(chain)
 
 

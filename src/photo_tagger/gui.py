@@ -185,6 +185,7 @@ from photo_tagger.gui_state import (
     photo_item_to_report_row,
     progress_timing_text,
     rank_vision_models,
+    record_dropped_terms,
     reveal_command,
     reveal_label,
     sort_photos,
@@ -3508,8 +3509,7 @@ class MainWindow(QMainWindow):
             return
         apply_proposal(item, proposal)
         self._vocabulary_mapped += proposal.vocabulary_mapped
-        for term in proposal.vocabulary_dropped:
-            self._vocabulary_dropped[term] = self._vocabulary_dropped.get(term, 0) + 1
+        record_dropped_terms(self._vocabulary_dropped, proposal.vocabulary_dropped)
         self._session_tagged.add(str(item.path))
         self._refresh_status_cell(item)
         self._advance_progress()
@@ -4546,7 +4546,8 @@ class MainWindow(QMainWindow):
     def _on_watch_batch(self, paths: list[Path]) -> None:
         """Add the photos a poll found and queue them for generation when asked to."""
         settings = self._watch_settings
-        if settings is None:
+        if settings is None or self._closing:
+            # A batch delivered while the window is going away has nothing left to be added to.
             return
         fresh = self._add_inputs(list(paths))
         if not fresh:

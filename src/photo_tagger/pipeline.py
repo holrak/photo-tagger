@@ -74,8 +74,9 @@ _RETRY_PASS_DELAY_SECONDS = 5.0
 
 # How many distinct keywords a strict vocabulary run reports as dropped before it stops collecting
 # new ones. Generous for the intended use (spotting gaps in a catalog) and bounded for the one that
-# is not (pointing --vocabulary at an unrelated file).
-_MAX_TRACKED_DROPPED_TERMS = 200
+# is not (pointing --vocabulary at an unrelated file). Public because the GUI keeps the same tally
+# for its own runs and there is no reason for the two to disagree.
+MAX_TRACKED_DROPPED_TERMS = 200
 
 
 @dataclass(slots=True, frozen=True)
@@ -202,7 +203,7 @@ class _UsageAccumulator:
 
         The dropped-term tally is what a user acts on after a strict run (these are the concepts the
         catalog has no name for yet), so it is kept per term rather than as a bare count. New terms
-        stop being recorded past :data:`_MAX_TRACKED_DROPPED_TERMS`: a run against the wrong
+        stop being recorded past :data:`MAX_TRACKED_DROPPED_TERMS`: a run against the wrong
         vocabulary can reject thousands of distinct keywords, and an unbounded dict would grow with
         them and then be dumped into the summary file.
         """
@@ -211,7 +212,7 @@ class _UsageAccumulator:
             for term in dropped:
                 if term in self.vocabulary_dropped:
                     self.vocabulary_dropped[term] += 1
-                elif len(self.vocabulary_dropped) < _MAX_TRACKED_DROPPED_TERMS:
+                elif len(self.vocabulary_dropped) < MAX_TRACKED_DROPPED_TERMS:
                     self.vocabulary_dropped[term] = 1
 
 
