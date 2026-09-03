@@ -101,12 +101,16 @@ repos:
 
   - repo: local
     hooks:
+      # Whole-project, never a file list: handed a subset, zuban resolves imports it cannot see
+      # and invents errors (a chunk holding only ai.py misreads pydantic-ai's two-parameter Agent
+      # as taking one). It is also the `zuban check` AGENTS.md tells contributors to run.
       - id: zuban
         name: zuban type check
         entry: zuban check
         language: system
         types: [python]
-        pass_filenames: true
+        pass_filenames: false
+        require_serial: true
         always_run: true
 
       - id: pycroscope
