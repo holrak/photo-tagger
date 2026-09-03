@@ -1,6 +1,7 @@
 """Tests for the photo processing pipeline using lightweight stubs."""
 
 import contextlib
+import json
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from photo_tagger.pipeline import (
     run_batch,
 )
 from photo_tagger.sessions import SessionPlan
+from photo_tagger.undo import UndoJournal
 from photo_tagger.vocabulary import Vocabulary
 
 
@@ -1950,3 +1952,47 @@ def test_run_batch_harmonizes_a_session_in_the_configured_language(
 
     assert written[first].subject == ["Alle"]
     assert written[second].subject == ["Alles"]
+
+
+def test_process_photo_records_the_write_in_the_undo_journal(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Each successful write is recorded, with whether the target already existed."""
+    fresh = tmp_path / "fresh.cr3"
+    existing = tmp_path / "existing.cr3"
+    for path in (fresh, existing):
+        path.write_text("x")
+    existing.with_suffix(".xmp").write_text("older sidecar")
+    journal = UndoJournal(tmp_path / "run.jsonl")
+    ctx = _ctx()
+    ctx.journal = journal
+
+    # write_metadata is stubbed, so create the sidecar the way exiftool would.
+    def fake_write(image_path: Path, _keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
+        image_path.with_suffix(".xmp").write_text("written")
+        return True
+
+    patched_pipeline["write"].side_effect = fake_write
+    assert process_photo(fresh, ctx) is True
+    assert process_photo(existing, ctx) is True
+
+    lines = [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
+    assert [entry["created"] for entry in lines] == [True, False]
+    assert lines[0]["target"] == str(fresh.with_suffix(".xmp"))
+
+
+def test_process_photo_journals_nothing_when_the_write_fails(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Undo must never be told about a write that did not happen."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["write"].return_value = False
+    journal = UndoJournal(tmp_path / "run.jsonl")
+    ctx = _ctx()
+    ctx.journal = journal
+
+    assert process_photo(image, ctx) is False
+    assert journal.entries == 0

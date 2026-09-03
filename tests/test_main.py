@@ -24,6 +24,7 @@ from photo_tagger import (
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.errors import ProviderError
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
+from photo_tagger.undo import UndoError
 from photo_tagger.vocabulary_build import KeywordCensus, TrimResult
 from photo_tagger.vocabulary_organize import OrganizeStats
 
@@ -63,6 +64,7 @@ def _patches(captured: dict[str, Any]) -> Any:  # noqa: ANN401 - context manager
         captured["cache"] = kwargs.get("cache")
         captured["progress"] = kwargs.get("progress")
         captured["session_plan"] = kwargs.get("session_plan")
+        captured["journal"] = kwargs.get("journal")
         return None
 
     return (
@@ -1468,3 +1470,201 @@ def test_vocabulary_command_exits_1_when_the_provider_is_unreachable(tmp_path: P
         )
 
     assert exit_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# undo command
+# ---------------------------------------------------------------------------
+
+
+def _journal_with(tmp_path: Path, target: Path, *, created: bool) -> Path:
+    """Write a one-entry journal describing *target* as it currently is on disk."""
+    stat = target.stat()
+    journal = tmp_path / "runs" / "20260501090000-1.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(
+        json.dumps(
+            {
+                "image": str(target.with_suffix(".cr3")),
+                "target": str(target),
+                "created": created,
+                "backup": None,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return journal
+
+
+def test_undo_exits_when_there_is_nothing_recorded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A machine that never tagged anything gets a message and exit 1, not a traceback."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.app(["undo"])
+    assert exit_info.value.code == 1
+
+
+def test_undo_puts_back_the_last_run(tmp_path: Path) -> None:
+    """The default target is the newest journal, and a created sidecar is deleted."""
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("generated", encoding="utf-8")
+    journal = _journal_with(tmp_path, sidecar, created=True)
+
+    with contextlib.suppress(SystemExit):
+        main_module.app(["undo", "--run", str(journal)])
+
+    assert not sidecar.exists()
+
+
+def test_undo_dry_run_leaves_the_files_alone(tmp_path: Path) -> None:
+    """--dry-run reports the same plan without carrying it out."""
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("generated", encoding="utf-8")
+    journal = _journal_with(tmp_path, sidecar, created=True)
+
+    with contextlib.suppress(SystemExit):
+        main_module.app(["undo", "--run", str(journal), "--dry-run"])
+
+    assert sidecar.exists()
+
+
+def test_undo_exits_1_when_an_entry_is_left_alone(tmp_path: Path) -> None:
+    """A file changed since the run blocks a clean exit, so scripts notice."""
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("generated", encoding="utf-8")
+    journal = _journal_with(tmp_path, sidecar, created=True)
+    sidecar.write_text("edited since the run", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.app(["undo", "--run", str(journal)])
+
+    assert exit_info.value.code == 1
+    assert sidecar.exists()
+
+
+def test_undo_list_reports_recorded_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--list names each journal and how many files it covers."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("generated", encoding="utf-8")
+    journal = _journal_with(tmp_path / "state" / "photo-tagger", sidecar, created=True)
+
+    with contextlib.suppress(SystemExit):
+        main_module.app(["undo", "--list"])
+
+    out = capsys.readouterr().out
+    assert journal.name in out
+    assert "1 file(s)" in out
+
+
+def test_undo_rejects_an_empty_journal(tmp_path: Path) -> None:
+    """A journal with no entries is nothing to undo, and says so with exit 1."""
+    journal = tmp_path / "empty.jsonl"
+    journal.write_text("", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.app(["undo", "--run", str(journal)])
+
+    assert exit_info.value.code == 1
+
+
+def test_cli_opens_an_undo_journal_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A normal run records what it writes; --no-undo-log turns that off."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image)])
+    assert captured["journal"] is not None
+
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--no-undo-log"])
+    assert captured["journal"] is None
+
+
+def test_cli_records_no_undo_journal_for_a_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dry run writes nothing, so there is nothing to put back."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--dry-run"])
+
+    assert captured["journal"] is None
+
+
+def test_undo_list_says_when_there_is_nothing_recorded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--list on a machine that never tagged anything exits 0 with a plain message."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    with contextlib.suppress(SystemExit):
+        main_module.app(["undo", "--list"])
+    assert "No recorded runs to undo." in capsys.readouterr().out
+
+
+def test_undo_reports_an_unreadable_journal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A journal that cannot be read is a message and exit 1, not a traceback."""
+    journal = tmp_path / "run.jsonl"
+    journal.write_text("{}", encoding="utf-8")
+
+    with (
+        patch("photo_tagger.main.read_journal", side_effect=UndoError("boom")),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(["undo", "--run", str(journal)])
+
+    assert exit_info.value.code == 1
+    assert "boom" in capsys.readouterr().out
+
+
+def test_cli_reports_the_journal_it_wrote(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run that recorded writes names its journal in the log, so undo is discoverable."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    image = _make_jpeg(tmp_path / "img.cr3")
+    sidecar = tmp_path / "img.xmp"
+    sidecar.write_text("written", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def recording_run_batch(*_args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        captured["journal"] = kwargs["journal"]
+        kwargs["journal"].record(image, sidecar, created=True)
+
+    setup, create_agent, _ = _patches(captured)
+    with (
+        setup,
+        create_agent,
+        patch.object(main_module, "run_batch", side_effect=recording_run_batch),
+    ):
+        _run_app(["--input", str(image)])
+
+    assert captured["journal"].entries == 1
+    assert captured["journal"].path.exists()

@@ -64,6 +64,7 @@
 # prompt_file = "prompt.txt"
 # cache_file = ".photo-tagger-cache.db"  # SQLite cache of model outputs; safe to delete
 # lock_file  = ".photo-tagger.lock"
+# undo_log = true             # false = do not record what the run writes (no `undo`)
 
 # --- display ------------------------------------------------------------------
 

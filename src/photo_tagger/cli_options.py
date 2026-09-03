@@ -438,6 +438,18 @@ class ArtifactConfig:
             ),
         ),
     ] = None
+    undo_log: Annotated[
+        bool,
+        Parameter(
+            name=("--undo-log",),
+            negative="--no-undo-log",
+            help=(
+                "Record every file this run writes to a journal under the state directory, so "
+                "'photo-tagger undo' can put it back. On by default: the runs worth undoing are "
+                "the ones nobody planned to. Journals are small and pruned automatically"
+            ),
+        ),
+    ] = True
     lock_file: Annotated[
         Path | None,
         Parameter(

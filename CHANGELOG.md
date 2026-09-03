@@ -74,6 +74,14 @@ All notable changes to this project are documented here. The format is based on
   model left to itself deliberates for thousands of tokens over sixty of them. On a local 31B model
   the setting was the difference between 13 minutes for sixteen keywords and 12 seconds.
 
+- `photo-tagger undo`: put back what a run wrote. Every run now records the files it writes to a
+  small JSON-lines journal under the state directory, so a batch tagged with the wrong prompt or
+  vocabulary is one command to revert: sidecars the run created are deleted, files it overwrote are
+  restored from ExifTool's `*_original` backup. `--list` shows the recorded runs, `--run PATH` picks
+  one, `--dry-run` reports the plan, and `--force` overrides the guard that leaves files edited
+  since the run alone. Recording is on by default (`--no-undo-log` disables it) and journals are
+  pruned to the 50 most recent runs and 90 days.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added

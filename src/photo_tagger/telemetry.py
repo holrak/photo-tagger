@@ -37,6 +37,7 @@ import httpx2
 from loguru import logger
 
 from photo_tagger import __version__
+from photo_tagger.config import state_dir
 from photo_tagger.hardware import hardware_info
 
 
@@ -174,15 +175,8 @@ def should_send(*, config_enabled: bool) -> bool:
 
 
 def _state_dir() -> Path:
-    """
-    Return the directory for telemetry state, honoring ``XDG_STATE_HOME``.
-
-    Falls back to ``~/.local/state/photo-tagger``. This is state, not config, so it lives apart from
-    the TOML config file the user edits by hand.
-    """
-    base = os.getenv("XDG_STATE_HOME")
-    root = Path(base) if base else Path.home() / ".local" / "state"
-    return root / "photo-tagger"
+    """Return the shared state directory telemetry keeps its install id and markers in."""
+    return state_dir()
 
 
 def install_id() -> str:

@@ -799,6 +799,22 @@ def _build_write_payload(
     return payload
 
 
+def write_target(image_path: Path, *, use_sidecar: bool) -> Path:
+    """
+    Return the file :func:`write_metadata` will modify for *image_path*.
+
+    Shared so callers that need to inspect the target before the write (the undo journal, which
+    must know whether the sidecar already existed) cannot drift from the writer's own choice.
+
+    Examples:
+        >>> write_target(Path("/photos/image.cr3"), use_sidecar=True).name
+        'image.xmp'
+        >>> write_target(Path("/photos/image.cr3"), use_sidecar=False).name
+        'image.cr3'
+    """
+    return image_path.with_suffix(".xmp") if use_sidecar else image_path
+
+
 def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as kwargs.
     image_path: Path,
     keywords: KeywordSet,
@@ -824,7 +840,7 @@ def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as k
     Returns:
         True on success, False on failure.
     """
-    target_path = image_path.with_suffix(".xmp") if use_sidecar else image_path
+    target_path = write_target(image_path, use_sidecar=use_sidecar)
     payload = _build_write_payload(keywords, description, title)
     if not payload:
         logger.warning("no_data_to_write", file=image_path.name)

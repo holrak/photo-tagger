@@ -15,13 +15,14 @@ precedence rules and TOML layout.
 
 ## Commands
 
-Running `photo-tagger` with image inputs tags them (the default command). Three subcommands exist:
+Running `photo-tagger` with image inputs tags them (the default command). Four subcommands exist:
 
 | Command                   | Description                                                                                               |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `photo-tagger`            | Tag the given images (default). Documented by the option groups below.                                    |
 | `photo-tagger doctor`     | Pre-flight check: verifies ExifTool is on `PATH` and the provider serves the model, then exits 0/1.       |
 | `photo-tagger vocabulary` | Build a keyword file from a library's own keywords (see [Building a vocabulary](#building-a-vocabulary)). |
+| `photo-tagger undo`       | Put back what the last run wrote (see [Undoing a run](#undoing-a-run)).                                   |
 | `photo-tagger gui`        | Launch the optional desktop GUI. Requires the `gui` extra; see [Desktop GUI](gui.md).                     |
 
 `doctor` accepts `--provider`, `-m/--model`, `-u/--url`, and `-k/--api-key` (same meanings as below)
@@ -228,13 +229,14 @@ The display group controls the progress bar and machine-readable output.
 The artifacts group points at side files: a custom prompt, a run summary, a per-photo CSV report, a
 result cache, and a lock.
 
-| Flag                  | Default | Env var | Description                                                                                                                                                                                                         |
-| --------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--prompt-file` PATH  | none    | `-`     | Replace the default user prompt with the contents of PATH; existing photo metadata is still appended automatically.                                                                                                 |
-| `--summary-file` PATH | none    | `-`     | Write a JSON run summary (success/failure counts, failed files, token usage, wall time) on completion.                                                                                                              |
-| `--csv-file` PATH     | none    | `-`     | Write a CSV report with one row per photo (see below). Rows stream as photos finish, so a stopped run still leaves a valid file.                                                                                    |
-| `--cache-file` PATH   | none    | `-`     | SQLite cache of model outputs, keyed on an image-data hash that ignores metadata (so it survives `--embed-in-photo`). Reruns skip the model call when nothing relevant changed. Created if missing; safe to delete. |
-| `--lock-file` PATH    | none    | `-`     | Acquire an exclusive file lock before running; refuse to start if another photo-tagger already holds it. Works on Linux, macOS, and Windows.                                                                        |
+| Flag                           | Default     | Env var | Description                                                                                                                                                                                                         |
+| ------------------------------ | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--prompt-file` PATH           | none        | `-`     | Replace the default user prompt with the contents of PATH; existing photo metadata is still appended automatically.                                                                                                 |
+| `--summary-file` PATH          | none        | `-`     | Write a JSON run summary (success/failure counts, failed files, token usage, wall time) on completion.                                                                                                              |
+| `--csv-file` PATH              | none        | `-`     | Write a CSV report with one row per photo (see below). Rows stream as photos finish, so a stopped run still leaves a valid file.                                                                                    |
+| `--cache-file` PATH            | none        | `-`     | SQLite cache of model outputs, keyed on an image-data hash that ignores metadata (so it survives `--embed-in-photo`). Reruns skip the model call when nothing relevant changed. Created if missing; safe to delete. |
+| `--lock-file` PATH             | none        | `-`     | Acquire an exclusive file lock before running; refuse to start if another photo-tagger already holds it. Works on Linux, macOS, and Windows.                                                                        |
+| `--undo-log` / `--no-undo-log` | on (`true`) | `-`     | Record every file the run writes so `photo-tagger undo` can put it back.                                                                                                                                            |
 
 ### CSV report
 
@@ -421,3 +423,44 @@ without re-tagging the photos that already succeeded.
     slip back in unchanged.
 
 See [Recipes](recipes.md) for runnable resume and skip examples.
+
+## Undoing a run
+
+Every run records the files it writes, so a batch tagged with the wrong prompt, the wrong model, or
+the wrong vocabulary can be reverted in one command instead of by hand:
+
+```console
+$ photo-tagger undo
+Undoing run 20260501142233-8421.jsonl
+Undoing 412 write(s)
+
+  deleted    /Users/you/Pictures/Trip/IMG_0001.xmp
+  restored   /Users/you/Pictures/Trip/IMG_0002.xmp
+  ...
+
+Every recorded write was put back.
+```
+
+Sidecars the run **created** are deleted; files it **overwrote** are restored from ExifTool's
+`*_original` backup. The journals are small JSON-lines files under the state directory
+(`$XDG_STATE_HOME/photo-tagger/runs`, or `~/.local/state/photo-tagger/runs`), pruned to the 50 most
+recent runs and 90 days.
+
+| Flag         | Default    | Description                                               |
+| ------------ | ---------- | --------------------------------------------------------- |
+| `--run` PATH | newest run | Undo this journal instead of the most recent one.         |
+| `--list`     | `false`    | List the recorded runs (name, file count, path) and exit. |
+| `--dry-run`  | `false`    | Report what would be put back, without touching anything. |
+| `--force`    | `false`    | Also revert files that changed after the run wrote them.  |
+
+Three things are deliberately left alone:
+
+- **Files changed since the run.** A different size or mtime means someone edited the file
+    afterwards, so undo reports it and moves on. `--force` overrides this.
+- **Writes made with `--no-backup-xmp`.** There is no copy of the previous contents, so an
+    overwritten file cannot be restored. Newly created sidecars are still deleted.
+- **Runs from the desktop GUI**, which does not record a journal.
+
+`photo-tagger undo` exits 1 when there is nothing to undo or when any entry was left alone, and 0
+when every recorded write was put back. Dry runs are not written to a journal (they change nothing),
+and `--no-undo-log` turns recording off for a run.

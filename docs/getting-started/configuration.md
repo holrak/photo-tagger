@@ -122,6 +122,7 @@ skip_tagged = false   # Skip files that already have keywords, a title, or a des
 # csv_file = "report.csv"      # Write a per-photo CSV report (one row per photo) as the run streams.
 # cache_file = "cache.sqlite"   # SQLite cache of model outputs; reruns skip unchanged calls.
 # lock_file = "photo-tagger.lock" # Exclusive lock; refuse to start if another run holds it.
+undo_log = true               # Record what the run writes so `photo-tagger undo` can revert it.
 ```
 
 !!! note

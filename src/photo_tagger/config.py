@@ -2,6 +2,7 @@
 
 import os
 import warnings
+from pathlib import Path
 from typing import Literal
 
 
@@ -76,6 +77,18 @@ DEFAULT_TIMEOUT_SECONDS = _env_float("TIMEOUT_SECONDS", 60.0)
 # the token budget is exhausted. 0.5 is mild enough to leave legitimate wording intact while
 # strongly suppressing pathological loops.
 DEFAULT_FREQUENCY_PENALTY = _env_float("FREQUENCY_PENALTY", 0.5)
+
+
+def state_dir() -> Path:
+    """
+    Return the directory for photo-tagger's own state, honoring ``XDG_STATE_HOME``.
+
+    Falls back to ``~/.local/state/photo-tagger``. This is state the app maintains (the install id,
+    the undo journals), not configuration the user edits, so it lives apart from the TOML file.
+    """
+    base = os.getenv("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "photo-tagger"
 
 
 def exiftool_executable() -> str | None:

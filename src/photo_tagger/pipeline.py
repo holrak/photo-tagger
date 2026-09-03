@@ -30,6 +30,7 @@ from photo_tagger.metadata import (
     managed_helper,
     read_image_context,
     write_metadata,
+    write_target,
 )
 from photo_tagger.models import KeywordSet
 from photo_tagger.sessions import build_session_vocabulary
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from photo_tagger.metadata import ImageContext
     from photo_tagger.models import GeneratedMetadata, InferenceResult
     from photo_tagger.sessions import SessionPlan
+    from photo_tagger.undo import UndoJournal
     from photo_tagger.vocabulary import Vocabulary
 
     OnSuccess = Callable[[Path], None]
@@ -305,6 +307,8 @@ class _BatchContext:
     # outcome) checks this flag rather than firing early.
     pending: dict[Path, _PendingWrite] | None = None
     pending_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Records every file this run writes, so `photo-tagger undo` can put it back.
+    journal: UndoJournal | None = None
 
 
 def _run_model(image_path: Path, ctx: _BatchContext, *, contextual_prompt: str) -> InferenceResult:
@@ -612,7 +616,11 @@ def _write_pending(
         )
         return True
 
-    return write_metadata(
+    # Whether the target already existed decides how undo reverts this write: restore the
+    # ExifTool backup, or delete the sidecar the run created. It can only be known before the write.
+    target = write_target(image_path, use_sidecar=options.use_sidecar)
+    existed = target.exists()
+    written = write_metadata(
         image_path,
         merged_keywords,
         description=pending.description if options.write_description else None,
@@ -621,6 +629,9 @@ def _write_pending(
         use_sidecar=options.use_sidecar,
         et=et,
     )
+    if written and ctx.journal is not None:
+        ctx.journal.record(image_path, target, created=not existed)
+    return written
 
 
 def _emit_outcome(
@@ -1153,6 +1164,7 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
     cache: InferenceCache | None = None,
     on_image_result: OnImageResult | None = None,
     session_plan: SessionPlan | None = None,
+    journal: UndoJournal | None = None,
 ) -> BatchTotals:
     """
     Run the initial pass plus a single retry pass and return summary totals.
@@ -1199,6 +1211,7 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
         on_image_result=on_image_result,
         progress=progress,
         session_plan=session_plan,
+        journal=journal,
     )
 
     with managed_helper(None) if workers <= 1 else _no_helper() as et:

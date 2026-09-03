@@ -181,6 +181,20 @@ entries. Because the hash ignores metadata, a rerun still hits the cache even wh
 embedded tags into the photo with `--embed-in-photo`. The file is created if missing and safe to
 delete.
 
+## Undo a run that went wrong
+
+Revert everything the last run wrote: sidecars it created are deleted, files it overwrote are
+restored from ExifTool's backup.
+
+```bash
+photo-tagger undo --dry-run   # see the plan first
+photo-tagger undo             # carry it out
+```
+
+Recording is automatic, so this works even when you did not expect to need it.
+`photo-tagger undo --list` shows the recorded runs and `--run PATH` picks one other than the newest.
+Files you edited after the run are left alone unless you add `--force`.
+
 ## Resume a killed run
 
 Track successes in a skip file, then resume from it after an interruption. Use the **same** path for
