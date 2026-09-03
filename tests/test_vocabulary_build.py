@@ -163,6 +163,21 @@ def test_trim_caps_the_list_at_max_terms_by_usage() -> None:
     ]
 
 
+def test_trim_keeps_non_english_lookalikes_apart() -> None:
+    """
+    Plural folding is English morphology; applied elsewhere it deletes real keywords.
+
+    _collapse_variants keys every term with loose_key and drops the loser of each collision. With
+    folding left on, German "Alles" keys as "alle" and collides with "Alle", so one of two distinct
+    catalog keywords never reached the file.
+    """
+    census = _census(Alle=9, Alles=7)
+
+    assert trim(census, TrimRules(fold_plurals=False)).kept == ["Alle", "Alles"]
+    # And the English default still folds, which is the whole point of the flag.
+    assert trim(census, TrimRules(fold_plurals=True)).kept == ["Alle"]
+
+
 def test_trim_is_deterministic_regardless_of_census_order() -> None:
     """Same library, same file: ties break alphabetically rather than by insertion order."""
     forward = trim(_census(Bird=5, Heron=5, Osprey=5))

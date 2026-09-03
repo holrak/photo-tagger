@@ -234,7 +234,7 @@ from photo_tagger.undo import (
     read_journal,
     undo_run,
 )
-from photo_tagger.vocabulary import prompt_with_vocabulary
+from photo_tagger.vocabulary import folds_plurals, prompt_with_vocabulary
 from photo_tagger.vocabulary_build import (
     KeywordCensus,
     TrimRules,
@@ -4277,6 +4277,9 @@ class MainWindow(QMainWindow):
                 min_uses=self._build_min_uses.value(),
                 max_terms=self._build_max_terms.value() or None,
                 allow_digits=self._build_digits.isChecked(),
+                # The metadata language from Settings: folding plurals is English morphology, and
+                # applying it to another language drops real keywords as variants of each other.
+                fold_plurals=folds_plurals(self._output_language),
             ),
             flat=self._build_flat.isChecked(),
             report_file=Path(report_text) if report_text else None,

@@ -48,6 +48,7 @@ from photo_tagger.pipeline import ProcessingOptions
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
 # below to validate the --provider choices, so the name must exist at class-definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
+from photo_tagger.vocabulary import folds_plurals
 from photo_tagger.vocabulary_build import TrimRules
 from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS
 
@@ -534,6 +535,17 @@ class VocabularyBuildConfig:
             ),
         ),
     ] = False
+    output_language: Annotated[
+        str,
+        Parameter(
+            name=("--output-language", "--lang"),
+            help=(
+                "Language the catalog's keywords are in. Only English plurals can be folded "
+                "onto their singular; naming any other language keeps 'Alles' and 'Alle' apart "
+                "instead of dropping one of them as a variant"
+            ),
+        ),
+    ] = DEFAULT_OUTPUT_LANGUAGE
     flat: Annotated[
         bool,
         Parameter(
@@ -772,6 +784,11 @@ def to_trim_rules(config: VocabularyBuildConfig) -> TrimRules:
         min_uses=config.min_uses,
         max_terms=config.max_terms or None,
         allow_digits=config.allow_digits,
+        # Folding plurals is English morphology, and _collapse_variants drops the loser of every
+        # collision. Left on for a German catalog it keys "Alles" as "alle" and deletes one of two
+        # real keywords. load_vocabulary and the session builder already gate on the language;
+        # this is the third caller and was the only one that did not.
+        fold_plurals=folds_plurals(config.output_language),
     )
 
 

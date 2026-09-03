@@ -292,6 +292,7 @@ Nothing is written to your photos or your catalog. The output is a text file to 
 | `--min-uses` N         | `2`        | Keep a keyword only when the library uses it at least this often.                         |
 | `--max-terms` N        | `4800`     | Cap the file, dropping the least-used first. `0` means no cap.                            |
 | `--allow-digits`       | `false`    | Keep keywords containing digits (dropped by default as measurements and model numbers).   |
+| `--output-language`    | `English`  | Language the catalog's keywords are in; only English plurals fold onto their singular.    |
 | `--flat`               | `false`    | Write bare keywords instead of their hierarchies.                                         |
 | `--report` PATH        | none       | Write a CSV of every dropped keyword, its count, and the rule that cut it.                |
 | `--organize`           | `false`    | Model pass for synonyms and a hierarchy (see [below](#organizing-with-the-model)).        |
