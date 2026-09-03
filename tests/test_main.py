@@ -1199,6 +1199,61 @@ def test_config_file_survives_sibling_cli_flag(
     assert captured["options"].max_tokens == 500  # noqa: PLR2004
 
 
+def test_config_file_sets_a_flag_a_command_shares_its_name_with(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    ``[output] vocabulary`` must reach the run even though a ``vocabulary`` command exists.
+
+    Regression test: cyclopts drops every flat-config key that names a subcommand before matching
+    it against anything, so this key was silently ignored the moment the command was added, while
+    the keys next to it in the same table kept working.
+    """
+    listing = tmp_path / "keywords.txt"
+    listing.write_text("Osprey\n", encoding="utf-8")
+    _point_config_at(
+        tmp_path,
+        monkeypatch,
+        f'[output]\nvocabulary = "{listing.as_posix()}"\nmax_keywords = 7\n',
+    )
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image)])
+
+    vocabulary = captured["options"].vocabulary
+    assert vocabulary is not None
+    assert vocabulary.match("ospreys") == "Osprey"
+    assert captured["options"].max_new_keywords == 7  # noqa: PLR2004 - the key next to it
+
+
+def test_cli_flag_beats_a_config_key_a_command_shares_its_name_with(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command line still wins for a key applied outside cyclopts' own config layer."""
+    from_config = tmp_path / "config-keywords.txt"
+    from_config.write_text("Osprey\n", encoding="utf-8")
+    from_flag = tmp_path / "flag-keywords.txt"
+    from_flag.write_text("Tractor\n", encoding="utf-8")
+    _point_config_at(
+        tmp_path,
+        monkeypatch,
+        f'[output]\nvocabulary = "{from_config.as_posix()}"\n',
+    )
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image), "--vocabulary", str(from_flag)])
+
+    assert captured["options"].vocabulary.terms == ("Tractor",)
+
+
 def test_cli_flag_overrides_config_file_for_the_same_field(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, get_args
 
 from cyclopts import App, ArgumentCollection, Parameter, validators
+from cyclopts.argument import update_argument_collection
 from cyclopts.config import Dict as _CycloptsDictConfig
 
 from photo_tagger.config import (
@@ -625,6 +626,38 @@ def cli_config_overrides(file_config: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
+def _apply_shadowed_keys(
+    values: dict[str, Any],
+    arguments: ArgumentCollection,
+    *,
+    source: str,
+) -> None:
+    """
+    Set the flags cyclopts' own config layer refuses to look at, because a command shares the name.
+
+    Cyclopts drops every flat-config key that names a subcommand before it matches anything (see
+    ``cyclopts.config._common.ConfigBase.__call__``), which is right for hierarchical configs and
+    wrong for ours: our keys are option names, so ``[output] vocabulary`` was silently ignored the
+    moment a ``vocabulary`` command existed. These keys are therefore handed to the argument they
+    name directly, mirroring what cyclopts would have done with them.
+
+    This is cyclopts' own matching step, called directly on the keys its filter removed, rather
+    than a second implementation of it: conversion, validation, and "a flag the user passed wins"
+    all behave exactly as they do for every other key.
+    """
+    if not values:
+        return
+    update_argument_collection(
+        values,
+        source,
+        arguments,
+        # No table nesting: these keys are option names, and a command that has no such flag
+        # (doctor, gui) must skip it rather than fail.
+        root_keys=(),
+        allow_unknown=True,
+    )
+
+
 class ConfigFileSource:
     """
     Cyclopts config hook that fills flags the user did not pass from the TOML config file.
@@ -644,15 +677,22 @@ class ConfigFileSource:
         if not overrides:
             return
         source = find_config_file()
+        source_name = str(source) if source is not None else "config"
+        # Keys that share a name with a command never reach the delegate below, so take them out
+        # first and apply them by hand.
+        shadowed = {key: value for key, value in overrides.items() if key in app}
+        for key in shadowed:
+            del overrides[key]
         delegate = _CycloptsDictConfig(
             data=overrides,
             # The keys are global option names, not per-command tables, and commands that lack a
             # given flag (gui, doctor) must ignore it rather than error.
             use_commands_as_keys=False,
             allow_unknown=True,
-            source=str(source) if source is not None else "config",
+            source=source_name,
         )
         delegate(app, commands, arguments)
+        _apply_shadowed_keys(shadowed, arguments, source=source_name)
 
 
 def to_processing_options(
