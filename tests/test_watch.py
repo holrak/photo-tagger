@@ -69,6 +69,23 @@ def test_watch_waits_for_a_freshly_written_file_to_age(tmp_path: Path) -> None:
     assert _settled_files([fresh], state, settle_seconds=30.0, now=now + 60) == [fresh]
 
 
+def test_watch_tags_a_file_stamped_in_the_future(tmp_path: Path) -> None:
+    """
+    A clock ahead of ours must not park a photo forever.
+
+    Cameras, card readers and NAS boxes stamp files in the future when their clock runs fast, and
+    so does any copy that preserves the source mtime. `now - mtime` is then negative and never
+    reaches settle_seconds, so the photo was re-polled on every interval and never tagged.
+    """
+    ahead = _make_photo(tmp_path / "ahead.jpg", age_seconds=-300.0)
+    state = _PollState()
+    now = time.time()
+
+    assert _settled_files([ahead], state, settle_seconds=30.0, now=now) == []
+    # Two identical polls are the real evidence that it stopped changing.
+    assert _settled_files([ahead], state, settle_seconds=30.0, now=now) == [ahead]
+
+
 def test_watch_skips_a_file_that_vanishes_between_listing_and_stat(tmp_path: Path) -> None:
     """A path deleted mid-poll is dropped rather than raising."""
     state = _PollState()

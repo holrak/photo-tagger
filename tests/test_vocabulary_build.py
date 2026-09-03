@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from photo_tagger.errors import DiscoveryError
 from photo_tagger.models import KeywordSet
 from photo_tagger.vocabulary import Vocabulary, parse_keyword_lines
 from photo_tagger.vocabulary_build import (
@@ -72,6 +73,26 @@ def test_census_from_photos_counts_one_vote_per_photo(monkeypatch: pytest.Monkey
     assert census.photos == len(photos)
     assert dict(census.uses) == {"Animal": 1, "Bird": 1, "Osprey": 1, "Golden Hour": 2}
     assert census.best_chain("Osprey") == ("Animal", "Bird", "Osprey")
+
+
+def test_census_from_photos_reports_a_failed_read_instead_of_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A broken exiftool must not read as "your library has no keywords".
+
+    read_keyword_sets maps every path it is given, so an empty result means the read never ran.
+    Counting it as zero sent the user to "No keywords found: nothing to build a vocabulary from",
+    with the real cause only in the log.
+    """
+
+    def failed_read(_paths: Any, **_: Any) -> dict[Path, KeywordSet]:  # noqa: ANN401
+        return {}
+
+    monkeypatch.setattr("photo_tagger.vocabulary_build.read_keyword_sets", failed_read)
+
+    with pytest.raises(DiscoveryError, match="exiftool"):
+        census_from_photos([Path("a.jpg")])
 
 
 def test_census_from_export_counts_tree_occurrences() -> None:

@@ -61,6 +61,20 @@ def _fingerprint(path: Path) -> _Fingerprint | None:
     return _Fingerprint(stat.st_size, stat.st_mtime)
 
 
+def _has_settled(mtime: float, now: float, settle_seconds: float) -> bool:
+    """
+    Report whether a file's last change is far enough back to call it finished.
+
+    A camera, card reader or NAS whose clock runs ahead of ours stamps files in the future, and so
+    does any copy that preserves the source mtime (``cp -p``, rsync). Plain subtraction then never
+    reaches *settle_seconds*, so such a photo was re-polled forever and silently never tagged. The
+    caller has already seen two identical polls of it, which is the real evidence that it stopped
+    changing, so take that rather than a clock we do not share.
+    """
+    age = now - mtime
+    return age >= settle_seconds or age < 0
+
+
 def _settled_files(
     candidates: list[Path],
     state: _PollState,
@@ -84,7 +98,7 @@ def _settled_files(
             continue
         current[path] = fingerprint
         previous = state.fingerprints.get(path)
-        if previous == fingerprint and now - fingerprint.mtime >= settle_seconds:
+        if previous == fingerprint and _has_settled(fingerprint.mtime, now, settle_seconds):
             ready.append(path)
     # Keep only what is still pending: anything yielded is now the caller's problem, and anything
     # that vanished between polls should not be remembered either.

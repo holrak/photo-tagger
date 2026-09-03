@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from photo_tagger.errors import DiscoveryError
 from photo_tagger.keywords import parse_hierarchical_keyword
 from photo_tagger.metadata import read_keyword_sets
 from photo_tagger.vocabulary import loose_key, parse_keyword_lines
@@ -172,12 +173,21 @@ def census_from_photos(
     Works with any application that writes XMP or IPTC, which is the point: only Lightroom exports a
     keyword list, while every DAM writes the keywords themselves. Photos are read in batches so the
     exiftool cost stays flat across a large library.
+
+    Raises :class:`~photo_tagger.errors.DiscoveryError` when a batch cannot be read at all.
+    ``read_keyword_sets`` maps every path it was given, so an empty result means exiftool never ran,
+    not that the photos carry no keywords. Counting that as zero told a user whose library is full
+    of keywords that they had none, with the real reason only in the log.
     """
     census = KeywordCensus()
     paths = list(image_paths)
     for start in range(0, len(paths), _PHOTO_BATCH):
         batch = paths[start : start + _PHOTO_BATCH]
-        for keywords in read_keyword_sets(batch, et=et).values():
+        read = read_keyword_sets(batch, et=et)
+        if batch and not read:
+            msg = f"could not read keywords from {len(batch)} photo(s); is exiftool working?"
+            raise DiscoveryError(msg)
+        for keywords in read.values():
             census.photos += 1
             for chain in _chains_of(keywords):
                 census.add(chain)
