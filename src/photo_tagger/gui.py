@@ -2850,19 +2850,36 @@ class MainWindow(QMainWindow):
             ).format(n=len(rows), name=target.name),
         )
 
+    def _empty_tree(self) -> None:
+        """
+        Drop the row index, then take the rows out one at a time.
+
+        Deliberately not ``QTreeWidget.clear()``. PySide's clear() hands each top-level row back to
+        Python and deletes only the ones nothing references; C++ frees the rest after detaching
+        them from the model, so it never emits the removals. Any QTreeWidgetItemIterator still
+        registered with QTreeModel is left pointing at freed memory, and the next removal reads it.
+        A context menu holding the row the user right-clicked is enough to arm that.
+
+        takeTopLevelItem always goes through QTreeModel::beginRemoveItems, which tells every
+        registered iterator what is going away. The index goes first so no row is reachable from
+        Python while Qt is tearing it down.
+        """
+        self._folder_rows.clear()
+        self._leaf_rows.clear()
+        while self._tree.topLevelItemCount():
+            self._tree.takeTopLevelItem(0)
+
     def _rebuild_tree(self) -> None:
         self._syncing = True
         # Build with sorting off so items do not shuffle on every insert; re-enabling at the
         # end re-applies whatever column/direction the header is currently set to.
         self._tree.setSortingEnabled(False)
-        self._folder_rows.clear()
-        self._leaf_rows.clear()
-        self._tree.clear()
+        self._empty_tree()
         for node in build_tree([item.path for item in self._items.values()]):
             self._add_folder_node(self._tree, node)
         self._tree.setSortingEnabled(True)
         self._sync_grid_checks()
-        # clear() above dropped the selection (_on_current_changed ignores it while _syncing,
+        # Emptying the tree dropped the selection (_on_current_changed ignores it while _syncing,
         # so the right-hand pane kept whatever was open). Restore the highlight so bulk actions
         # (dragging photos in, Check All, Uncheck Already Tagged) do not kick the user out of
         # the photo or folder they are reviewing.

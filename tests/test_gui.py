@@ -383,7 +383,13 @@ def test_row_index_covers_every_folder_and_leaf(window: gui.MainWindow, tmp_path
 
 
 def test_a_rebuild_replaces_every_indexed_row(window: gui.MainWindow, tmp_path: Path) -> None:
-    """A rebuild swaps in fresh rows: the index holds no leftovers from the previous tree."""
+    """
+    A rebuild swaps in fresh rows and detaches the old ones cleanly.
+
+    Anything still holding a row from the previous tree (a context menu, a caller's local) keeps a
+    live, detached object. Under QTreeWidget.clear() that row would instead be freed in C++ while
+    Python still pointed at it.
+    """
     from shiboken6 import isValid  # noqa: PLC0415 - only importable with the [gui] extra
 
     a = _jpeg(tmp_path / "a.jpg")
@@ -397,9 +403,45 @@ def test_a_rebuild_replaces_every_indexed_row(window: gui.MainWindow, tmp_path: 
     assert set(window._leaf_rows) == {str(b)}  # noqa: SLF001
     assert window._leaf_rows[str(b)] is not stale_leaf  # noqa: SLF001
     assert window._folder_rows[str(tmp_path)] is not stale_folder  # noqa: SLF001
-    # The rows the index dropped were destroyed with the old tree, not orphaned.
-    assert not isValid(stale_folder)
-    assert not isValid(stale_leaf)
+    assert isValid(stale_folder), "the old row was freed while Python still held it"
+    assert stale_folder.treeWidget() is None
+    assert stale_leaf.treeWidget() is None
+
+
+def test_the_tree_is_emptied_row_by_row_never_with_clear(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A rebuild takes the rows out; QTreeWidget.clear() is off limits.
+
+    clear() frees rows that Python still references without emitting the removal, which leaves any
+    QTreeWidgetItemIterator registered with QTreeModel pointing at freed memory.
+    """
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+    forbidden: list[int] = []
+    monkeypatch.setattr(window._tree, "clear", lambda: forbidden.append(1))  # noqa: SLF001
+
+    window._rebuild_tree()  # noqa: SLF001
+
+    assert not forbidden, "_rebuild_tree fell back to QTreeWidget.clear()"
+    assert window._tree.topLevelItemCount() == 1  # noqa: SLF001
+    assert set(window._leaf_rows) == {str(a), str(b)}  # noqa: SLF001
+
+
+def test_emptying_the_tree_drops_the_rows_and_the_index(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """_empty_tree leaves nothing behind in the widget or the lookup."""
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    window._empty_tree()  # noqa: SLF001
+    assert window._tree.topLevelItemCount() == 0  # noqa: SLF001
+    assert not window._folder_rows  # noqa: SLF001
+    assert not window._leaf_rows  # noqa: SLF001
 
 
 def test_gui_does_not_use_the_tree_item_iterator() -> None:
