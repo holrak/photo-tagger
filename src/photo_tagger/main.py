@@ -197,9 +197,9 @@ def gui() -> None:
         # Only a genuinely missing Qt module earns the install hint. Anything else (a broken
         # shiboken build, an import error inside our own gui code) must surface as itself, or the
         # hint sends the user reinstalling an extra that is not the problem.
-        # NOSONAR S1110 - the parentheses are needed. Without them the "or" takes the split
-        # result, and the name arrives whole.
-        missing = (exc.name or "").split(".")[0]  # NOSONAR
+        # Without the parentheses the "or" takes the result of the split, and the module name
+        # arrives whole. SonarQube reads them as redundant (S1110) and is wrong.
+        missing = (exc.name or "").split(".")[0]  # NOSONAR S1110
         if missing not in ("PySide6", "shiboken6"):
             raise
         sys.stderr.write(
