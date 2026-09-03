@@ -91,6 +91,33 @@ All notable changes to this project are documented here. The format is based on
   cache, report file, and undo journal are shared by the whole session; a batch with failures is
   logged and the watch continues.
 
+- GUI: all five of the above, without a terminal.
+
+  **Settings > Keyword Rules** holds the two that shape what a run writes. A **controlled
+  vocabulary** file is listed in the prompt (so the model prefers the catalog's terms) and snapped
+  onto afterwards (so it writes them whatever the model said), with a strict toggle that drops what
+  the file does not cover; the run's closing line names how many keywords were rewritten and which
+  were dropped. The listing is part of the cache namespace, so swapping files starts a fresh slice
+  instead of replaying keywords chosen under the old one, and snapping happens after the cache
+  lookup, so a vocabulary chosen today also applies to answers stored yesterday. A **session gap**
+  turns on shoot harmonization: every generation is followed by a pass that groups the proposals
+  into shoots and makes each one agree with itself. The CLI does this inside the run, holding a
+  session's writes until it is analyzed; the window writes nothing until you save, so it lands on
+  the proposals, before the review. **Tools > Harmonize Shoots Now** re-runs it after edits.
+
+  **Tools** carries the three that act on a library. **Build Vocabulary** counts the keywords the
+  photos already carry (or reads a Lightroom export), trims them by the same deterministic rules as
+  the command, optionally asks the model to fold synonyms and add a hierarchy, writes the optional
+  drop report, and offers to put the result straight to work. **Watch Folder** polls a folder and
+  generates each photo as it lands; saving is opt-in, because review-before-write is the point of
+  the window and an unattended import is what the CLI's `watch` is for. **Undo Writes** lists every
+  recorded run, previews what putting one back would do, and does it.
+
+  Saves from the window are now recorded in an undo journal too (**Settings > Record Saves for
+  Undo**, on by default), one per save, so `photo-tagger undo` and the dialog cover them and not
+  only CLI runs. The vocabulary, the session gap, and the undo-log toggle persist through *Save
+  Settings as Defaults*, so a CLI run picks up the same rules.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added

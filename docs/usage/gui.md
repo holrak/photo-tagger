@@ -233,6 +233,97 @@ For the full traceback behind a failure, use **Help > Open Logs**. The GUI write
 rotating log file to `~/.photo-tagger/logs/` on every run and the action opens that folder in your
 file browser.
 
+### Keyword rules: a vocabulary, and harmonized shoots
+
+**Settings > Keyword Rules...** holds the two settings that decide which keywords a save ends up
+writing. Both are kept for the session and persist through *Save Settings as Defaults*, so a CLI run
+picks up the same rules.
+
+A **controlled vocabulary** restricts generated keywords to the terms in a keyword file, the GUI's
+[`--vocabulary`](cli-reference.md#controlled-vocabulary). Choose a Lightroom keyword export (`.txt`
+or `.csv`) or a plain list of terms and `Animal|Bird|Osprey` paths; the label under the picker
+reports how many keywords it holds, or why the file was refused. The file does two things at once:
+it is listed in the prompt, so the model prefers your catalog's terms in the first place, and every
+generated keyword is snapped onto it afterwards, so `ospreys` is written as your `Osprey` under your
+`Animal|Bird` hierarchy whatever the model said. Tick **Write only keywords the vocabulary covers**
+for [`--vocabulary-strict`](cli-reference.md#controlled-vocabulary): keywords the file does not have
+are dropped instead of written as they came, and the status bar names the most frequent rejects so
+the vocabulary can grow on purpose rather than by accident.
+
+!!! note "The vocabulary is part of the cache key"
+
+    Swapping vocabulary files starts a fresh cache slice, so a run never replays keywords chosen under
+    the old one. Snapping happens *after* the cache lookup, so a vocabulary you choose today also
+    applies to answers cached yesterday.
+
+**Split shoots after** N minutes turns on shoot harmonization, the GUI's
+[`--session-gap`](cli-reference.md#sessions). Photos are grouped into shoots wherever the capture
+time jumps by more than that gap (falling back to the file date), and each shoot's keywords are made
+to agree with themselves: the spelling and the hierarchy most of the shoot used win for all of it,
+so forty frames of the same bird stop arriving in the catalog as `Osprey`, `Ospreys`, and
+`Wildlife|Raptor|Osprey`. The CLI holds a session's writes until every photo in it has been
+analyzed; the window writes nothing until you press Save, so the pass runs over the **proposals** at
+the end of each generation instead, before you review them. **Tools > Harmonize Shoots Now** runs it
+again after you have edited some keywords by hand. Zero (shown as `off`) treats every photo on its
+own.
+
+### Build a vocabulary from your own library
+
+**Tools > Build Vocabulary...** writes the keyword file the strict vocabulary needs, out of the
+keywords your photos already carry. It is the
+[`photo-tagger vocabulary`](cli-reference.md#building-a-vocabulary) command with its flags as form
+fields:
+
+- **Read from** the photos in the list (read through ExifTool, so any application that writes XMP or
+    IPTC counts, not only Lightroom), a Lightroom **keyword export**, or both.
+- **Keep a keyword when** it is used at least *N* times (the single most useful knob: in a catalog
+    an AI has been writing to, most keywords are used once), with a cap on the file's size, an
+    option to keep keywords containing digits, and one to write bare keywords without their
+    hierarchies.
+- **Organize with the model** (off by default) asks the model the two things counting cannot settle:
+    which keywords are synonyms of each other, and what hierarchy the list should have. It never
+    decides what to keep and never invents a keyword. It needs a reachable provider, and uses the
+    one in the header.
+- **Write to** a vocabulary file, plus an optional **drop report**: a CSV naming every dropped
+    keyword, its count, and the rule that cut it, which is what makes the thresholds tunable.
+
+The build runs in the background (counting a large library takes a while, and organizing takes model
+calls), and when it finishes the window offers to put the new file straight to work as the active
+vocabulary. Nothing is written to your photos.
+
+### Watch a folder
+
+**Tools > Watch Folder...** is the import-time workflow: point it at the folder your card reader,
+tethered capture, or sync client fills, and photos join the list as they arrive. Photos already
+there are picked up first. It mirrors [`photo-tagger watch`](cli-reference.md#watching-a-folder),
+including **Check every** (how often the folder is listed) and **Settle for** (how long a file must
+sit unchanged before it is picked up, so a photo still being copied is left alone until the copy
+finishes).
+
+Two toggles decide how far it goes: **Generate each new photo** (on by default) runs the model on
+each arrival so a proposal is waiting for you, and **Save it too, without reviewing** (off by
+default) writes it straight away. Saving is opt-in because reviewing before writing is the point of
+the window; turn it on for an unattended import, where it behaves like the CLI command. A photo that
+lands mid-run waits for the run in flight rather than starting a second one. The menu entry becomes
+**Stop Watching** while a watch is running, and closing the window stops it.
+
+### Undo what a save wrote
+
+Every save records what it wrote to a small journal (**Settings > Record Saves for Undo**, on by
+default), the same journal [`photo-tagger undo`](cli-reference.md#undoing-a-run) reads. **Tools >
+Undo Writes...** lists every recorded run, newest first, from this window *and* from the command
+line, with the time it ran and how many files it wrote.
+
+Pick one and press **Preview** to see what putting it back would do, file by file, without touching
+anything; press **Undo** (after a confirmation) to do it. Sidecars the run created are deleted, and
+files it overwrote are restored from their ExifTool `*_original` backup. A file that changed since
+the run is left alone, because that change is a later edit and not this run's to undo; **Also revert
+files changed since the run** overrides that. A file written with **Keep ExifTool Backup** unchecked
+cannot be restored at all, since there is no copy of what it held, and the dialog says so per file.
+
+Photos in the list whose writes were reverted go back to `ready` (their proposal is still there to
+save again) and their **Tagged** column is scanned again.
+
 ### Export a CSV report
 
 **File > Export CSV Report...** writes a spreadsheet with **one row per photo in the list**, the

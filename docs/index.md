@@ -22,8 +22,9 @@ originals untouched, writing an XMP sidecar next to each image instead of modify
 - A `doctor` command that pre-flights ExifTool and the model provider before a run.
 - A `watch` command that tags photos as they land in an import folder.
 - An `undo` command that puts back what a run wrote, down to the last sidecar.
-- Optional PySide6 desktop GUI (`photo-tagger gui`) for a point-and-click workflow, translated into
-    English and Brazilian Portuguese.
+- Optional PySide6 desktop GUI (`photo-tagger gui`) for a point-and-click workflow, carrying the
+    same vocabulary, shoot-harmonization, watch, and undo features, translated into English and
+    Brazilian Portuguese.
 - Sends a compact, resized JPEG to the model to save tokens, with configurable dimensions and
     quality.
 - Optional SQLite cache so reruns skip the model call when nothing relevant changed.

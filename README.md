@@ -39,8 +39,9 @@ directly into each photo with `--embed-in-photo`.
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Records what each run writes, so `photo-tagger undo` puts a bad batch back
 - Watches a folder and tags photos as they arrive (`photo-tagger watch`)
-- Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow, translated into your own
-  language (English and Brazilian Portuguese ship today)
+- Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow, with the same
+  vocabulary, shoot-harmonization, watch, and undo features, translated into your own language
+  (English and Brazilian Portuguese ship today)
 - Converts images to compact JPEG bytes to minimize token usage
 - Reports what it did: a JSON run summary, NDJSON on stdout, or a per-photo CSV (`--csv-file`)
 - Generates detailed log files for easy debugging and auditing
@@ -384,6 +385,14 @@ retried from its right-click menu, and **Help > Open Logs** opens the run log fo
 same config file and environment variables as the CLI, and **Settings > Save Settings as Defaults**
 writes them back. PySide6 is only pulled in by the `gui` extra, so the plain CLI install stays
 lightweight.
+
+The window covers the same keyword workflow as the CLI. **Settings > Keyword Rules...** picks the
+controlled vocabulary generated keywords are snapped onto (with a strict toggle) and the session gap
+that harmonizes each shoot, applied to the proposals so you still review before saving. **Tools**
+holds the jobs that act on a whole library: **Build Vocabulary...** writes a keyword file out of the
+keywords your photos already carry (optionally organized by the model), **Watch Folder...** picks up
+and generates photos as they land, and **Undo Writes...** puts back what a recorded run wrote,
+whether it came from the window or the command line.
 
 ### Build a standalone macOS app
 
