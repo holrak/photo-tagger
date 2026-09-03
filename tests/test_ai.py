@@ -228,9 +228,11 @@ def test_analyze_image_folds_hierarchies_and_dedupes_keywords() -> None:
         user_prompt="Describe.",
     )
 
+    usage = (result.input_tokens, result.output_tokens, result.total_tokens)
+
     assert result.keywords == ["Duck", "Sky", "Duck<Bird<Animal"]
     assert (result.title, result.description) == ("A Title", "A description.")
-    assert (result.input_tokens, result.output_tokens, result.total_tokens) == _STUB_USAGE
+    assert usage == _STUB_USAGE
     assert result.seconds >= 0.0
 
 
@@ -313,10 +315,13 @@ def test_analyze_image_attaches_partial_usage_when_the_call_fails() -> None:
             msg = "model returned invalid structured output"
             raise ValueError(msg)
 
+    image = _stub_image()
+    agent = _FailingAgent()
+
     with pytest.raises(ValueError, match="invalid structured output") as exc_info:
         ai_module.analyze_image_with_ai(
-            image_bytes=_stub_image(),
-            agent=_FailingAgent(),  # type: ignore[arg-type]
+            image_bytes=image,
+            agent=agent,  # type: ignore[arg-type]
             user_prompt="Describe.",
         )
 

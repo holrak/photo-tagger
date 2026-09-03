@@ -289,11 +289,13 @@ def test_run_batch_raises_system_exit_when_any_fails_after_retry(tmp_path: Path)
     files = [tmp_path / "img.cr3"]
     files[0].write_text("x")
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
         pytest.raises(BatchError),
     ):
-        run_batch(files, agent=_FAKE_AGENT, options=ProcessingOptions())
+        run_batch(files, agent=_FAKE_AGENT, options=options)
 
 
 def test_run_batch_retry_recovers_a_failure(tmp_path: Path) -> None:
@@ -369,6 +371,8 @@ def test_run_batch_skips_retry_for_a_rejected_credential(
         raise ModelHTTPError(status_code=401, model_name="test-model")
 
     received: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=unauthorized),
         pytest.raises(BatchError),
@@ -376,7 +380,7 @@ def test_run_batch_skips_retry_for_a_rejected_credential(
         run_batch(
             [image],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received.append,
         )
 
@@ -409,6 +413,8 @@ def test_run_batch_still_reports_on_ctrl_c_during_the_retry_pause(
     image.write_text("x")
 
     received: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
         pytest.raises(BatchError),
@@ -416,7 +422,7 @@ def test_run_batch_still_reports_on_ctrl_c_during_the_retry_pause(
         run_batch(
             [image],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received.append,
         )
 
@@ -448,6 +454,8 @@ def test_run_batch_calls_on_success_for_each_completed_file(tmp_path: Path) -> N
 
     notified: list[Path] = []
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=fake_process_photo),
         pytest.raises(BatchError),
@@ -455,7 +463,7 @@ def test_run_batch_calls_on_success_for_each_completed_file(tmp_path: Path) -> N
         run_batch(
             [success_first, success_retry, failure],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_success=notified.append,
         )
 
@@ -585,6 +593,8 @@ def test_run_batch_reports_failure_kinds_in_totals(tmp_path: Path) -> None:
         return False  # metadata write failed
 
     received: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=fake_process_photo),
         pytest.raises(BatchError),
@@ -592,7 +602,7 @@ def test_run_batch_reports_failure_kinds_in_totals(tmp_path: Path) -> None:
         run_batch(
             [timeout_file, write_file],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received.append,
         )
 
@@ -777,6 +787,8 @@ def test_progress_callback_ticks_on_final_failure_after_retry(tmp_path: Path) ->
         f.write_text("x")
     received: list[tuple[str, bool]] = []
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
         pytest.raises(
@@ -786,7 +798,7 @@ def test_progress_callback_ticks_on_final_failure_after_retry(tmp_path: Path) ->
         run_batch(
             images,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             progress=lambda path, ok: received.append((path.name, ok)),
         )
 
@@ -822,6 +834,8 @@ def test_run_batch_calls_on_complete_with_totals_even_on_failure(tmp_path: Path)
     files[0].write_text("x")
     received: list[Any] = []
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
         pytest.raises(BatchError),
@@ -829,7 +843,7 @@ def test_run_batch_calls_on_complete_with_totals_even_on_failure(tmp_path: Path)
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received.append,
         )
 
@@ -1083,6 +1097,8 @@ def test_run_batch_serial_handles_keyboard_interrupt(tmp_path: Path) -> None:
         return True
 
     received_totals: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=fake_process_photo),
         pytest.raises(BatchError),
@@ -1090,7 +1106,7 @@ def test_run_batch_serial_handles_keyboard_interrupt(tmp_path: Path) -> None:
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received_totals.append,
         )
 
@@ -1118,6 +1134,8 @@ def test_run_batch_concurrent_handles_keyboard_interrupt(tmp_path: Path) -> None
         return True
 
     received_totals: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=fake_process_photo),
         pytest.raises(BatchError),
@@ -1125,7 +1143,7 @@ def test_run_batch_concurrent_handles_keyboard_interrupt(tmp_path: Path) -> None
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received_totals.append,
             workers=2,
         )
@@ -1161,6 +1179,8 @@ def test_run_batch_concurrent_interrupt_during_submission(tmp_path: Path) -> Non
             return super().submit(*args, **kwargs)
 
     received_totals: list[Any] = []
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.ThreadPoolExecutor", InterruptingPool),
         patch("photo_tagger.pipeline.process_photo", return_value=True),
@@ -1169,7 +1189,7 @@ def test_run_batch_concurrent_interrupt_during_submission(tmp_path: Path) -> Non
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_complete=received_totals.append,
             workers=2,
         )
@@ -1497,11 +1517,13 @@ def test_run_batch_concurrent_records_worker_exception(tmp_path: Path) -> None:
         msg = "worker blew up"
         raise RuntimeError(msg)
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=_exploding_process),
         pytest.raises(BatchError),
     ):
-        run_batch(files, agent=_FAKE_AGENT, options=ProcessingOptions(), workers=2)
+        run_batch(files, agent=_FAKE_AGENT, options=options, workers=2)
 
 
 def test_notify_success_is_a_noop_without_callback(tmp_path: Path) -> None:
@@ -1565,11 +1587,13 @@ def test_run_batch_concurrent_catches_future_result_exception(tmp_path: Path) ->
         msg = "execute_process blew up"
         raise RuntimeError(msg)
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.execute_process", side_effect=_exploding_execute),
         pytest.raises(BatchError),
     ):
-        run_batch(files, agent=_FAKE_AGENT, options=ProcessingOptions(), workers=2)
+        run_batch(files, agent=_FAKE_AGENT, options=options, workers=2)
 
 
 def test_run_batch_concurrent_progress_callback_fires_per_image(tmp_path: Path) -> None:
@@ -1670,6 +1694,9 @@ def test_run_batch_session_defers_success_until_the_write(
     def failing_write(image_path: Path, _keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
         return image_path != files[1]
 
+    options = ProcessingOptions()
+    plan = _session_plan(files)
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
         patch("photo_tagger.pipeline.write_metadata", side_effect=failing_write),
@@ -1678,10 +1705,10 @@ def test_run_batch_session_defers_success_until_the_write(
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             on_success=notified.append,
             on_image_result=outcomes.append,
-            session_plan=_session_plan(files),
+            session_plan=plan,
         )
 
     assert notified == [files[0]]
@@ -1701,6 +1728,9 @@ def test_run_batch_session_write_failure_is_final(
         calls.append(path)
         return bool(two_photo_session["process"](path, ctx, **kwargs))
 
+    options = ProcessingOptions()
+    plan = _session_plan(files)
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=counting_process),
         patch("photo_tagger.pipeline.write_metadata", return_value=False),
@@ -1709,8 +1739,8 @@ def test_run_batch_session_write_failure_is_final(
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
-            session_plan=_session_plan(files),
+            options=options,
+            session_plan=plan,
         )
 
     totals = batch_error.value.args[0]
@@ -1732,6 +1762,9 @@ def test_run_batch_session_progress_reports_the_write_not_the_analysis(
     files = two_photo_session["files"]
     ticks: list[tuple[Path, bool]] = []
 
+    options = ProcessingOptions()
+    plan = _session_plan(files)
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
         patch("photo_tagger.pipeline.write_metadata", return_value=False),
@@ -1740,8 +1773,8 @@ def test_run_batch_session_progress_reports_the_write_not_the_analysis(
         run_batch(
             files,
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
-            session_plan=_session_plan(files),
+            options=options,
+            session_plan=plan,
             progress=lambda path, ok: ticks.append((path, ok)),
         )
 
@@ -1896,6 +1929,9 @@ def test_run_batch_session_with_no_usable_analysis_writes_nothing(tmp_path: Path
     image = tmp_path / "img.cr3"
     image.write_text("x")
 
+    options = ProcessingOptions()
+    plan = _session_plan([image])
+
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
         patch("photo_tagger.pipeline.write_metadata") as write,
@@ -1904,8 +1940,8 @@ def test_run_batch_session_with_no_usable_analysis_writes_nothing(tmp_path: Path
         run_batch(
             [image],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
-            session_plan=_session_plan([image]),
+            options=options,
+            session_plan=plan,
         )
 
     write.assert_not_called()
@@ -1930,6 +1966,8 @@ def test_run_batch_session_interrupt_stops_after_the_session_in_flight(
         _real_process_photo(path, ctx, **kwargs)
         raise KeyboardInterrupt
 
+    options = ProcessingOptions()
+
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=process),
         pytest.raises(BatchError) as batch_error,
@@ -1937,7 +1975,7 @@ def test_run_batch_session_interrupt_stops_after_the_session_in_flight(
         run_batch(
             [first, second],
             agent=_FAKE_AGENT,
-            options=ProcessingOptions(),
+            options=options,
             session_plan=plan,
         )
 
