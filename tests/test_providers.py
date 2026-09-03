@@ -240,8 +240,11 @@ def test_ollama_backend_strips_v1_suffix(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_validate_model_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """ProviderError is raised when the requested model id is not in the listing."""
     _patch_httpx2_get(monkeypatch, _DummyResponse(HTTPStatus.OK, {"data": [{"id": "other"}]}))
+    backend = get_backend("lmstudio")
+
+    # Only the call under test runs inside the block, so the error can come from nowhere else.
     with pytest.raises(ProviderError):
-        get_backend("lmstudio").validate_model("http://localhost:1234/v1", "missing", None)
+        backend.validate_model("http://localhost:1234/v1", "missing", None)
 
 
 def test_build_provider_returns_a_provider() -> None:
