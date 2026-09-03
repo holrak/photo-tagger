@@ -4525,6 +4525,9 @@ class MainWindow(QMainWindow):
 
     def _generate_watched(self) -> None:
         """Run the model on the photos the watch queued, skipping any already dealt with."""
+        if self._busy():
+            # Draining the queue now would lose it: _run_generation refuses to start mid-run.
+            return
         queued, self._watch_pending = self._watch_pending, []
         targets = [
             item
@@ -4556,6 +4559,10 @@ class MainWindow(QMainWindow):
 
     def _stop_watch(self) -> None:
         """End the watch and put the menu action back to offering a new one."""
+        if self._watch_settings is None and self._watch_thread is None:
+            # Already stopped: the worker's own finished signal arrives just after a Stop click,
+            # and re-running this would overwrite whatever the status bar says by then.
+            return
         if self._watch_worker is not None:
             self._watch_worker.stop()
         self._teardown_watch_thread()
