@@ -486,6 +486,21 @@ def test_emptying_the_tree_drops_the_rows_and_the_index(
     assert not window._leaf_rows  # noqa: SLF001
 
 
+@pytest.mark.parametrize("name", ["QCloseEvent", "QDragEnterEvent", "QDropEvent"])
+def test_event_types_are_built_at_import_not_during_delivery(name: str) -> None:
+    """
+    The event classes the window annotates must exist before Qt delivers one.
+
+    PySide6 builds its wrapper types on first use. Left to TYPE_CHECKING these were built from
+    inside the C++ callback that delivers the event, and shiboken's introduceWrapperType does not
+    check whether the creation succeeded, so quitting an untouched window could crash there.
+    """
+    import PySide6.QtGui  # noqa: PLC0415 - only importable with the [gui] extra
+
+    assert getattr(gui, name, None) is not None, f"gui.py must import {name} at runtime"
+    assert name in vars(PySide6.QtGui), f"{name} is still built lazily"
+
+
 def test_gui_does_not_use_the_tree_item_iterator() -> None:
     """
     QTreeWidgetItemIterator is banned here: PySide never destroys one.

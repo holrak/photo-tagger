@@ -45,12 +45,19 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
+
+# QCloseEvent, QDragEnterEvent and QDropEvent are used only in annotations, but they are imported
+# here at runtime on purpose: see the note above closeEvent. Moving them into the TYPE_CHECKING
+# block below reopens a PySide crash.
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QBrush,
+    QCloseEvent,
     QColor,
     QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
     QIcon,
     QKeySequence,
     QPainter,
@@ -245,7 +252,6 @@ from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS,
 if TYPE_CHECKING:
     # Annotation-only on Python 3.14 (lazy), so no runtime import is needed.
     from exiftool import ExifToolHelper
-    from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 
     from photo_tagger.undo import UndoJournal, UndoResult, WriteRecord
     from photo_tagger.vocabulary import Vocabulary
@@ -4818,6 +4824,15 @@ class MainWindow(QMainWindow):
         Asking the workers to stop first means closing mid-run only waits for the photo currently in
         flight, not the whole batch. Waiting on the threads keeps a running QThread from being
         destroyed under it.
+
+        The QCloseEvent annotation is why QtGui imports that class at runtime rather than under
+        TYPE_CHECKING. PySide6 creates its wrapper types on first use, and nothing else in this
+        window touches QCloseEvent, so the first close used to build it (and QEvent, its base) from
+        inside this very callback. Shiboken's introduceWrapperType does not check whether that
+        creation succeeded, so a failure there segfaults the process rather than raising: quitting
+        an untouched window sometimes died before this method's body ran. Importing the class up
+        front builds the type during a plain import instead, well away from event delivery. The
+        drag-and-drop handlers below take the same precaution.
         """
         if self._has_unsaved_proposals():
             reply = QMessageBox.question(
