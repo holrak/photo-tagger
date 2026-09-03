@@ -1968,3 +1968,25 @@ def test_watch_exits_1_when_the_vocabulary_is_unusable(tmp_path: Path) -> None:
         main_module.app(["watch", "--input", str(inbox), "--vocabulary", str(vocabulary)])
 
     assert exit_info.value.code == 1
+
+
+def test_watch_reads_the_interval_and_settle_flags(tmp_path: Path) -> None:
+    """The two watch knobs moved into an option group; the flags themselves did not change."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _settled_photo(inbox / "a.cr3")
+    seen: dict[str, float] = {}
+
+    def fake_watch(*_args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 - passthrough shim
+        seen["interval"] = kwargs["interval_seconds"]
+        seen["settle"] = kwargs["settle_seconds"]
+        return iter(())
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "watch_batches", side_effect=fake_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox), "--interval", "11", "--settle", "3"])
+
+    assert seen == {"interval": 11.0, "settle": 3.0}

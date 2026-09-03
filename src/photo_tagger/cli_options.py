@@ -49,6 +49,7 @@ from photo_tagger.pipeline import ProcessingOptions
 # below to validate the --provider choices, so the name must exist at class-definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
 from photo_tagger.vocabulary_build import TrimRules
+from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS
 
 
 if TYPE_CHECKING:
@@ -464,6 +465,36 @@ class ArtifactConfig:
             ),
         ),
     ] = None
+
+
+@dataclass
+class WatchConfig:
+    """
+    How often the ``watch`` command looks for photos, and how long it waits for each one.
+
+    Only the ``watch`` command takes these, and like the vocabulary build flags they have no entry
+    in ``_CONFIG_TABLES``: they belong to one command, not to a run.
+    """
+
+    interval: Annotated[
+        float,
+        Parameter(
+            name=("--interval",),
+            validator=validators.Number(gt=0),
+            help="Seconds between folder scans",
+        ),
+    ] = DEFAULT_INTERVAL_SECONDS
+    settle: Annotated[
+        float,
+        Parameter(
+            name=("--settle",),
+            validator=validators.Number(gte=0),
+            help=(
+                "Seconds a file must sit unchanged before it is tagged, so a photo still being "
+                "copied is left alone until the copy finishes"
+            ),
+        ),
+    ] = DEFAULT_SETTLE_SECONDS
 
 
 @dataclass

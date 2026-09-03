@@ -47,6 +47,7 @@ from photo_tagger.cli_options import (
     ProviderConfig,
     TelemetryConfig,
     VocabularyBuildConfig,
+    WatchConfig,
     to_processing_options,
     to_trim_rules,
 )
@@ -95,8 +96,6 @@ from photo_tagger.vocabulary_build import (
 )
 from photo_tagger.vocabulary_organize import OrganizeStats, organize
 from photo_tagger.watch import (
-    DEFAULT_INTERVAL_SECONDS,
-    DEFAULT_SETTLE_SECONDS,
     watch_batches,
 )
 
@@ -130,6 +129,7 @@ _DEFAULT_DISPLAY = DisplayConfig()
 _DEFAULT_ARTIFACTS = ArtifactConfig()
 _DEFAULT_FILTER = FilterConfig()
 _DEFAULT_TELEMETRY = TelemetryConfig()
+_DEFAULT_WATCH = WatchConfig()
 
 
 def _apply_exiftool_path(path: str | None) -> None:
@@ -740,8 +740,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     artifacts: ArtifactConfig,
     provider: ProviderConfig,
     options: ProcessingOptions,
-    output_language: str,
-    hint: str | None,
+    inference: InferenceConfig,
     log: LogConfig,
     telemetry_enabled: bool,
     session_gap_minutes: float,
@@ -787,8 +786,8 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         frequency_penalty=options.frequency_penalty,
         jpeg_dimensions=options.jpeg_dimensions,
         jpeg_quality=options.jpeg_quality,
-        output_language=output_language,
-        hint=hint,
+        output_language=inference.output_language,
+        hint=inference.hint,
         retries=provider.retries,
         log_folder=str(log.log_folder),
     )
@@ -1192,8 +1191,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         artifacts=artifacts,
         provider=provider,
         options=setup.options,
-        output_language=inference.output_language,
-        hint=inference.hint,
+        inference=inference,
         log=log,
         telemetry_enabled=telemetry_config.enabled,
         session_gap_minutes=output.session_gap_minutes,
@@ -1241,20 +1239,7 @@ def watch(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group
         int,
         Parameter(name=("--workers", "-w"), help="Photos to process concurrently per batch"),
     ] = DEFAULT_WORKERS,
-    interval: Annotated[
-        float,
-        Parameter(name=("--interval",), help="Seconds between folder scans"),
-    ] = DEFAULT_INTERVAL_SECONDS,
-    settle: Annotated[
-        float,
-        Parameter(
-            name=("--settle",),
-            help=(
-                "Seconds a file must sit unchanged before it is tagged, so a photo still being "
-                "copied is left alone until the copy finishes"
-            ),
-        ),
-    ] = DEFAULT_SETTLE_SECONDS,
+    watch_config: Annotated[WatchConfig, Parameter(name="*")] = _DEFAULT_WATCH,
     filter_: Annotated[FilterConfig, Parameter(name="*")] = _DEFAULT_FILTER,
     display: Annotated[DisplayConfig, Parameter(name="*")] = _DEFAULT_DISPLAY,
     artifacts: Annotated[ArtifactConfig, Parameter(name="*")] = _DEFAULT_ARTIFACTS,
@@ -1306,8 +1291,7 @@ def watch(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group
             image_extensions=image_extensions,
             recursive=recursive,
             workers=workers,
-            interval=interval,
-            settle=settle,
+            watch_config=watch_config,
             filter_=filter_,
             display=display,
             artifacts=artifacts,
@@ -1326,8 +1310,7 @@ def _watch_forever(  # noqa: PLR0913 - mirrors watch()'s flag groups one-for-one
     image_extensions: str,
     recursive: bool,
     workers: int,
-    interval: float,
-    settle: float,
+    watch_config: WatchConfig,
     filter_: FilterConfig,
     display: DisplayConfig,
     artifacts: ArtifactConfig,
@@ -1354,8 +1337,8 @@ def _watch_forever(  # noqa: PLR0913 - mirrors watch()'s flag groups one-for-one
         inputs=[str(path) for path in inputs],
         extensions=image_extensions,
         recursive=recursive,
-        interval=interval,
-        settle=settle,
+        interval=watch_config.interval,
+        settle=watch_config.settle,
     )
     batches = 0
     tagged = 0
@@ -1364,8 +1347,8 @@ def _watch_forever(  # noqa: PLR0913 - mirrors watch()'s flag groups one-for-one
             inputs,
             image_extensions,
             recursive=recursive,
-            interval_seconds=interval,
-            settle_seconds=settle,
+            interval_seconds=watch_config.interval,
+            settle_seconds=watch_config.settle,
         ):
             image_files = _filter_batch(
                 batch,
