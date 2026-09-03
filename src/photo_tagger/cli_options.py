@@ -511,6 +511,25 @@ class VocabularyBuildConfig:
             ),
         ),
     ] = None
+    organize: Annotated[
+        bool,
+        Parameter(
+            name=("--organize",),
+            help=(
+                "Ask the model for the two things counting cannot settle: which keywords are "
+                "synonyms of each other (folded into one, the others kept as {synonyms} so they "
+                "still match), and what hierarchy the list should have. Never decides what to "
+                "keep, and never invents a keyword. Needs a reachable provider"
+            ),
+        ),
+    ] = False
+    organize_workers: Annotated[
+        int,
+        Parameter(
+            name=("--organize-workers",),
+            help="Model requests to run at once while organizing. The list is sent in chunks",
+        ),
+    ] = 1
 
 
 @dataclass

@@ -69,6 +69,9 @@ DROP_TOO_MANY_WORDS = "too-many-words"
 DROP_PUNCTUATION = "punctuation"
 DROP_VARIANT = "variant"
 DROP_OVER_LIMIT = "over-limit"
+# Not a rejection: the organize pass folded this keyword into another, which still writes it as a
+# {synonym} of the keyword that kept it. Reported so the fold is visible rather than silent.
+DROP_SYNONYM = "synonym"
 
 
 @dataclass(slots=True)
@@ -213,11 +216,25 @@ class Dropped:
 
 @dataclass(slots=True, frozen=True)
 class TrimResult:
-    """The kept terms (most used first) and every rejection, for the report."""
+    """
+    The kept terms (most used first) and every rejection, for the report.
+
+    ``chains`` and ``synonyms`` are empty after a plain trim: hierarchies then come from the census,
+    which is what the library itself says. The optional organize pass fills them in to override that
+    with a hierarchy and a set of synonym groups it worked out instead.
+    """
 
     kept: list[str] = field(default_factory=list)
     dropped: list[Dropped] = field(default_factory=list)
     census: KeywordCensus = field(default_factory=KeywordCensus)
+    chains: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    synonyms: dict[str, list[str]] = field(default_factory=dict)
+
+    def chain_for(self, term: str) -> tuple[str, ...]:
+        """Return *term*'s hierarchy: the organized one if there is one, else the census's."""
+        if (chain := self.chains.get(term)) is not None:
+            return chain
+        return self.census.best_chain(term)
 
 
 def _shape_reason(term: str, rules: TrimRules) -> str | None:
@@ -313,15 +330,24 @@ def render_vocabulary(result: TrimResult, *, header: str = "", flat: bool = Fals
     cannot re-enter through one of its children. Terms are sorted alphabetically, because the file
     is meant to be read and edited by hand.
 
+    Synonyms worked out by the organize pass are written as ``{braces}`` on the keyword that kept
+    them, so a photo tagged with a folded spelling still matches.
+
     Pass *flat* to drop the hierarchies and write bare terms. Worth doing when the source hierarchy
     is not trustworthy: an export from a catalog a tool has been writing to can file "Beach" under
     "Sand", and a vocabulary imposes its hierarchy on every photo it matches.
     """
     kept = set(result.kept)
+    # A category invented by the organize pass is a legitimate parent even though it is not itself
+    # a kept keyword; a parent from the census is only allowed if it survived the trim.
+    organized = {segment for chain in result.chains.values() for segment in chain}
     lines = []
     for term in kept:
-        chain = [] if flat else [s for s in result.census.best_chain(term) if s in kept]
-        lines.append("|".join(chain) if len(chain) > 1 else term)
+        chain = [] if flat else [s for s in result.chain_for(term) if s in kept or s in organized]
+        line = "|".join(chain) if len(chain) > 1 else term
+        if aliases := result.synonyms.get(term):
+            line += "".join(f" {{{alias}}}" for alias in aliases)
+        lines.append(line)
     # Sorted by the rendered line, not by the term, so a path files under its root and the tree
     # reads top-down.
     body = "\n".join(dict.fromkeys(sorted(lines, key=lambda line: (line.casefold(), line))))

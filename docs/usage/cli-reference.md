@@ -271,16 +271,21 @@ carries the hierarchy those photos really use, so the generated file keeps it.
 
 Nothing is written to your photos or your catalog. The output is a text file to read and edit.
 
-| Flag                  | Default    | Description                                                                               |
-| --------------------- | ---------- | ----------------------------------------------------------------------------------------- |
-| `-i`, `--input` PATH  | none       | Photos or folders to read keywords from; repeat the flag. Honors `--ext` and `-r`.        |
-| `-o`, `--output` PATH | (required) | Where to write the vocabulary file.                                                       |
-| `--from-export` PATH  | none       | Read a Lightroom keyword export (`.txt` or `.csv`) instead of, or as well as, the photos. |
-| `--min-uses` N        | `2`        | Keep a keyword only when the library uses it at least this often.                         |
-| `--max-terms` N       | `4800`     | Cap the file, dropping the least-used first. `0` means no cap.                            |
-| `--allow-digits`      | `false`    | Keep keywords containing digits (dropped by default as measurements and model numbers).   |
-| `--flat`              | `false`    | Write bare keywords instead of their hierarchies.                                         |
-| `--report` PATH       | none       | Write a CSV of every dropped keyword, its count, and the rule that cut it.                |
+| Flag                   | Default    | Description                                                                               |
+| ---------------------- | ---------- | ----------------------------------------------------------------------------------------- |
+| `-i`, `--input` PATH   | none       | Photos or folders to read keywords from; repeat the flag. Honors `--ext` and `-r`.        |
+| `-o`, `--output` PATH  | (required) | Where to write the vocabulary file.                                                       |
+| `--from-export` PATH   | none       | Read a Lightroom keyword export (`.txt` or `.csv`) instead of, or as well as, the photos. |
+| `--min-uses` N         | `2`        | Keep a keyword only when the library uses it at least this often.                         |
+| `--max-terms` N        | `4800`     | Cap the file, dropping the least-used first. `0` means no cap.                            |
+| `--allow-digits`       | `false`    | Keep keywords containing digits (dropped by default as measurements and model numbers).   |
+| `--flat`               | `false`    | Write bare keywords instead of their hierarchies.                                         |
+| `--report` PATH        | none       | Write a CSV of every dropped keyword, its count, and the rule that cut it.                |
+| `--organize`           | `false`    | Model pass for synonyms and a hierarchy (see [below](#organizing-with-the-model)).        |
+| `--organize-workers` N | `1`        | Model requests to run at once while organizing.                                           |
+
+`--organize` also takes the provider flags (`--provider`, `-m/--model`, `-u/--url`, `-k/--api-key`),
+with the same meanings and the same config-file and environment defaults as a tagging run.
 
 ### Which source to use
 
@@ -312,6 +317,84 @@ The result is deterministic: the same library gives the same file, ties broken a
     hierarchy is worth a look too: a catalog a tool has been writing to can file `Beach` under `Sand`,
     and a vocabulary imposes its hierarchy on every photo it matches. `--flat` drops the hierarchies
     when the source is not worth keeping.
+
+### Organizing with the model
+
+Counting settles which keywords are worth keeping. It cannot settle two things, and `--organize`
+asks the model for exactly those two, over the keywords that already survived:
+
+```bash
+photo-tagger vocabulary -i ~/Pictures -r -o vocabulary.txt --organize --organize-workers 4
+```
+
+- **Synonyms.** Matching already folds case, punctuation, and plurals, so `Animal` and `Animals` are
+    one keyword without any help. It cannot know that `Golden Light` is `Golden Hour`. The winner
+    keeps the entry and the others are written as `{braces}` on it, so a photo tagged with a folded
+    spelling still matches; each fold is listed in `--report` with the reason `synonym`.
+- **A hierarchy.** The categories are chosen once, from the most-used keywords, and every chunk of
+    the list is then filed against that one fixed set. Asking each chunk to invent its own would
+    give `Animal` in one and `Animals` in the next, which is the sprawl this command exists to end.
+
+Five properties keep the pass from making the file worse:
+
+- **It never decides what to keep.** That is already settled, by counting, before the model sees
+    anything.
+- **It never invents a keyword.** Every string the model returns is matched back to a keyword that
+    was sent, loosely enough to survive a retyped capital; anything else is discarded and counted.
+- **A failure costs nothing but the organizing.** A chunk that errors, or a keyword the model
+    forgets, keeps the shape the deterministic pass gave it.
+- **A group cannot swallow a category.** At most three synonyms are accepted per keyword; a group
+    claiming more is refused whole. A model listing five is not naming synonyms, it is emptying a
+    category into one keyword (`People` taking `Person`, `Human`, `Woman`, and `Man`), and each one
+    it takes is a keyword your catalog loses.
+- **A degenerate category list is refused.** Asked for six to twenty top-level categories, a weak
+    model sometimes echoes the keyword list back. Keeping the first twenty of that would look like
+    an answer and behave like noise, so the hierarchy is skipped and only synonyms are folded.
+
+### Choosing a model for it
+
+This pass is **text only**: it reads a list of words, not an image. Your tagging model is a
+vision-language model, and its vision half buys nothing here, so it is worth pointing `--model` at
+something else:
+
+```bash
+photo-tagger vocabulary -i ~/Pictures -r -o vocabulary.txt --organize --model openai/gpt-oss-20b
+```
+
+What matters is instruction-following and reliable structured output, not size. Three failure modes
+tell you a model is the wrong choice, and all three are visible in the run log:
+
+- `vocabulary_organize_request_failed` on every chunk, with a token-limit message: a reasoning model
+    spending its whole budget thinking before it answers. The budget is already generous; a model
+    that still cannot finish inside it is not usable here.
+- **Chunks that take minutes each.** Grouping words is recall, not deduction, but a reasoning model
+    left to itself will spend thousands of tokens deliberating over a list of sixty of them. Every
+    request therefore asks for no reasoning (`reasoning_effort: "none"`), which servers that do not
+    know the setting simply ignore. On one local 31B model that setting was the difference between
+    **13 minutes for sixteen keywords and 12 seconds**. If chunks are still slow, the server is
+    probably not honoring it; check whether your provider exposes its own switch.
+- `vocabulary_synonym_group_refused` many times over: the model is folding categories into keywords,
+    and the guardrail is the only thing between it and your catalog.
+
+!!! tip
+
+    Time one chunk before committing a whole library to it. Add `--max-terms 60` so exactly one chunk is
+    sent, and watch the clock between `vocabulary_organize_started` and `vocabulary_organized`. Multiply
+    by the chunks your real list needs, then divide by `--organize-workers`.
+
+!!! warning "Categories are new keywords"
+
+    A category the model names becomes a parent in the file, so it will be written to your photos as a
+    hierarchical keyword even if your library never used that word. The file's header lists them for
+    exactly this reason. If you would rather not have any, use `--flat` or drop the parents by hand.
+
+The list is sent in chunks of 60 keywords: roughly one request per 60 keywords plus one for the
+categories, so about 80 requests for a 4,800-keyword file. `--organize-workers` runs several at
+once. Sampling is fixed at temperature 0 and chunks are reassembled by position, so the same list
+organizes the same way whatever order the replies arrive in, but a model is not a pure function:
+treat the output as a proposal to read, which is what the whole file is anyway.
+
+## Watching a folder
 
 ## Skipping and resuming
 

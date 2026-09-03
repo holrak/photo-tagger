@@ -49,6 +49,31 @@ All notable changes to this project are documented here. The format is based on
   keyword and the rule that cut it, so the thresholds can be tuned rather than guessed. Nothing is
   written to your photos or your catalog.
 
+- `photo-tagger vocabulary --organize`: an opt-in model pass over the keywords that survived the
+  count, for the two things counting cannot settle. It folds synonyms (`Golden Light` becomes a
+  `{synonym}` of `Golden Hour`, so a photo tagged with it still matches) and gives the list a
+  hierarchy, with the categories chosen once up front so every chunk files against the same set
+  rather than inventing `Animal` in one and `Animals` in the next. It never decides what to keep,
+  and it never invents a keyword: every string it returns is matched back to one that was sent, and
+  anything else is discarded. A chunk that fails leaves its keywords exactly as the deterministic
+  pass left them. Categories do become new parent keywords, so the generated file lists them in its
+  header.
+
+  Live testing against local models shaped three of its rules. A model asked only for synonyms folds
+  `Battery Pack` into `Camera Accessories` and `Black` into `Color`, destroying the narrower
+  keyword, and says so however firmly the prompt forbids it; given a `parent` field to name the
+  relation it can actually see, it stops. A group claiming more than three synonyms is refused
+  whole, because at that size it is not a synonym set but a category being poured into one keyword.
+  A category reply far longer than the twenty asked for is the keyword list echoed back, and is
+  refused rather than truncated into noise. The token budget is generous for the same reason: a
+  reasoning model spends thousands of tokens before its first brace, and a tight budget fails every
+  chunk with nothing to show.
+
+  Every request asks for no reasoning (`reasoning_effort: "none"`), which servers that do not know
+  the setting ignore. Grouping a list of words is recall rather than deduction, and a reasoning
+  model left to itself deliberates for thousands of tokens over sixty of them. On a local 31B model
+  the setting was the difference between 13 minutes for sixteen keywords and 12 seconds.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added

@@ -28,6 +28,44 @@ if TYPE_CHECKING:
     from pydantic_ai import BinaryContent
 
 
+def build_chat_model(
+    provider_name: ProviderName,
+    model_name: str,
+    *,
+    api_base_url: str | None,
+    api_key: str | None,
+) -> OpenAIChatModel:
+    """
+    Resolve a backend, check the model is served, and return the chat model to build an Agent on.
+
+    Split out of :func:`create_agent` because the provider plumbing (URL defaults, key resolution,
+    the served-model check) is the same whatever the agent is for. The vocabulary organizer builds a
+    text-only agent with a different output schema on top of this.
+    """
+    backend = get_backend(provider_name)
+    resolved_url = api_base_url or backend.default_base_url
+    if api_base_url is None:
+        logger.debug("using_default_provider_url", url=resolved_url)
+    logger.info(
+        "provider_config_resolved",
+        provider=provider_name,
+        url=resolved_url,
+        model=model_name,
+    )
+
+    resolved_api_key = backend.resolve_api_key(api_key)
+    if backend.requires_api_key and not resolved_api_key:
+        msg = (
+            f"Provider {provider_name!r} requires an API key. Set OPENAI_API_KEY or pass --api-key."
+        )
+        logger.error("provider_api_key_required", provider=provider_name)
+        raise ProviderError(msg)
+
+    backend.validate_model(resolved_url, model_name, resolved_api_key)
+    provider = backend.build_provider(resolved_url, resolved_api_key)
+    return OpenAIChatModel(model_name=model_name, provider=provider)
+
+
 def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent knob
     provider_name: ProviderName,
     model_name: str,
@@ -43,29 +81,13 @@ def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent
     *output_language* is the language the system prompt asks for in every generated field (title,
     description, keywords, hierarchy segments).
     """
-    backend = get_backend(provider_name)
-    resolved_url = api_base_url or backend.default_base_url
-    if api_base_url is None:
-        logger.debug("using_default_provider_url", url=resolved_url)
-    logger.info(
-        "provider_config_resolved",
-        provider=provider_name,
-        url=resolved_url,
-        model=model_name,
-        output_language=output_language,
+    chat_model = build_chat_model(
+        provider_name,
+        model_name,
+        api_base_url=api_base_url,
+        api_key=api_key,
     )
-
-    resolved_api_key = backend.resolve_api_key(api_key)
-    if backend.requires_api_key and not resolved_api_key:
-        msg = (
-            f"Provider {provider_name!r} requires an API key. Set OPENAI_API_KEY or pass --api-key."
-        )
-        logger.error("provider_api_key_required", provider=provider_name)
-        raise ProviderError(msg)
-
-    backend.validate_model(resolved_url, model_name, resolved_api_key)
-    provider = backend.build_provider(resolved_url, resolved_api_key)
-    chat_model = OpenAIChatModel(model_name=model_name, provider=provider)
+    logger.debug("agent_output_language", output_language=output_language)
     # pydantic-ai's Agent constructor does not propagate `output_type` into its
     # generic, so static analyzers see `Agent[None, str]` while the runtime
     # object actually decodes `GeneratedMetadata`. The two suppressions below

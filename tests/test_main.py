@@ -22,8 +22,10 @@ from photo_tagger import (
     telemetry,
 )
 from photo_tagger.cli_options import load_defaults
+from photo_tagger.errors import ProviderError
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
-from photo_tagger.vocabulary_build import KeywordCensus
+from photo_tagger.vocabulary_build import KeywordCensus, TrimResult
+from photo_tagger.vocabulary_organize import OrganizeStats
 
 
 if TYPE_CHECKING:
@@ -1415,3 +1417,54 @@ def test_vocabulary_command_exits_1_when_no_keywords_are_found(tmp_path: Path) -
 
     assert exit_info.value.code == 1
     assert not output.exists()
+
+
+def test_vocabulary_command_organizes_when_asked(tmp_path: Path) -> None:
+    """--organize hands the trimmed list and the provider flags to the model pass."""
+    export = tmp_path / "keywords.txt"
+    export.write_text("Golden Hour\nGolden Hour\nGolden Light\nGolden Light\n", encoding="utf-8")
+    output = tmp_path / "vocabulary.txt"
+    census = KeywordCensus()
+    census.add(["Golden Hour"], weight=2)
+    organized = TrimResult(kept=["Golden Hour"], census=census, synonyms={})
+    stats = OrganizeStats(model_name="test-model", categories=["Lighting"], grouped=1)
+
+    with patch.object(main_module, "organize", return_value=(organized, stats)) as organizer:
+        _run_app(
+            [
+                "vocabulary",
+                "--from-export",
+                str(export),
+                "--output",
+                str(output),
+                "--organize",
+                "--model",
+                "test-model",
+                "--provider",
+                "ollama",
+            ],
+        )
+
+    kwargs = organizer.call_args.kwargs
+    assert kwargs["provider_name"] == "ollama"
+    assert kwargs["model_name"] == "test-model"
+    written = output.read_text(encoding="utf-8")
+    assert "Organized by test-model" in written
+    assert "Categories (written to your photos as parents): Lighting" in written
+
+
+def test_vocabulary_command_exits_1_when_the_provider_is_unreachable(tmp_path: Path) -> None:
+    """Asking for --organize and silently not organizing would be worse than stopping."""
+    export = tmp_path / "keywords.txt"
+    export.write_text("Bird\nBird\n", encoding="utf-8")
+    output = tmp_path / "vocabulary.txt"
+
+    with (
+        patch.object(main_module, "organize", side_effect=ProviderError("no provider")),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(
+            ["vocabulary", "--from-export", str(export), "--output", str(output), "--organize"],
+        )
+
+    assert exit_info.value.code == 1

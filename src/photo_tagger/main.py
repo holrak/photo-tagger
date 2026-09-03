@@ -83,6 +83,7 @@ from photo_tagger.vocabulary_build import (
     render_vocabulary,
     trim,
 )
+from photo_tagger.vocabulary_organize import OrganizeStats, organize
 
 
 if TYPE_CHECKING:
@@ -187,18 +188,37 @@ def gui() -> None:
     raise SystemExit(gui_module.launch())
 
 
-def _vocabulary_header(source: str, kept: int, dropped: int, rules: TrimRules) -> str:
+def _vocabulary_header(
+    source: str,
+    kept: int,
+    dropped: int,
+    rules: TrimRules,
+    stats: OrganizeStats | None = None,
+) -> str:
     """Explain at the top of the generated file where it came from and how to change it."""
     cap = rules.max_terms if rules.max_terms is not None else "no cap"
-    return (
-        f"# photo-tagger vocabulary: {kept} keywords kept, {dropped} dropped.\n"
-        f"# Source: {source}.\n"
-        f"# Rules: used at least {rules.min_uses}x, at most {cap} terms, "
-        f"digits {'kept' if rules.allow_digits else 'dropped'}.\n"
-        "#\n"
-        "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a\n"
-        "# tree, {braces} for a synonym. A line starting with '# ' is a comment.\n"
-    )
+    lines = [
+        f"# photo-tagger vocabulary: {kept} keywords kept, {dropped} dropped.",
+        f"# Source: {source}.",
+        (
+            f"# Rules: used at least {rules.min_uses}x, at most {cap} terms, "
+            f"digits {'kept' if rules.allow_digits else 'dropped'}."
+        ),
+    ]
+    if stats is not None:
+        lines += [
+            (
+                f"# Organized by {stats.model_name}: {stats.grouped} keyword(s) folded into a "
+                f"synonym, {stats.categorized} filed under a category."
+            ),
+            f"# Categories (written to your photos as parents): {', '.join(stats.categories)}.",
+        ]
+    lines += [
+        "#",
+        "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a",
+        "# tree, {braces} for a synonym. A line starting with '# ' is a comment.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _build_census(
@@ -264,6 +284,7 @@ def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all
         Parameter(name=("--recursive", "-r"), help="Scan subdirectories too"),
     ] = DEFAULT_RECURSIVE,
     build: Annotated[VocabularyBuildConfig, Parameter(name="*")] = VocabularyBuildConfig(),  # noqa: B008
+    provider: Annotated[ProviderConfig, Parameter(name="*")] = _DEFAULT_PROVIDER,
 ) -> None:
     """
     Build a controlled vocabulary from the keywords a library already uses.
@@ -276,6 +297,10 @@ def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all
     ``--from-export`` reads a Lightroom keyword export instead, for a catalog that is not on this
     machine. Its counts are occurrences in the keyword tree rather than photos, which is a weaker
     signal; prefer the photos when you have them.
+
+    ``--organize`` adds a model pass over the keywords that survived, for the two things counting
+    cannot settle: which of them are synonyms of each other, and what hierarchy they should have. It
+    never decides what to keep and never invents a keyword.
 
     Nothing is written to your photos or your catalog. The output is a file to review and edit, plus
     an optional ``--report`` naming every keyword that was dropped and why.
@@ -303,7 +328,26 @@ def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all
         raise SystemExit(1)
 
     result = trim(census, rules)
-    header = _vocabulary_header(source, len(result.kept), len(result.dropped), rules)
+    stats: OrganizeStats | None = None
+    if build.organize:
+        console.print(f"Organizing {len(result.kept)} keyword(s) with {provider.model_name}...")
+        try:
+            result, stats = organize(
+                result,
+                provider_name=provider.provider_name,
+                model_name=provider.model_name,
+                api_base_url=provider.api_base_url,
+                api_key=provider.api_key,
+                workers=build.organize_workers,
+            )
+        except PhotoTaggerError as exc:
+            # The trimmed list is already worth writing, but silently downgrading to it would hide
+            # that the organize pass the user asked for never ran.
+            logger.error("vocabulary_organize_failed", error=str(exc))
+            console.print(f"[red]{exc}[/red]")
+            raise SystemExit(1) from exc
+
+    header = _vocabulary_header(source, len(result.kept), len(result.dropped), rules, stats)
     try:
         output.write_text(
             render_vocabulary(result, header=header, flat=build.flat),

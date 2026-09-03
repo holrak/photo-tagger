@@ -260,6 +260,23 @@ Lightroom, digiKam, darktable, Immich, PhotoPrism, Synology Photos, and anything
 XMP or IPTC. Photos and catalog are left untouched; the output is a text file to review and edit,
 and `--report` names every keyword it dropped and why.
 
+Add `--organize` to let the model fold synonyms together (`Golden Light` becomes a `{synonym}` of
+`Golden Hour`, so it still matches) and file the keywords under categories. It never decides what to
+keep, and never invents a keyword: everything it returns is matched back to one your library already
+uses.
+
+Tag photos as they land in an import folder, until you stop it with Ctrl-C:
+
+```bash
+photo-tagger watch -i ~/Pictures/Inbox -r --skip-tagged
+```
+
+Put back what the last run wrote (a bad prompt across 500 photos is one command to revert):
+
+```bash
+photo-tagger undo            # or: photo-tagger undo --list / --dry-run
+```
+
 Check your setup before a big run (verifies ExifTool and that the provider serves the model):
 
 ```bash
