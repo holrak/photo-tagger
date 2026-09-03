@@ -22,7 +22,6 @@ from photo_tagger.pipeline import (
     _BatchContext,
     _drain_after_interrupt,
     _emit_outcome,
-    _InferenceScratch,
     _notify_success,
     _resolve_inference,
     _UsageAccumulator,
@@ -41,6 +40,7 @@ if TYPE_CHECKING:
     from pydantic_ai import Agent
 
     from photo_tagger.models import GeneratedMetadata
+    from photo_tagger.pipeline import _InferenceScratch
 
 # Pipeline tests patch every IO call, so the agent value never gets touched.
 _FAKE_AGENT = cast("Agent[None, GeneratedMetadata]", object())

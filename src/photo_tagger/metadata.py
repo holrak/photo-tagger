@@ -12,7 +12,7 @@ from loguru import logger
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Generator, Iterable
 
 from photo_tagger.config import (
     CAMERA_TAGS,
@@ -42,7 +42,7 @@ _IMAGE_HASH_API = ["-api", "ImageHashType=SHA256"]
 
 
 @contextlib.contextmanager
-def managed_helper(et: ExifToolHelper | None) -> Iterator[ExifToolHelper]:
+def managed_helper(et: ExifToolHelper | None) -> Generator[ExifToolHelper]:
     """
     Yield *et* if supplied, otherwise spin up and tear down a one-shot helper.
 

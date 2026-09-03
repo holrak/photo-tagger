@@ -34,7 +34,7 @@ from photo_tagger.models import KeywordSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Generator, Iterable
     from pathlib import Path
 
     from exiftool import ExifToolHelper  # type: ignore[attr-defined]
@@ -49,6 +49,18 @@ if TYPE_CHECKING:
     OnComplete = Callable[["BatchTotals"], None]
     OnImageResult = Callable[["ImageOutcome"], None]
 
+    # Only ever named in annotations, which PEP 649 leaves unevaluated, so it costs nothing at
+    # runtime to keep it here. It also has to stay here: as a runtime class its member types
+    # (InferenceResult, ImageContext) resolve to nothing, and pycroscope errors out trying to
+    # evaluate them, which silently degrades its analysis of the whole module.
+    class _InferenceScratch(TypedDict, total=False):
+        """Typed scratch pad passed between process_photo and _emit_outcome."""
+
+        inference: InferenceResult
+        from_cache: bool
+        context: ImageContext
+        merged_keywords: KeywordSet
+
 
 # Pause between the first pass and the retry pass. First-pass failures often mean the model
 # server is overloaded or mid-restart; re-hitting it immediately retries into the same outage.
@@ -59,15 +71,6 @@ _RETRY_PASS_DELAY_SECONDS = 5.0
 # new ones. Generous for the intended use (spotting gaps in a catalog) and bounded for the one that
 # is not (pointing --vocabulary at an unrelated file).
 _MAX_TRACKED_DROPPED_TERMS = 200
-
-
-class _InferenceScratch(TypedDict, total=False):
-    """Typed scratch pad passed between process_photo and _emit_outcome."""
-
-    inference: InferenceResult
-    from_cache: bool
-    context: ImageContext
-    merged_keywords: KeywordSet
 
 
 @dataclass(slots=True, frozen=True)
@@ -131,7 +134,7 @@ class ProcessingOptions:
 
 
 @contextlib.contextmanager
-def _no_helper() -> Iterator[None]:
+def _no_helper() -> Generator[None]:
     """Yield None as the shared ExifToolHelper for the concurrent path."""
     yield None
 

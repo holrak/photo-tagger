@@ -24,14 +24,14 @@ from rich.progress import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     ProgressCallback = Callable[[Path, bool], None]
 
 
 @contextmanager
-def batch_progress(total: int, *, enabled: bool = True) -> Iterator[ProgressCallback | None]:
+def batch_progress(total: int, *, enabled: bool = True) -> Generator[ProgressCallback | None]:
     """
     Yield a per-image progress callback for :func:`photo_tagger.pipeline.run_batch`.
 

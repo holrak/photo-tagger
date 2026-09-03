@@ -71,7 +71,8 @@ def _open_image(image_path: Path) -> Image.Image:
         # exif_transpose returns None when no EXIF orientation tag exists.
         # img.load() pre-loaded pixel data so img is usable after the with-block,
         # but returning from inside the block is cleaner.
-        return ImageOps.exif_transpose(img) or img
+        transposed = ImageOps.exif_transpose(img)
+        return transposed if transposed is not None else img
 
 
 def _flatten_alpha(img: Image.Image) -> Image.Image:
