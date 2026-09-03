@@ -46,6 +46,8 @@
 # use_sidecar = true          # false = embed metadata in the image file
 # dry_run = false
 # max_keywords = 15           # cap AI keywords kept per photo before merging
+# vocabulary = "keywords.txt" # Lightroom keyword export, or one term/path per line
+# vocabulary_strict = false   # true = drop keywords the vocabulary does not cover
 
 # --- filter -------------------------------------------------------------------
 

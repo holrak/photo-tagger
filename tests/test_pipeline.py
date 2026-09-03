@@ -31,6 +31,7 @@ from photo_tagger.pipeline import (
     process_photo,
     run_batch,
 )
+from photo_tagger.vocabulary import Vocabulary
 
 
 if TYPE_CHECKING:
@@ -1210,6 +1211,109 @@ def test_process_photo_caps_ai_keywords_before_merging(
 
     written = patched_pipeline["write"].call_args.args[1]
     assert written.subject == expected_subjects
+
+
+def test_process_photo_snaps_keywords_onto_the_vocabulary(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """A near-miss keyword is written with the catalog's spelling and hierarchy."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["ospreys", "Golden Hour"],
+    )
+
+    options = ProcessingOptions(vocabulary=Vocabulary.from_entries(["Animal|Bird|Osprey"]))
+    usage = _UsageAccumulator()
+    assert process_photo(image, _ctx(options=options, usage=usage)) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == ["Animal", "Bird", "Osprey", "Golden Hour"]
+    assert written.hierarchical == ["Animal|Bird", "Animal|Bird|Osprey"]
+    assert usage.vocabulary_mapped == 1
+    assert usage.vocabulary_dropped == {}
+
+
+def test_process_photo_drops_unknown_keywords_in_strict_mode(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Strict mode writes only catalog terms and records what it rejected."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["Osprey", "Golden Hour"],
+    )
+
+    options = ProcessingOptions(
+        vocabulary=Vocabulary.from_entries(["Osprey"]),
+        vocabulary_strict=True,
+    )
+    usage = _UsageAccumulator()
+    assert process_photo(image, _ctx(options=options, usage=usage)) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == ["Osprey"]
+    assert usage.vocabulary_dropped == {"Golden Hour": 1}
+
+
+def test_process_photo_applies_the_vocabulary_before_the_cap(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """The cap counts keywords that survive the vocabulary, not ones about to be dropped."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["Unknown One", "Unknown Two", "Osprey", "Mallard"],
+    )
+
+    options = ProcessingOptions(
+        vocabulary=Vocabulary.from_entries(["Osprey", "Mallard"]),
+        vocabulary_strict=True,
+        max_new_keywords=2,
+    )
+    assert process_photo(image, _ctx(options=options)) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == ["Osprey", "Mallard"]
+
+
+def test_process_photo_leaves_keywords_alone_without_a_vocabulary(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """The snap is skipped entirely when no vocabulary is configured."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    usage = _UsageAccumulator()
+
+    assert process_photo(image, _ctx(usage=usage)) is True
+
+    written = patched_pipeline["write"].call_args.args[1]
+    assert written.subject == ["Beach", "Sunset"]
+    assert usage.vocabulary_mapped == 0
+
+
+def test_usage_accumulator_stops_tracking_dropped_terms_past_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run against the wrong vocabulary cannot grow the report without bound."""
+    monkeypatch.setattr("photo_tagger.pipeline._MAX_TRACKED_DROPPED_TERMS", 2)
+    usage = _UsageAccumulator()
+
+    usage.add_vocabulary(mapped=0, dropped=["A", "B", "C"])
+    usage.add_vocabulary(mapped=1, dropped=["A", "D"])
+
+    assert usage.vocabulary_dropped == {"A": 2, "B": 1}
+    assert usage.vocabulary_mapped == 1
 
 
 def test_process_photo_discards_existing_keywords_when_preserve_false(

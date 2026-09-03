@@ -24,7 +24,7 @@ command line (the GUI).
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, get_args
+from typing import TYPE_CHECKING, Annotated, Any, get_args
 
 from cyclopts import App, ArgumentCollection, Parameter, validators
 from cyclopts.config import Dict as _CycloptsDictConfig
@@ -47,6 +47,10 @@ from photo_tagger.pipeline import ProcessingOptions
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
 # below to validate the --provider choices, so the name must exist at class-definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
+
+
+if TYPE_CHECKING:
+    from photo_tagger.vocabulary import Vocabulary
 
 
 @dataclass
@@ -228,6 +232,31 @@ class OutputConfig:
             ),
         ),
     ] = None
+    vocabulary: Annotated[
+        Path | None,
+        Parameter(
+            name=("--vocabulary",),
+            validator=validators.Path(exists=True, file_okay=True, dir_okay=False),
+            help=(
+                "Restrict generated keywords to the terms in this file: a Lightroom keyword-list "
+                "export, or a plain list of terms and 'Animal|Bird|Osprey' paths. Terms are "
+                "matched ignoring case, punctuation, and plurals, and every match is rewritten to "
+                "the file's own spelling and hierarchy, so a run cannot seed your catalog with "
+                "near-duplicates of keywords you already have"
+            ),
+        ),
+    ] = None
+    vocabulary_strict: Annotated[
+        bool,
+        Parameter(
+            name=("--vocabulary-strict",),
+            help=(
+                "Drop generated keywords that --vocabulary does not cover instead of writing them "
+                "as-is. The run summary lists every dropped term and how often it came up, so the "
+                "vocabulary can grow on purpose rather than by accident"
+            ),
+        ),
+    ] = False
 
 
 @dataclass
@@ -520,8 +549,18 @@ class ConfigFileSource:
         delegate(app, commands, arguments)
 
 
-def to_processing_options(output: OutputConfig, inference: InferenceConfig) -> ProcessingOptions:
-    """Combine the CLI's output + inference groups into the pipeline's options dataclass."""
+def to_processing_options(
+    output: OutputConfig,
+    inference: InferenceConfig,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> ProcessingOptions:
+    """
+    Combine the CLI's output + inference groups into the pipeline's options dataclass.
+
+    *vocabulary* is passed in already loaded rather than read from ``output.vocabulary`` here:
+    parsing the file is IO that can fail, and this module is pure schema.
+    """
     return ProcessingOptions(
         preserve_existing_kw=output.preserve_keywords,
         write_description=output.write_description,
@@ -537,6 +576,8 @@ def to_processing_options(output: OutputConfig, inference: InferenceConfig) -> P
         jpeg_dimensions=inference.jpeg_dimensions,
         jpeg_quality=inference.jpeg_quality,
         max_new_keywords=output.max_keywords,
+        vocabulary=vocabulary,
+        vocabulary_strict=output.vocabulary_strict,
     )
 
 

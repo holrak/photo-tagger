@@ -28,6 +28,8 @@ directly into each photo with `--embed-in-photo`.
 - Works with RAW and standard image formats (CR3, CR2, NEF, JPG, PNG, and more)
 - Generates a title, a concise description, and hierarchical keywords
 - Merges with existing metadata unless you opt-in to overwrite
+- Snaps keywords onto your own Lightroom keyword list, so a run cannot fill your catalog with
+  near-duplicates of terms you already curate
 - Works with Ollama, LM Studio, llama.cpp, and any hosted OpenAI-compatible API
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow
@@ -160,6 +162,11 @@ Key options:
 - `-w/--workers N` – process N photos concurrently using a thread pool (default 1)
 - `--no-progress` – hide the live rich progress bar (auto-disabled on non-interactive stdouts)
 - `--max-keywords N` – cap how many AI-generated keywords are kept per photo before merging
+- `--vocabulary PATH` – restrict generated keywords to the terms in a Lightroom keyword-list export
+  (either the `.txt` or the `.csv` shape of _Metadata > Export Keywords_, or a plain list of terms
+  and `Animal|Bird|Osprey` paths). Matching ignores case, punctuation, and plurals, and every match
+  is rewritten to the file's own spelling and hierarchy. Add `--vocabulary-strict` to drop keywords
+  the file does not cover; the run summary then lists every dropped term and how often it came up
 - `--prompt-file PATH` – override the default user prompt with the contents of `PATH`
 - `--summary-file PATH` – write a JSON run summary (token usage, success/failure counts) to `PATH`
   on completion
@@ -260,6 +267,12 @@ Process a large folder concurrently with a live progress bar and a JSON summary:
 
 ```bash
 photo-tagger -i ~/Pictures/Trip -r --workers 4 --summary-file ~/Pictures/Trip/run.json
+```
+
+Keep generated keywords inside the vocabulary your Lightroom catalog already uses:
+
+```bash
+photo-tagger -i ./shoot --vocabulary ~/lightroom-keywords.txt --vocabulary-strict
 ```
 
 Use a custom prompt tuned for wildlife photography:

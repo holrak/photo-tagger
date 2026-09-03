@@ -98,6 +98,8 @@ backup_xmp = true         # Keep ExifTool's *_original backup before writing.
 use_sidecar = true        # Write an XMP sidecar (false embeds into the image file).
 dry_run = false           # Run the model and log results, but write nothing.
 # max_keywords = 10       # Cap AI keywords kept per photo (omit to keep all).
+# vocabulary = "~/keywords.txt"  # Restrict keywords to the terms in this file.
+# vocabulary_strict = false      # Drop keywords the vocabulary does not cover.
 
 [log]
 file_log_level = "DEBUG"     # DEBUG/INFO/WARNING/ERROR/CRITICAL/OFF.

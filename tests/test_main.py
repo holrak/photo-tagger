@@ -185,6 +185,40 @@ def test_cli_hint_lands_in_the_user_prompt(tmp_path: Path) -> None:
     assert prompt.startswith(DEFAULT_USER_PROMPT)
 
 
+def test_cli_vocabulary_reaches_the_pipeline_and_the_prompt(tmp_path: Path) -> None:
+    """--vocabulary loads the file, hands it to the pipeline, and lists it in the prompt."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    vocabulary = tmp_path / "keywords.txt"
+    vocabulary.write_text("Animal\n\tBird\n\t\tOsprey\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(
+            ["--input", str(image), "--vocabulary", str(vocabulary), "--vocabulary-strict"],
+        )
+
+    options = captured["options"]
+    assert options.vocabulary.match("ospreys") == "Osprey"
+    assert options.vocabulary_strict is True
+    assert "- Animal > Bird > Osprey" in captured["user_prompt"]
+
+
+def test_cli_exits_when_the_vocabulary_file_has_no_terms(tmp_path: Path) -> None:
+    """An unusable vocabulary stops the run before any model call, with exit 1."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    vocabulary = tmp_path / "keywords.txt"
+    vocabulary.write_text("# nothing here\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch, pytest.raises(SystemExit) as exit_info:
+        main_module.app(["--input", str(image), "--vocabulary", str(vocabulary)])
+
+    assert exit_info.value.code == 1
+    assert "image_files" not in captured  # run_batch never invoked
+
+
 def _outcome(file: Path, *, success: bool = True, from_cache: bool = False) -> ImageOutcome:
     """Build a representative ImageOutcome for NDJSON-emitter tests."""
     return ImageOutcome(

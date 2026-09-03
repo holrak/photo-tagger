@@ -93,7 +93,44 @@ sidecar next to each image and leaves the original untouched.
 | `--write-sidecar` / `--embed-in-photo`           | sidecar (`true`)  | `-`     | Write an XMP sidecar (default) vs embed metadata into the image file.                               |
 | `--backup-xmp` / `--no-backup-xmp`               | backup (`true`)   | `-`     | Keep ExifTool's `*_original` backup before writing; `--no-backup-xmp` passes `-overwrite_original`. |
 | `--max-keywords` N                               | none (keep all)   | `-`     | Cap AI-generated keywords kept per photo before merging.                                            |
+| `--vocabulary` PATH                              | none              | `-`     | Restrict generated keywords to the terms in PATH (see below).                                       |
+| `--vocabulary-strict`                            | `false`           | `-`     | Drop generated keywords the vocabulary does not cover instead of writing them as-is.                |
 | `--dry-run`                                      | `false`           | `-`     | Run the model and log the proposed metadata, but write nothing.                                     |
+
+### Controlled vocabulary
+
+`--vocabulary` points at the keyword list your catalog already uses, so a run cannot seed it with
+near-duplicates of keywords you have curated by hand. Two file shapes are accepted:
+
+- A **Lightroom keyword-list export** (_Metadata > Export Keywords_), in either shape that menu
+    offers: the `.txt` (_Exclude Keyword Tag Options_) is one keyword per line, children indented
+    under their parent, `{braces}` for synonyms, `[brackets]` for keywords marked "do not export";
+    the `.csv` (_Include Keyword Tag Options_) is the same list behind four option columns, and the
+    keyword column is lifted out of it automatically.
+- A **plain list**: one term per line, optionally as a full path in either `Animal|Bird|Osprey` or
+    `Osprey<Bird<Animal` form. Blank lines are ignored, and so are `#` comments: a comment needs a
+    space after the hash, so a hashtag-style keyword such as `#Diversity` is kept as a keyword.
+
+```text
+Animal
+	Bird
+		Osprey
+		{Sea Hawk}
+	Mammal
+Landscape
+```
+
+Every generated keyword is matched against the file, ignoring case, punctuation, and plurals, with a
+conservative fuzzy pass for typos. A match is rewritten to the file's own spelling **and
+hierarchy**, so `ospreys`, `Sea Hawk`, and `Osprey<Raptor<Wildlife` all land as
+`Animal|Bird|Osprey`. Keywords the file does not cover pass through untouched unless
+`--vocabulary-strict` is set, in which case they are dropped and reported: the run summary's
+`vocabulary_dropped` names every rejected term and how often it came up, which is the list to work
+from when growing the vocabulary. `vocabulary_mapped` counts the rewrites.
+
+The vocabulary is listed in the prompt as well, so the model prefers your terms in the first place
+instead of being corrected afterwards. That listing is part of the cache namespace: swapping
+vocabulary files starts a fresh cache slice rather than replaying keywords chosen under the old one.
 
 ## Filter
 

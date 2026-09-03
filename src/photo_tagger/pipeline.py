@@ -34,7 +34,7 @@ from photo_tagger.models import KeywordSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from exiftool import ExifToolHelper  # type: ignore[attr-defined]
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from photo_tagger.metadata import ImageContext
     from photo_tagger.models import GeneratedMetadata, InferenceResult
+    from photo_tagger.vocabulary import Vocabulary
 
     OnSuccess = Callable[[Path], None]
     ProgressCallback = Callable[[Path, bool], None]
@@ -53,6 +54,11 @@ if TYPE_CHECKING:
 # server is overloaded or mid-restart; re-hitting it immediately retries into the same outage.
 # The test suite zeroes this via a conftest fixture.
 _RETRY_PASS_DELAY_SECONDS = 5.0
+
+# How many distinct keywords a strict vocabulary run reports as dropped before it stops collecting
+# new ones. Generous for the intended use (spotting gaps in a catalog) and bounded for the one that
+# is not (pointing --vocabulary at an unrelated file).
+_MAX_TRACKED_DROPPED_TERMS = 200
 
 
 class _InferenceScratch(TypedDict, total=False):
@@ -118,6 +124,10 @@ class ProcessingOptions:
     jpeg_dimensions: int = DEFAULT_DIMENSIONS
     jpeg_quality: int = DEFAULT_JPEG_QUALITY
     max_new_keywords: int | None = None
+    # Terms the generated keywords are snapped onto (see photo_tagger.vocabulary). None leaves the
+    # model's own wording alone; vocabulary_strict additionally drops what the vocabulary lacks.
+    vocabulary: Vocabulary | None = None
+    vocabulary_strict: bool = False
 
 
 @contextlib.contextmanager
@@ -137,6 +147,8 @@ class _UsageAccumulator:
     inference_calls: int = 0
     cache_hits: int = 0
     failure_kinds: dict[str, int] = field(default_factory=dict)
+    vocabulary_mapped: int = 0
+    vocabulary_dropped: dict[str, int] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, result: InferenceResult) -> None:
@@ -172,6 +184,24 @@ class _UsageAccumulator:
         """Count one photo that failed for good, bucketed by coarse *kind*."""
         with self._lock:
             self.failure_kinds[kind] = self.failure_kinds.get(kind, 0) + 1
+
+    def add_vocabulary(self, *, mapped: int, dropped: Iterable[str]) -> None:
+        """
+        Fold one photo's vocabulary rewrites and rejections into the running totals.
+
+        The dropped-term tally is what a user acts on after a strict run (these are the concepts the
+        catalog has no name for yet), so it is kept per term rather than as a bare count. New terms
+        stop being recorded past :data:`_MAX_TRACKED_DROPPED_TERMS`: a run against the wrong
+        vocabulary can reject thousands of distinct keywords, and an unbounded dict would grow with
+        them and then be dumped into the summary file.
+        """
+        with self._lock:
+            self.vocabulary_mapped += mapped
+            for term in dropped:
+                if term in self.vocabulary_dropped:
+                    self.vocabulary_dropped[term] += 1
+                elif len(self.vocabulary_dropped) < _MAX_TRACKED_DROPPED_TERMS:
+                    self.vocabulary_dropped[term] = 1
 
 
 # The coarse failure buckets. Classification is heuristic by exception class name/module so no
@@ -370,6 +400,28 @@ def _record_scratch(
         sink["merged_keywords"] = merged_keywords
 
 
+def _apply_vocabulary(keywords: list[str], ctx: _BatchContext, *, file_name: str) -> list[str]:
+    """
+    Snap the model's keywords onto the configured vocabulary, recording what it changed.
+
+    Returns the keywords untouched when no vocabulary is configured. Rewrites and (in strict mode)
+    rejections are logged per photo and tallied on the batch so the summary file can report them.
+    """
+    vocabulary = ctx.options.vocabulary
+    if not vocabulary:
+        return keywords
+    result = vocabulary.snap(keywords, strict=ctx.options.vocabulary_strict)
+    if result.mapped or result.dropped:
+        logger.info(
+            "vocabulary_applied",
+            file=file_name,
+            mapped=result.mapped,
+            dropped=result.dropped,
+        )
+        ctx.usage.add_vocabulary(mapped=len(result.mapped), dropped=result.dropped)
+    return result.keywords
+
+
 def process_photo(
     image_path: Path,
     ctx: _BatchContext,
@@ -438,7 +490,9 @@ def process_photo(
 
         title = inference.title
         description = inference.description
-        keywords = inference.keywords
+        # The vocabulary runs before the cap so the cap counts keywords that will actually be
+        # written: in strict mode it would otherwise be spent on terms about to be dropped.
+        keywords = _apply_vocabulary(inference.keywords, ctx, file_name=image_path.name)
 
         if options.max_new_keywords is not None and len(keywords) > options.max_new_keywords:
             logger.info(
@@ -595,6 +649,10 @@ class BatchTotals:
     # Final failures bucketed by coarse kind (timeout, connection, model-validation, ...), so
     # the summary file and telemetry can say WHY photos failed, not just how many.
     failure_kinds: dict[str, int] = field(default_factory=dict)
+    # What --vocabulary did: how many keywords it rewrote to the catalog's spelling, and which
+    # terms strict mode rejected (with how often), so the summary file names the gaps to fill.
+    vocabulary_mapped: int = 0
+    vocabulary_dropped: dict[str, int] = field(default_factory=dict)
 
 
 def _notify_success(on_success: OnSuccess | None, image_file: Path) -> None:
@@ -955,6 +1013,8 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
         workers=workers,
         dry_run=options.dry_run,
         failure_kinds=dict(usage.failure_kinds),
+        vocabulary_mapped=usage.vocabulary_mapped,
+        vocabulary_dropped=dict(usage.vocabulary_dropped),
     )
 
     logger.info(
@@ -973,6 +1033,15 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
         dry_run=options.dry_run,
         workers=workers,
     )
+    if totals.vocabulary_mapped or totals.vocabulary_dropped:
+        # Named here, not just in the summary file, because a strict run that quietly discarded
+        # half the model's keywords should say so on the console.
+        logger.info(
+            "vocabulary_summary",
+            mapped=totals.vocabulary_mapped,
+            dropped_terms=len(totals.vocabulary_dropped),
+            dropped=totals.vocabulary_dropped,
+        )
     if still_failing:
         logger.error("files_failed_after_retry", files=totals.failed_files)
 

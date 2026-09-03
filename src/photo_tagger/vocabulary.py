@@ -445,6 +445,19 @@ class Vocabulary:
         )
 
 
+def prompt_with_vocabulary(base_prompt: str, vocabulary: Vocabulary | None) -> str:
+    """
+    Append the vocabulary block to *base_prompt*, or return it unchanged when there is none.
+
+    The block rides in the user prompt rather than the system prompt, which puts it inside the
+    cache namespace: swapping vocabulary files starts a fresh slice instead of replaying keywords
+    chosen under the old one.
+    """
+    if not vocabulary:
+        return base_prompt
+    return f"{base_prompt.strip()}\n\n{vocabulary.prompt_section()}"
+
+
 def _entry_from_string(raw: str) -> _Entry | None:
     """Parse one ``A|B|C``, ``C<B<A``, or plain-term string into an entry."""
     name, synonyms = _split_synonyms(raw)

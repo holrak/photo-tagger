@@ -129,6 +129,24 @@ photo-tagger \
 Existing photo metadata (location, GPS, camera EXIF) is still appended to your custom prompt
 automatically. `--max-keywords` caps the AI keywords before they are merged with existing ones.
 
+## Keep keywords inside your Lightroom catalog
+
+Export your keyword list from Lightroom (_Metadata > Export Keywords_) and point the run at it, so
+generated keywords use the names and hierarchy you already curate instead of new near-duplicates.
+
+```bash
+photo-tagger \
+  -i ~/Pictures/inbox \
+  --recursive \
+  --vocabulary ~/lightroom-keywords.txt \
+  --summary-file ~/Pictures/inbox/run.json
+```
+
+`ospreys`, `Sea Hawk`, and `Osprey<Raptor<Wildlife` all land as your `Animal|Bird|Osprey`. Add
+`--vocabulary-strict` to drop anything the list does not cover; the summary file's
+`vocabulary_dropped` then names each rejected term and how often it came up, which is the list to
+work from when deciding what to add to the catalog.
+
 ## Cache model outputs across reruns
 
 Store model outputs in a SQLite cache so reruns skip the model call when nothing relevant changed.

@@ -68,6 +68,7 @@ from photo_tagger.progress import batch_progress
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
 # on the doctor command to validate the --provider choices, so it must exist at definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
+from photo_tagger.vocabulary import load_vocabulary, prompt_with_vocabulary
 
 
 if TYPE_CHECKING:
@@ -483,6 +484,8 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         use_sidecar=options.use_sidecar,
         dry_run=options.dry_run,
         max_keywords=options.max_new_keywords,
+        vocabulary_terms=len(options.vocabulary.terms) if options.vocabulary else 0,
+        vocabulary_strict=options.vocabulary_strict,
         temperature=options.temperature,
         max_tokens=options.max_tokens,
         timeout_seconds=options.timeout_seconds,
@@ -671,7 +674,10 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
 ) -> None:
     """Body of ``tag`` that runs once the optional file lock has been acquired."""
     _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
-    options = to_processing_options(output, inference)
+    # Raises VocabularyError (a PhotoTaggerError) on an unusable file, which `tag` turns into a
+    # clean exit 1. Loading it up front means a typo in the path fails before any model call.
+    vocabulary = load_vocabulary(output.vocabulary) if output.vocabulary is not None else None
+    options = to_processing_options(output, inference, vocabulary=vocabulary)
     newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
     older_than = _parse_filter_date(filter_.older_than, flag="--older-than")
     _log_startup(
@@ -704,9 +710,13 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         logger.info("no_files_to_process_after_skipping")
         return
 
-    # A --hint rides inside the user prompt, so the cache namespace below picks it up too:
-    # a hinted run never replays results generated without the hint (and vice versa).
-    user_prompt = prompt_with_hint(_read_prompt_file(artifacts.prompt_file), inference.hint)
+    # A --hint and the --vocabulary listing ride inside the user prompt, so the cache namespace
+    # below picks them up too: a hinted run never replays results generated without the hint (and
+    # vice versa), and the same holds for a vocabulary.
+    user_prompt = prompt_with_vocabulary(
+        prompt_with_hint(_read_prompt_file(artifacts.prompt_file), inference.hint),
+        vocabulary,
+    )
     agent = create_agent(
         provider.provider_name,
         provider.model_name,
