@@ -9,12 +9,12 @@ from photo_tagger.vocabulary import (
     Vocabulary,
     VocabularyError,
     _lightroom_csv_keywords,
-    _parse_lines,
     _singularize,
     folds_plurals,
     fuzzy_key_match,
     load_vocabulary,
     loose_key,
+    parse_keyword_lines,
 )
 
 
@@ -46,9 +46,9 @@ Y,Y,Y,N,Landscape
 """
 
 
-def test_parse_lines_reads_an_indented_lightroom_export() -> None:
+def test_parse_keyword_lines_reads_an_indented_lightroom_export() -> None:
     """Indentation builds the chain, braces attach synonyms, brackets are stripped."""
-    entries = _parse_lines(LIGHTROOM_EXPORT)
+    entries = parse_keyword_lines(LIGHTROOM_EXPORT)
     chains = [entry.chain for entry in entries]
     assert chains == [
         ["Animal"],
@@ -63,9 +63,9 @@ def test_parse_lines_reads_an_indented_lightroom_export() -> None:
     assert osprey.synonyms == ["Sea Hawk", "Fish Hawk"]
 
 
-def test_parse_lines_accepts_space_indentation_of_any_width() -> None:
+def test_parse_keyword_lines_accepts_space_indentation_of_any_width() -> None:
     """Widths are compared, not counted in levels, so four-space indents nest the same."""
-    entries = _parse_lines("Animal\n    Bird\n        Osprey\n")
+    entries = parse_keyword_lines("Animal\n    Bird\n        Osprey\n")
     assert [entry.chain for entry in entries] == [
         ["Animal"],
         ["Animal", "Bird"],
@@ -73,9 +73,11 @@ def test_parse_lines_accepts_space_indentation_of_any_width() -> None:
     ]
 
 
-def test_parse_lines_reads_flat_paths_and_ignores_comments() -> None:
+def test_parse_keyword_lines_reads_flat_paths_and_ignores_comments() -> None:
     """Both path spellings work on one line; blanks and '#' lines are skipped."""
-    entries = _parse_lines("# my keywords\n\nAnimal|Bird|Osprey\nOak<Tree<Plant\nLandscape\n")
+    entries = parse_keyword_lines(
+        "# my keywords\n\nAnimal|Bird|Osprey\nOak<Tree<Plant\nLandscape\n",
+    )
     assert [entry.chain for entry in entries] == [
         ["Animal", "Bird", "Osprey"],
         ["Plant", "Tree", "Oak"],
@@ -83,9 +85,9 @@ def test_parse_lines_reads_flat_paths_and_ignores_comments() -> None:
     ]
 
 
-def test_parse_lines_keeps_hashtag_keywords() -> None:
+def test_parse_keyword_lines_keeps_hashtag_keywords() -> None:
     """A comment needs a space after the hash, so a hashtag-shaped keyword survives."""
-    entries = _parse_lines("# a comment\n#\n#Diversity\n\t#1\nAnimal\n")
+    entries = parse_keyword_lines("# a comment\n#\n#Diversity\n\t#1\nAnimal\n")
     assert [entry.chain for entry in entries] == [
         ["#Diversity"],
         ["#Diversity", "#1"],
@@ -93,9 +95,9 @@ def test_parse_lines_keeps_hashtag_keywords() -> None:
     ]
 
 
-def test_parse_lines_does_not_let_a_one_line_path_parent_the_next_line() -> None:
+def test_parse_keyword_lines_does_not_let_a_one_line_path_parent_the_next_line() -> None:
     """A full path stands alone; an indented line after it still belongs to the tree above."""
-    entries = _parse_lines("Animal\n\tAnimal|Bird|Osprey\n\tMammal\n")
+    entries = parse_keyword_lines("Animal\n\tAnimal|Bird|Osprey\n\tMammal\n")
     assert [entry.chain for entry in entries] == [
         ["Animal"],
         ["Animal", "Bird", "Osprey"],
@@ -126,9 +128,9 @@ def test_from_entries_skips_entries_with_no_term() -> None:
     assert vocab.terms == ("Bird",)
 
 
-def test_parse_lines_ignores_a_synonym_with_no_keyword_above_it() -> None:
+def test_parse_keyword_lines_ignores_a_synonym_with_no_keyword_above_it() -> None:
     """A stray synonym line at the top of the file has nothing to alias."""
-    entries = _parse_lines("{Orphan}\nBird\n")
+    entries = parse_keyword_lines("{Orphan}\nBird\n")
     assert [entry.chain for entry in entries] == [["Bird"]]
 
 
@@ -159,7 +161,7 @@ def test_match_refuses_a_fuzzy_hit_that_starts_with_another_letter() -> None:
 
 def test_match_resolves_synonyms_to_the_canonical_term() -> None:
     """A synonym is an alias, not a term of its own."""
-    vocab = Vocabulary.from_entries(_parse_lines(LIGHTROOM_EXPORT))
+    vocab = Vocabulary.from_entries(parse_keyword_lines(LIGHTROOM_EXPORT))
     assert vocab.match("Sea Hawk") == "Osprey"
     assert "Sea Hawk" not in vocab.terms
 
@@ -227,7 +229,7 @@ def test_snap_matches_on_the_leaf_of_a_generated_chain() -> None:
 
 def test_prompt_section_lists_hierarchies_without_their_prefixes() -> None:
     """Only the deepest path of a branch is listed, parent-first."""
-    vocab = Vocabulary.from_entries(_parse_lines(LIGHTROOM_EXPORT))
+    vocab = Vocabulary.from_entries(parse_keyword_lines(LIGHTROOM_EXPORT))
     section = vocab.prompt_section()
     assert "- Animal > Bird > Osprey" in section
     assert "- Animal > Mammal > Pet" in section
@@ -426,7 +428,7 @@ def test_german_keeps_words_the_english_plural_rules_would_merge() -> None:
 def test_cyrillic_matches_on_case_and_declared_synonyms() -> None:
     """Case folding is script-neutral; inflections come from the file's own synonyms."""
     russian = Vocabulary.from_entries(
-        _parse_lines("Животное\n\tПтица\n\t{птицы}\n\t{птиц}\n"),  # noqa: RUF001
+        parse_keyword_lines("Животное\n\tПтица\n\t{птицы}\n\t{птиц}\n"),  # noqa: RUF001
         fold_plurals=False,
     )
 

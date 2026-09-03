@@ -28,6 +28,7 @@ from photo_tagger.metadata import (
     read_caption,
     read_capture_times,
     read_image_context,
+    read_keyword_sets,
     read_metadata_sources,
     write_metadata,
 )
@@ -1039,3 +1040,55 @@ def test_read_capture_times_survives_an_exiftool_error(tmp_path: Path) -> None:
 
     with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
         assert read_capture_times([photo]) == {}
+
+
+def test_read_keyword_sets_merges_image_and_sidecar_keywords(tmp_path: Path) -> None:
+    """Every keyword view of a photo comes back in one batched read, sidecar included."""
+    image = tmp_path / "a.cr3"
+    sidecar = tmp_path / "a.xmp"
+    bare = tmp_path / "b.cr3"
+    for path in (image, sidecar, bare):
+        path.write_text("x")
+
+    fake_helper = _fake_helper(
+        [
+            {"SourceFile": str(image), "IPTC:Keywords": ["Beach"]},
+            {
+                "SourceFile": str(sidecar),
+                "XMP:Subject": ["beach", "Sunset"],
+                "XMP:HierarchicalSubject": ["Nature|Sunset"],
+            },
+            {"SourceFile": str(bare), "File:FileSize": 100},
+        ],
+    )
+    with (
+        patch(
+            "photo_tagger.metadata.metadata_targets",
+            side_effect=lambda p: [str(p), str(p.with_suffix(".xmp"))],
+        ),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=fake_helper),
+    ):
+        keywords = read_keyword_sets([image, bare])
+
+    assert keywords[image].subject == ["Beach", "Sunset"]
+    assert keywords[image].hierarchical == ["Nature|Sunset"]
+    assert keywords[bare].is_empty()
+
+
+def test_read_keyword_sets_reports_an_exiftool_failure_as_an_empty_dict(tmp_path: Path) -> None:
+    """A read failure must not look like "read and found nothing", or a census would be wrong."""
+    image = tmp_path / "a.cr3"
+    image.write_text("x")
+
+    with (
+        patch("photo_tagger.metadata.metadata_targets", side_effect=lambda p: [str(p)]),
+        patch("photo_tagger.metadata.ExifToolHelper", side_effect=ValueError("no exiftool")),
+    ):
+        assert read_keyword_sets([image]) == {}
+
+
+def test_read_keyword_sets_with_no_paths_reads_nothing(tmp_path: Path) -> None:
+    """An empty batch short-circuits before exiftool is opened."""
+    assert read_keyword_sets([]) == {}
+    with patch("photo_tagger.metadata.metadata_targets", return_value=[]):
+        assert read_keyword_sets([tmp_path / "gone.cr3"]) == {tmp_path / "gone.cr3": KeywordSet()}

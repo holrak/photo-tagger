@@ -242,8 +242,9 @@ def _lightroom_csv_keywords(text: str) -> str | None:
     Lift the keyword column out of a Lightroom CSV keyword export, or return None.
 
     Lightroom's *Metadata > Export Keywords* offers two shapes of the same list. The ``.txt`` is
-    the indented list :func:`_parse_lines` reads as-is; the ``.csv`` wraps it in four option columns
-    ("Include On Export" and friends) and hides the indentation inside the last field. Without this,
+    the indented list :func:`parse_keyword_lines` reads as-is; the ``.csv`` wraps it in four option
+    columns ("Include On Export" and friends) and hides the indentation inside the last field. So
+    without this,
     the CSV parses into terms like ``Y,Y,Y,N,Osprey`` that match nothing, and the whole hierarchy is
     lost: a vocabulary that silently snaps no keyword at all, which strict mode turns into a run
     that drops every one.
@@ -274,7 +275,7 @@ def _lightroom_csv_keywords(text: str) -> str | None:
     return "\n".join(keywords) if any(keyword.strip() for keyword in keywords) else None
 
 
-def _parse_lines(text: str) -> list[_Entry]:
+def parse_keyword_lines(text: str) -> list[_Entry]:
     """
     Parse a vocabulary file into entries.
 
@@ -548,7 +549,8 @@ def load_vocabulary(path: Path, *, output_language: str = DEFAULT_OUTPUT_LANGUAG
     Read a vocabulary file and index it for keywords written in *output_language*.
 
     Accepts either Lightroom keyword-list export, ``.txt`` or ``.csv`` (see
-    :func:`_lightroom_csv_keywords`), or a plain list of terms and paths (see :func:`_parse_lines`).
+    :func:`_lightroom_csv_keywords`), or a plain list of terms and paths (see
+    :func:`parse_keyword_lines`).
     Raises :class:`VocabularyError` when the file cannot be read or holds no usable term, because
     silently continuing with an empty vocabulary would drop every keyword in strict mode.
 
@@ -577,7 +579,7 @@ def load_vocabulary(path: Path, *, output_language: str = DEFAULT_OUTPUT_LANGUAG
         text = keyword_column
 
     vocabulary = Vocabulary.from_entries(
-        _parse_lines(text),
+        parse_keyword_lines(text),
         fold_plurals=folds_plurals(output_language),
     )
     if not vocabulary:

@@ -369,6 +369,44 @@ def find_field_presence(
     return presence
 
 
+def read_keyword_sets(
+    image_paths: Iterable[Path],
+    *,
+    et: ExifToolHelper | None = None,
+) -> dict[Path, KeywordSet]:
+    """
+    Read the keywords already on each of *image_paths*, image and XMP sidecar merged.
+
+    Every input path maps to a :class:`KeywordSet`, empty when the photo carries no keyword; an
+    *empty dict* means exiftool could not be run at all, which callers must tell apart from "read
+    and found nothing" (see :func:`find_field_presence`). Like the other census-style reads, this is
+    one batched exiftool call rather than one per image, so a whole library can be surveyed without
+    paying an IPC round-trip per photo.
+    """
+    paths = list(image_paths)
+    keywords = {path: KeywordSet() for path in paths}
+    if not paths:
+        return keywords
+
+    all_targets, target_to_images = _build_target_index(paths)
+    if not all_targets:
+        return keywords
+
+    tags = list(dict.fromkeys(tag for tag, _ in _KEYWORD_TAG_TO_FIELD))
+    try:
+        blocks = _batched_get_tags(et, files=all_targets, tags=tags)
+    except _EXIFTOOL_ERRORS as exc:
+        logger.exception("failed_to_open_exiftool_for_keyword_census", error=str(exc))
+        return {}
+
+    for block in blocks:
+        for image_path in _images_for_block(block, target_to_images):
+            _accumulate_keyword_blocks([block], keywords[image_path])
+    for keyword_set in keywords.values():
+        _dedup_keyword_set(keyword_set)
+    return keywords
+
+
 def _first_tag_value(blocks: list[dict[str, Any]], tags: tuple[str, ...]) -> str | None:
     """Return the first non-blank value across *blocks* for the first matching *tags* entry."""
     for tag in tags:

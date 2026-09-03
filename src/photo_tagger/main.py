@@ -21,6 +21,7 @@ import os
 import sys
 import tempfile
 import threading
+from collections import Counter
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol
 
 from cyclopts import App, Parameter, validators
 from loguru import logger
+from rich.console import Console
 
 from photo_tagger import __version__, i18n, telemetry
 from photo_tagger.ai import create_agent
@@ -45,7 +47,9 @@ from photo_tagger.cli_options import (
     OutputConfig,
     ProviderConfig,
     TelemetryConfig,
+    VocabularyBuildConfig,
     to_processing_options,
+    to_trim_rules,
 )
 from photo_tagger.config import DEFAULT_USER_PROMPT
 from photo_tagger.config_file import configured_exiftool_path, load_config
@@ -58,7 +62,7 @@ from photo_tagger.discovery import (
     make_skip_list_appender,
     resolve_image_batch,
 )
-from photo_tagger.errors import PhotoTaggerError
+from photo_tagger.errors import DiscoveryError, PhotoTaggerError
 from photo_tagger.locking import FileLock, LockHeldError
 from photo_tagger.logging_setup import setup_logging
 from photo_tagger.metadata import prompt_with_hint, select_camera_fields, select_location
@@ -70,6 +74,15 @@ from photo_tagger.progress import batch_progress
 from photo_tagger.providers import ProviderName  # noqa: TC001
 from photo_tagger.sessions import plan_sessions
 from photo_tagger.vocabulary import load_vocabulary, prompt_with_vocabulary
+from photo_tagger.vocabulary_build import (
+    KeywordCensus,
+    TrimRules,
+    census_from_export,
+    census_from_photos,
+    render_drop_report,
+    render_vocabulary,
+    trim,
+)
 
 
 if TYPE_CHECKING:
@@ -172,6 +185,144 @@ def gui() -> None:
         )
         raise SystemExit(1) from exc
     raise SystemExit(gui_module.launch())
+
+
+def _vocabulary_header(source: str, kept: int, dropped: int, rules: TrimRules) -> str:
+    """Explain at the top of the generated file where it came from and how to change it."""
+    cap = rules.max_terms if rules.max_terms is not None else "no cap"
+    return (
+        f"# photo-tagger vocabulary: {kept} keywords kept, {dropped} dropped.\n"
+        f"# Source: {source}.\n"
+        f"# Rules: used at least {rules.min_uses}x, at most {cap} terms, "
+        f"digits {'kept' if rules.allow_digits else 'dropped'}.\n"
+        "#\n"
+        "# Edit freely: one keyword per line, 'Parent|Child' for a hierarchy, indentation for a\n"
+        "# tree, {braces} for a synonym. A line starting with '# ' is a comment.\n"
+    )
+
+
+def _build_census(
+    inputs: list[Path] | None,
+    from_export: Path | None,
+    *,
+    image_extensions: str,
+    recursive: bool,
+) -> tuple[KeywordCensus, str]:
+    """Count keywords from the photos, from an export, or from both; also name the source."""
+    census = KeywordCensus()
+    sources: list[str] = []
+    if from_export is not None:
+        census = census_from_export(from_export.read_text(encoding="utf-8"))
+        sources.append(f"keyword export {from_export.name} (counts are tree occurrences)")
+    if inputs:
+        image_files = resolve_image_batch(inputs, image_extensions, recursive=recursive)
+        photo_census = census_from_photos(image_files)
+        for term, count in photo_census.uses.items():
+            census.uses[term] += count
+        for term, chains in photo_census.chains.items():
+            census.chains.setdefault(term, Counter()).update(chains)
+        census.photos = photo_census.photos
+        sources.append(f"{photo_census.photos} photo(s)")
+    return census, " and ".join(sources)
+
+
+@app.command
+def vocabulary(  # noqa: PLR0913 - inputs, output, and the option groups are all distinct concerns.
+    inputs: Annotated[
+        list[Path] | None,
+        Parameter(
+            name=("--input", "-i"),
+            help="Photos or folders to read existing keywords from (repeat this option)",
+        ),
+    ] = None,
+    *,
+    output: Annotated[
+        Path,
+        Parameter(
+            name=("--output", "-o"),
+            validator=validators.Path(file_okay=True, dir_okay=False),
+            help="Where to write the vocabulary file",
+        ),
+    ],
+    from_export: Annotated[
+        Path | None,
+        Parameter(
+            name=("--from-export",),
+            validator=validators.Path(exists=True, file_okay=True, dir_okay=False),
+            help=(
+                "Read a Lightroom keyword export (.txt or .csv) instead of, or as well as, the "
+                "photos. Counts from an export are tree occurrences, not photos"
+            ),
+        ),
+    ] = None,
+    image_extensions: Annotated[
+        str,
+        Parameter(name=("--ext", "--extensions"), help="Extensions to scan for (case insensitive)"),
+    ] = DEFAULT_EXTENSIONS,
+    recursive: Annotated[
+        bool,
+        Parameter(name=("--recursive", "-r"), help="Scan subdirectories too"),
+    ] = DEFAULT_RECURSIVE,
+    build: Annotated[VocabularyBuildConfig, Parameter(name="*")] = VocabularyBuildConfig(),  # noqa: B008
+) -> None:
+    """
+    Build a controlled vocabulary from the keywords a library already uses.
+
+    ``--vocabulary-strict`` is what stops a catalog sprawling, and it needs a keyword file worth
+    enforcing. This writes one: point it at your photos and it reads the keywords they already carry
+    (through exiftool, so any application that writes XMP or IPTC works, not only Lightroom), counts
+    how often each is used, and keeps the ones that earn their place.
+
+    ``--from-export`` reads a Lightroom keyword export instead, for a catalog that is not on this
+    machine. Its counts are occurrences in the keyword tree rather than photos, which is a weaker
+    signal; prefer the photos when you have them.
+
+    Nothing is written to your photos or your catalog. The output is a file to review and edit, plus
+    an optional ``--report`` naming every keyword that was dropped and why.
+    """
+    _apply_exiftool_path(configured_exiftool_path())
+    if not inputs and from_export is None:
+        logger.error("vocabulary_no_source")
+        raise SystemExit(1)
+
+    console = Console()
+    rules = to_trim_rules(build)
+    try:
+        census, source = _build_census(
+            inputs,
+            from_export,
+            image_extensions=image_extensions,
+            recursive=recursive,
+        )
+    except (DiscoveryError, OSError) as exc:
+        logger.error("vocabulary_source_unreadable", error=str(exc))
+        raise SystemExit(1) from exc
+
+    if not census.uses:
+        console.print("[yellow]No keywords found: nothing to build a vocabulary from.[/yellow]")
+        raise SystemExit(1)
+
+    result = trim(census, rules)
+    header = _vocabulary_header(source, len(result.kept), len(result.dropped), rules)
+    try:
+        output.write_text(
+            render_vocabulary(result, header=header, flat=build.flat),
+            encoding="utf-8",
+        )
+        if build.report_file is not None:
+            build.report_file.write_text(render_drop_report(result), encoding="utf-8")
+    except OSError as exc:
+        logger.error("vocabulary_write_failed", error=str(exc))
+        raise SystemExit(1) from exc
+
+    console.print(f"Read {len(census.uses)} keyword(s) from {source}.")
+    console.print(f"[green]Wrote {len(result.kept)} keyword(s) to {output}[/green]")
+    if build.report_file is not None:
+        console.print(f"Dropped {len(result.dropped)}; see {build.report_file}")
+    console.print(
+        "\nReview the file, then tag with it:\n"
+        f"  photo-tagger -i PHOTOS --vocabulary {output} --vocabulary-strict",
+    )
 
 
 def _read_prompt_file(prompt_file: Path | None) -> str:

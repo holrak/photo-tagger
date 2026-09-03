@@ -15,13 +15,14 @@ precedence rules and TOML layout.
 
 ## Commands
 
-Running `photo-tagger` with image inputs tags them (the default command). Two subcommands exist:
+Running `photo-tagger` with image inputs tags them (the default command). Three subcommands exist:
 
-| Command               | Description                                                                                         |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| `photo-tagger`        | Tag the given images (default). Documented by the option groups below.                              |
-| `photo-tagger doctor` | Pre-flight check: verifies ExifTool is on `PATH` and the provider serves the model, then exits 0/1. |
-| `photo-tagger gui`    | Launch the optional desktop GUI. Requires the `gui` extra; see [Desktop GUI](gui.md).               |
+| Command                   | Description                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `photo-tagger`            | Tag the given images (default). Documented by the option groups below.                                    |
+| `photo-tagger doctor`     | Pre-flight check: verifies ExifTool is on `PATH` and the provider serves the model, then exits 0/1.       |
+| `photo-tagger vocabulary` | Build a keyword file from a library's own keywords (see [Building a vocabulary](#building-a-vocabulary)). |
+| `photo-tagger gui`        | Launch the optional desktop GUI. Requires the `gui` extra; see [Desktop GUI](gui.md).                     |
 
 `doctor` accepts `--provider`, `-m/--model`, `-u/--url`, and `-k/--api-key` (same meanings as below)
 and honors the same config file and environment variables. Run it first when a tagging run will not
@@ -252,6 +253,65 @@ each photo completes, so interrupting the run with Ctrl-C still leaves a complet
 the work done so far. `--csv-file` and `--json` can be used together; both observe every photo. A
 `--dry-run` still fills the report, which makes it handy for previewing a batch before writing any
 metadata.
+
+## Building a vocabulary
+
+`--vocabulary-strict` is what stops a catalog sprawling, and it needs a keyword file worth
+enforcing. `photo-tagger vocabulary` writes one from the library you already have:
+
+```bash
+photo-tagger vocabulary -i ~/Pictures -r -o vocabulary.txt --report dropped.csv
+```
+
+It reads the keywords your photos already carry, counts how often each one is used, and keeps the
+ones that earn their place. The read goes through exiftool, so **the application does not matter**:
+digiKam, darktable, Immich, PhotoPrism, Synology Photos, Piwigo and the rest all write XMP/IPTC
+keywords, and only Lightroom offers a keyword-list export at all. `XMP-lr:HierarchicalSubject`
+carries the hierarchy those photos really use, so the generated file keeps it.
+
+Nothing is written to your photos or your catalog. The output is a text file to read and edit.
+
+| Flag                  | Default    | Description                                                                               |
+| --------------------- | ---------- | ----------------------------------------------------------------------------------------- |
+| `-i`, `--input` PATH  | none       | Photos or folders to read keywords from; repeat the flag. Honors `--ext` and `-r`.        |
+| `-o`, `--output` PATH | (required) | Where to write the vocabulary file.                                                       |
+| `--from-export` PATH  | none       | Read a Lightroom keyword export (`.txt` or `.csv`) instead of, or as well as, the photos. |
+| `--min-uses` N        | `2`        | Keep a keyword only when the library uses it at least this often.                         |
+| `--max-terms` N       | `4800`     | Cap the file, dropping the least-used first. `0` means no cap.                            |
+| `--allow-digits`      | `false`    | Keep keywords containing digits (dropped by default as measurements and model numbers).   |
+| `--flat`              | `false`    | Write bare keywords instead of their hierarchies.                                         |
+| `--report` PATH       | none       | Write a CSV of every dropped keyword, its count, and the rule that cut it.                |
+
+### Which source to use
+
+Prefer the photos. An export has no usage data at all, so `--from-export` counts *occurrences in the
+keyword tree* instead: a term filed under forty parents scores forty, however many photos carry it.
+It is a usable proxy for a catalog that is not on this machine, not the same measure. Pass both and
+the counts are added together.
+
+### What the rules do
+
+Applied in this order, each one reported in `--report`:
+
+1. **Shape.** A keyword with digits, odd punctuation, more than three words, or over 30 characters
+    is a measurement, a path, or a sentence, not a subject.
+2. **Rarity.** `--min-uses` drops the one-offs. In a catalog an AI has been writing to this is the
+    rule that does the work: most keywords are used exactly once.
+3. **Variants.** One concept keeps one spelling, the most-used one. Nothing is lost by this, since
+    vocabulary matching folds case, punctuation, and plurals anyway: a photo tagged `Animals` still
+    snaps onto `Animal`.
+4. **The cap.** `--max-terms` removes the least-used survivors last, so it never cuts a term an
+    earlier rule would have kept.
+
+The result is deterministic: the same library gives the same file, ties broken alphabetically.
+
+!!! tip
+
+    Read the file before you trust it, and tune from the report rather than by guesswork. If a keyword
+    you care about was dropped, `dropped.csv` names it with the count that would have kept it. The
+    hierarchy is worth a look too: a catalog a tool has been writing to can file `Beach` under `Sand`,
+    and a vocabulary imposes its hierarchy on every photo it matches. `--flat` drops the hierarchies
+    when the source is not worth keeping.
 
 ## Skipping and resuming
 

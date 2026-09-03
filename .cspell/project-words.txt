@@ -29,6 +29,7 @@ cpuinfo
 CREAT
 Cyclopts
 cyclopts
+darktable
 dataclass
 datas
 debugpy
@@ -37,6 +38,7 @@ dedupe
 dedups
 delenv
 Descrição
+digiKam
 distpath
 docformatter
 docstrings
@@ -71,6 +73,7 @@ httpx
 iconset
 iconutil
 idioma
+Immich
 importorskip
 importorskips
 imread
@@ -102,6 +105,7 @@ logfire
 loguru
 lspci
 lucide
+Lychee
 machdep
 magiclink
 marimo
@@ -133,8 +137,10 @@ Ospray
 pacman
 palavras
 parentless
+PhotoPrism
 pinentry
 pipx
+Piwigo
 pixmap
 pixtral
 pofile

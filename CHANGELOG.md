@@ -21,10 +21,12 @@ All notable changes to this project are documented here. The format is based on
   the prompt, so the model prefers those terms in the first place; that listing is part of the cache
   namespace, so swapping files starts a fresh cache slice. Past 5,000 terms the run warns that the
   fuzzy pass is off and the prompt listing is truncated.
+
 - `--vocabulary-strict`: drop generated keywords the vocabulary does not cover instead of writing
   them as-is. The run summary gains `vocabulary_mapped` (how many keywords were rewritten) and
   `vocabulary_dropped` (each rejected term and how often it came up), so the vocabulary can grow on
   purpose rather than by accident.
+
 - `--session-gap MINUTES`: group the batch into shoots (by EXIF capture time, falling back to file
   mtime) and harmonize each one, so forty frames of the same bird stop landing in the catalog as
   `Osprey`, `Ospreys`, `Bird|Osprey`, and `Wildlife|Raptor|Osprey`. A session is analyzed in full
@@ -34,12 +36,26 @@ All notable changes to this project are documented here. The format is based on
   finished results rather than nudging the model keeps it deterministic: the same batch harmonizes
   the same way at any `--workers` setting.
 
+- `photo-tagger vocabulary`: build a controlled vocabulary out of the keywords a library already
+  uses, which is what `--vocabulary-strict` needs and what nothing until now could produce. It reads
+  the keywords on the photos themselves through ExifTool, so the application does not matter:
+  digiKam, darktable, Immich, PhotoPrism, Synology Photos and the rest all write XMP/IPTC keywords,
+  while only Lightroom exports a keyword list at all. Usage is counted per photo, hierarchies come
+  from `XMP-lr:HierarchicalSubject`, and `--from-export` reads a Lightroom export instead for a
+  catalog that is not on this machine (its counts are tree occurrences, a weaker signal). The rules
+  are deterministic and reported: keep a keyword used at least `--min-uses` times, drop measurements
+  and sentences, keep one spelling per concept, cap the file with `--max-terms` (default 4800, under
+  the size where matching gives up its fuzzy pass). `--report` writes a CSV naming every dropped
+  keyword and the rule that cut it, so the thresholds can be tuned rather than guessed. Nothing is
+  written to your photos or your catalog.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added
 
 - GUI: the bottom bar now shows the time **elapsed** and the estimated time **left** next to the
   progress bar, for both generating and saving (`2:30 elapsed · 8:10 left`).
+
 - GUI: a **Keep ExifTool Backup** toggle in the Save options menu (the CLI's `--no-backup-xmp`).
   Saving used to always leave a `*_original` copy of every photo behind, which on a large batch
   doubles the disk space used. It defaults to on and persists via *Save Settings as Defaults*.

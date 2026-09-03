@@ -28,8 +28,9 @@ directly into each photo with `--embed-in-photo`.
 - Works with RAW and standard image formats (CR3, CR2, NEF, JPG, PNG, and more)
 - Generates a title, a concise description, and hierarchical keywords
 - Merges with existing metadata unless you opt-in to overwrite
-- Snaps keywords onto your own Lightroom keyword list, so a run cannot fill your catalog with
-  near-duplicates of terms you already curate
+- Snaps keywords onto your own keyword list, so a run cannot fill your catalog with near-duplicates
+  of terms you already curate, and builds that list for you from the photos you already have
+  (`photo-tagger vocabulary`)
 - Harmonizes each shoot: every frame of the same subject gets the same keyword and the same
   hierarchy, instead of "Osprey" here and "Ospreys" there
 - Works with Ollama, LM Studio, llama.cpp, and any hosted OpenAI-compatible API
@@ -246,6 +247,18 @@ Embed metadata directly into a set of JPEGs:
 ```bash
 photo-tagger -i ./exports --ext jpg --embed-in-photo
 ```
+
+Build a keyword list from the photos you already have, then tag against it:
+
+```bash
+photo-tagger vocabulary -i ~/Pictures -r -o vocabulary.txt --report dropped.csv
+photo-tagger -i ~/Pictures/Shoot --vocabulary vocabulary.txt --vocabulary-strict
+```
+
+The keywords are read from the photos themselves with ExifTool, so it works whatever wrote them:
+Lightroom, digiKam, darktable, Immich, PhotoPrism, Synology Photos, and anything else that writes
+XMP or IPTC. Photos and catalog are left untouched; the output is a text file to review and edit,
+and `--report` names every keyword it dropped and why.
 
 Check your setup before a big run (verifies ExifTool and that the provider serves the model):
 

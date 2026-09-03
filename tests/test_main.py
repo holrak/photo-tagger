@@ -23,6 +23,7 @@ from photo_tagger import (
 )
 from photo_tagger.cli_options import load_defaults
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
+from photo_tagger.vocabulary_build import KeywordCensus
 
 
 if TYPE_CHECKING:
@@ -1349,3 +1350,68 @@ def test_cli_vocabulary_follows_the_output_language(tmp_path: Path) -> None:
     assert options.output_language == "German"
     assert options.vocabulary.fold_plurals is False
     assert options.vocabulary.match("Alles") is None
+
+
+def test_vocabulary_command_builds_a_file_from_the_photos(tmp_path: Path) -> None:
+    """The census reads the photos' own keywords and writes a file the tagger can load."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    output = tmp_path / "vocabulary.txt"
+    report = tmp_path / "dropped.csv"
+    census = KeywordCensus()
+    census.add(["Animal", "Bird"], weight=5)
+    census.add(["One Off"], weight=1)
+
+    with patch.object(main_module, "census_from_photos", return_value=census) as counted:
+        _run_app(
+            [
+                "vocabulary",
+                "--input",
+                str(image),
+                "--output",
+                str(output),
+                "--report",
+                str(report),
+            ],
+        )
+
+    assert counted.call_args.args[0] == [image]
+    written = output.read_text(encoding="utf-8")
+    assert "Animal\nAnimal|Bird\n" in written
+    assert "One Off" not in written
+    assert "One Off,1,rare" in report.read_text(encoding="utf-8")
+
+
+def test_vocabulary_command_reads_a_keyword_export(tmp_path: Path) -> None:
+    """--from-export works without any photos, for a catalog that is not on this machine."""
+    export = tmp_path / "keywords.txt"
+    export.write_text("Animal\n\tBird\nAnimal\n\tBird\n", encoding="utf-8")
+    output = tmp_path / "vocabulary.txt"
+
+    _run_app(["vocabulary", "--from-export", str(export), "--output", str(output)])
+
+    written = output.read_text(encoding="utf-8")
+    assert "Bird" in written
+    assert "keyword export keywords.txt" in written
+
+
+def test_vocabulary_command_exits_1_without_a_source(tmp_path: Path) -> None:
+    """Neither photos nor an export means there is nothing to count."""
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.app(["vocabulary", "--output", str(tmp_path / "out.txt")])
+
+    assert exit_info.value.code == 1
+
+
+def test_vocabulary_command_exits_1_when_no_keywords_are_found(tmp_path: Path) -> None:
+    """An untagged library cannot seed a vocabulary, so it says so instead of writing a file."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    output = tmp_path / "vocabulary.txt"
+
+    with (
+        patch.object(main_module, "census_from_photos", return_value=KeywordCensus()),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(["vocabulary", "--input", str(image), "--output", str(output)])
+
+    assert exit_info.value.code == 1
+    assert not output.exists()

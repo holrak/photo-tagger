@@ -47,6 +47,7 @@ from photo_tagger.pipeline import ProcessingOptions
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
 # below to validate the --provider choices, so the name must exist at class-definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
+from photo_tagger.vocabulary_build import TrimRules
 
 
 if TYPE_CHECKING:
@@ -452,6 +453,67 @@ class ArtifactConfig:
 
 
 @dataclass
+class VocabularyBuildConfig:
+    """Filters the ``vocabulary`` command applies when turning a keyword census into a file."""
+
+    min_uses: Annotated[
+        int,
+        Parameter(
+            name=("--min-uses",),
+            help=(
+                "Keep a keyword only when the library uses it at least this many times. The "
+                "single most useful knob: in a catalog an AI has been writing to, most keywords "
+                "are used once and are one-offs, not vocabulary"
+            ),
+        ),
+    ] = 2
+    max_terms: Annotated[
+        int | None,
+        Parameter(
+            name=("--max-terms",),
+            help=(
+                "Cap the file at this many keywords, dropping the least used first. The default "
+                "keeps it under the 5000 terms above which vocabulary matching gives up its fuzzy "
+                "pass. Pass 0 for no cap"
+            ),
+        ),
+    ] = 4800
+    allow_digits: Annotated[
+        bool,
+        Parameter(
+            name=("--allow-digits",),
+            help=(
+                "Keep keywords containing digits. They are dropped by default because they are "
+                "nearly always measurements or model numbers ('19.5V', '0 Percent Battery') "
+                "rather than subjects"
+            ),
+        ),
+    ] = False
+    flat: Annotated[
+        bool,
+        Parameter(
+            name=("--flat",),
+            help=(
+                "Write bare keywords instead of their hierarchies. Worth using when the source "
+                "hierarchy is not trustworthy, since a vocabulary imposes its own on every photo "
+                "it matches"
+            ),
+        ),
+    ] = False
+    report_file: Annotated[
+        Path | None,
+        Parameter(
+            name=("--report",),
+            validator=validators.Path(file_okay=True, dir_okay=False),
+            help=(
+                "Write a CSV of every dropped keyword, its usage count, and the rule that cut it. "
+                "This is what makes the thresholds tunable rather than a guess"
+            ),
+        ),
+    ] = None
+
+
+@dataclass
 class TelemetryConfig:
     """Anonymous, opt-out usage telemetry toggle."""
 
@@ -592,6 +654,21 @@ def to_processing_options(
         vocabulary=vocabulary,
         vocabulary_strict=output.vocabulary_strict,
         output_language=inference.output_language,
+    )
+
+
+def to_trim_rules(config: VocabularyBuildConfig) -> TrimRules:
+    """
+    Translate the CLI's vocabulary-build group into the builder's own rules.
+
+    Mirrors :func:`to_processing_options`: the schema module owns the flags, the builder owns the
+    behavior, and neither imports the other's vocabulary. ``--max-terms 0`` reads as "no cap",
+    because a cyclopts flag cannot take ``None`` on the command line.
+    """
+    return TrimRules(
+        min_uses=config.min_uses,
+        max_terms=config.max_terms or None,
+        allow_digits=config.allow_digits,
     )
 
 
