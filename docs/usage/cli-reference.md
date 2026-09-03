@@ -225,6 +225,16 @@ The display group controls the progress bar and machine-readable output.
 | `--progress` / `--no-progress` | progress (`true`) | `-`     | Live rich progress bar; auto-disabled when stderr is not a TTY.                                                                                                                                                                              |
 | `--json`                       | `false`           | `-`     | Emit one NDJSON line per processed photo to stdout (`file`, `status`, `from_cache`, `retry`, `title`, `description`, `keywords`, input/output/total tokens, `seconds`). Logs and progress stay on stderr, so stdout pipes cleanly into `jq`. |
 
+## Telemetry
+
+photo-tagger sends one anonymous beacon per run, and one on a crash. It is opt-out and carries no
+photos, paths, filenames, tags, or error messages; see [Telemetry](../telemetry.md) for the exact
+payload and every way to switch it off.
+
+| Flag                             | Default     | Env var                                      | Description                                                                                       |
+| -------------------------------- | ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `--telemetry` / `--no-telemetry` | on (`true`) | `PHOTO_TAGGER_NO_TELEMETRY` / `DO_NOT_TRACK` | Send anonymous usage stats and crash reports. The env vars win over the flag and the config file. |
+
 ## Artifacts
 
 The artifacts group points at side files: a custom prompt, a run summary, a per-photo CSV report, a

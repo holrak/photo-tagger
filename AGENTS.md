@@ -8,8 +8,10 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 existing metadata → build a prompt → call a vision model → merge keywords → write XMP/IPTC. Each
 module owns one slice of that pipeline:
 
-- `main.py` - cyclopts entry point and orchestration (`tag` default command, `doctor` command). Keep
-  it thin: it wires modules together and translates domain errors into exit codes.
+- `main.py` - cyclopts entry point and orchestration (`tag` default command plus the `doctor`,
+  `watch`, and `undo` commands). Keep it thin: it wires modules together and translates domain
+  errors into exit codes. `_RunSetup` holds what a run builds once (agent, cache, report writers,
+  undo journal) and `_process_batch` runs one batch against it, so `tag` and `watch` share a path.
 - `cli_options.py` - the CLI _schema_: the seven `@dataclass` option groups, their config-file
   defaults (`load_defaults`), and the `ProcessingOptions` mapping. New flags go here, not in `main`.
 - `providers.py` - the backend registry. A `ProviderBackend` (Strategy) bundles the per-backend bits
@@ -19,6 +21,11 @@ module owns one slice of that pipeline:
 - `ai.py` - builds the pydantic-ai `Agent` from a backend and runs inference.
 - `pipeline.py` - the batch runner (serial + thread-pool passes, retry pass, usage accounting).
 - `metadata.py` - all ExifTool reads/writes; `keywords.py` - hierarchical-keyword merge logic.
+- `vocabulary.py` - the controlled vocabulary (`--vocabulary`): parse a keyword list, snap generated
+  keywords onto it. `sessions.py` groups a batch into shoots (`--session-gap`) and builds each
+  shoot's vocabulary from its own output; both go through the same matcher.
+- `undo.py` - the per-run write journal and the `undo` command's restore logic; `watch.py` - the
+  polling folder watcher behind the `watch` command.
 - `models.py` - shared data types: `GeneratedMetadata` (the model's schema), `InferenceResult`, and
   `KeywordSet` (the typed value object that replaced the old `dict[str, list[str]]`).
 - `cache.py`, `locking.py`, `image_io.py`, `discovery.py`, `progress.py`, `logging_setup.py`,

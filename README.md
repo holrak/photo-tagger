@@ -15,8 +15,9 @@
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
 [![BuyMeACoffee](https://img.shields.io/badge/%E2%98%95-buymeacoffee-ffdd00?style=flat-square)](https://www.buymeacoffee.com/jbsilva)
 
-Photo Tagger is a command-line helper that asks a vision-language model to analyze your photos and
-writes Lightroom-compatible metadata.
+Photo Tagger asks a vision-language model to analyze your photos and writes Lightroom-compatible
+metadata. Use it as a command-line tool (`photo-tagger`) or as an optional desktop app
+(`photo-tagger gui`); both run the same pipeline and read the same config.
 
 By default it keeps your originals untouched by creating XMP sidecars, but you can embed the updates
 directly into each photo with `--embed-in-photo`.
@@ -26,7 +27,8 @@ directly into each photo with `--embed-in-photo`.
 ## Highlights
 
 - Works with RAW and standard image formats (CR3, CR2, NEF, JPG, PNG, and more)
-- Generates a title, a concise description, and hierarchical keywords
+- Generates a title, a concise description, and hierarchical keywords, in any language you ask for
+  (`--output-language`)
 - Merges with existing metadata unless you opt-in to overwrite
 - Snaps keywords onto your own keyword list, so a run cannot fill your catalog with near-duplicates
   of terms you already curate, and builds that list for you from the photos you already have
@@ -37,8 +39,10 @@ directly into each photo with `--embed-in-photo`.
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Records what each run writes, so `photo-tagger undo` puts a bad batch back
 - Watches a folder and tags photos as they arrive (`photo-tagger watch`)
-- Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow
+- Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow, translated into your own
+  language (English and Brazilian Portuguese ship today)
 - Converts images to compact JPEG bytes to minimize token usage
+- Reports what it did: a JSON run summary, NDJSON on stdout, or a per-photo CSV (`--csv-file`)
 - Generates detailed log files for easy debugging and auditing
 - Highly configurable via CLI flags and environment variables
 
@@ -98,6 +102,8 @@ Environment variables provide defaults so you can keep the CLI concise:
   `FREQUENCY_PENALTY` – fine-tune runtime
 - `PHOTO_TAGGER_EXIFTOOL` – path to the ExifTool binary, for installs not on `PATH` (overrides the
   config file's `exiftool_path`)
+- `PHOTO_TAGGER_LANG` – language of the desktop app's own interface (`en`, `pt_BR`, or `auto`); the
+  language of the generated metadata is `--output-language`, a separate setting
 
 Any CLI flag takes precedence over the environment.
 
@@ -159,8 +165,12 @@ Key options:
 - `-m/--model` – model identifier understood by your provider
 - `--provider` – `ollama`, `lmstudio`, `llamacpp`, or `openai` (defaults to `lmstudio`)
 - `--url` / `--api-key` – override provider endpoint and credentials
+- `--output-language` / `--lang` – language of the generated title, description, and keywords (any
+  language name the model understands, for example `German` or `"Brazilian Portuguese"`)
+- `--hint` – a note about every photo in the run that the model must trust over its own reading of
+  the image, for example `"The animal in these photos is a deer"`
 - `--overwrite-keywords` – replace instead of merge existing keyword metadata
-- `--no-write-title` / `--no-write-description` – skip writing those fields
+- `--no-write-title` / `--no-write-description` / `--no-write-keywords` – skip writing those fields
 - `--no-backup-xmp` – avoid creating `*_original` snapshot before writing
 - `--embed-in-photo` – write metadata directly into the image instead of creating an XMP sidecar
 - `--dry-run` – run the model and log the proposed metadata without writing XMP
@@ -181,6 +191,10 @@ Key options:
 - `--prompt-file PATH` – override the default user prompt with the contents of `PATH`
 - `--summary-file PATH` – write a JSON run summary (token usage, success/failure counts) to `PATH`
   on completion
+- `--csv-file PATH` – write a spreadsheet-friendly report with one row per photo: what was
+  generated, the keywords already on the file, the camera and location EXIF read as context, and
+  per-photo tokens and timing. Rows stream as photos finish, so a stopped run still leaves a valid
+  file
 - `--cache-file PATH` – persistent SQLite cache of model outputs keyed by an image-data hash
   (ExifTool's `ImageDataHash`, which ignores metadata so it survives `--embed-in-photo`) plus
   model+prompt+settings. Reruns skip the model call when nothing relevant has changed
@@ -192,9 +206,11 @@ Key options:
   `jq` or your own tools
 - `--newer-than DATE` / `--older-than DATE` – filter the input batch by file mtime. Accepts ISO 8601
   like `2024-01-01` or `2024-01-01T14:30`; naive timestamps use local time
+- `--no-undo-log` – do not record this run's writes (recording is on by default, and is what
+  `photo-tagger undo` puts back)
 - `--no-telemetry` – turn off anonymous usage telemetry for this run (see [Telemetry](#telemetry))
-- `--jpeg-dimensions`, `--jpeg-quality`, `--temperature`, `--max-tokens`, `--retries` – control
-  inference behavior
+- `--jpeg-dimensions`, `--jpeg-quality`, `--temperature`, `--max-tokens`, `--retries`,
+  `--timeout-seconds`, `--frequency-penalty` – control inference behavior
 
 ### Skipping and resuming
 

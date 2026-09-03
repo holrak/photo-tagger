@@ -86,16 +86,48 @@ flowchart TD
 5. **`analyze_image_with_ai`** sends those bytes to the model with the sampling settings and returns
     a validated `InferenceResult` (title, description, keywords, token usage, seconds). On a miss
     the result is written back to the cache. See [AI providers](ai-providers.md).
-6. **`merge_keywords`** merges the model's keywords with the existing ones. With
+6. **The vocabulary snap** (only with `--vocabulary`) rewrites each generated keyword to the
+    catalog's own spelling and hierarchy, dropping what the catalog lacks under
+    `--vocabulary-strict`. It runs before the cap so the cap counts keywords that will actually be
+    written. See [`vocabulary.py`](../usage/cli-reference.md#controlled-vocabulary).
+7. **`merge_keywords`** merges the model's keywords with the existing ones. With
     `--preserve-keywords` (the default) the existing keywords form the base; with
     `--overwrite-keywords` the base is empty. `--max-keywords` caps how many AI keywords are kept
     before merging.
-7. **`write_metadata`** writes the merged keywords, title, and description through ExifTool, to an
+8. **`write_metadata`** writes the merged keywords, title, and description through ExifTool, to an
     XMP sidecar by default or into the file with `--embed-in-photo`. `--no-write-title` and
-    `--no-write-description` suppress those fields. See [Metadata and keywords](metadata.md).
+    `--no-write-description` suppress those fields. See [Metadata and keywords](metadata.md). The
+    write is recorded in the run's undo journal, which is what `photo-tagger undo` reads back.
 
-With `--dry-run`, steps 1 through 6 still run (so the model is queried and the cache is consulted),
-but step 7 is replaced by a log line previewing the proposed metadata. Nothing is written.
+With `--dry-run`, steps 1 through 7 still run (so the model is queried and the cache is consulted),
+but step 8 is replaced by a log line previewing the proposed metadata. Nothing is written.
+
+## Session mode
+
+With `--session-gap MINUTES` the batch is grouped into shoots by capture time and the write is
+deferred, so a whole session can agree on its keywords before any of it lands on disk.
+
+```mermaid
+flowchart TD
+    A[plan_sessions] --> B{Per session}
+    B --> C[Analyze every photo]
+    C --> D[build_session_vocabulary]
+    D --> E[Snap each photo onto it]
+    E --> F[Write the session]
+    F --> B
+```
+
+Steps 1 to 7 above run as usual, but instead of writing, each photo's analysis is held in a
+`_PendingWrite`. Once the session's last photo is analyzed, its own output becomes a `Vocabulary`
+(majority spelling, majority hierarchy), every held analysis is snapped onto it, and the session is
+written in one burst. The signals that must follow a real write (the `--append-to-skip-file`
+callback and the per-photo `ImageOutcome`) fire from that burst rather than from the analysis.
+
+Sessions run in sequence; the photos inside one still use the thread pool. A write that fails in the
+burst is final rather than retried, because the model work is already done and harmonized: an
+ExifTool failure there is a filesystem problem, not one a second inference clears. Analysis failures
+are retried as usual, and the retry pass applies the session's vocabulary so a recovered photo lands
+on the same terms as the rest of its shoot.
 
 ## Retry pass
 

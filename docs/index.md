@@ -4,28 +4,34 @@ icon: lucide/house
 
 # photo-tagger
 
-photo-tagger is a Python command-line tool that sends each photo to a local vision-language model
-and writes Lightroom-compatible metadata: a title, a short description, and hierarchical keywords.
-By default it leaves your originals untouched, writing an XMP sidecar next to each image instead of
-modifying the file.
+photo-tagger sends each photo to a local vision-language model and writes Lightroom-compatible
+metadata: a title, a short description, and hierarchical keywords. It comes as a command-line tool
+and an optional desktop app, which share one pipeline and one config file. By default it leaves your
+originals untouched, writing an XMP sidecar next to each image instead of modifying the file.
 
 ## Highlights
 
 - Works with RAW and standard formats (CR3, CR2, NEF, DNG, JPG, PNG, and more). RAW files are
     decoded with rawpy/libraw and the rest with Pillow.
 - Generates a `title`, a short `description`, and hierarchical keywords in Lightroom's root-to-leaf
-    pipe form.
+    pipe form, in any language you ask for with `--output-language`.
 - Merges new keywords with existing ones by default, or replaces them with `--overwrite-keywords`.
-- Talks to local Ollama or LM Studio servers, or any hosted OpenAI-compatible API.
+- Snaps generated keywords onto your own Lightroom keyword list with `--vocabulary`, and harmonizes
+    each shoot with `--session-gap` so every frame of one subject gets the same term.
+- Talks to local Ollama, LM Studio, or llama.cpp servers, or any hosted OpenAI-compatible API.
 - A `doctor` command that pre-flights ExifTool and the model provider before a run.
-- Optional PySide6 desktop GUI (`photo-tagger gui`) for a point-and-click workflow.
+- A `watch` command that tags photos as they land in an import folder.
+- An `undo` command that puts back what a run wrote, down to the last sidecar.
+- Optional PySide6 desktop GUI (`photo-tagger gui`) for a point-and-click workflow, translated into
+    English and Brazilian Portuguese.
 - Sends a compact, resized JPEG to the model to save tokens, with configurable dimensions and
     quality.
 - Optional SQLite cache so reruns skip the model call when nothing relevant changed.
 - Processes photos concurrently with a thread pool when the model server can keep up.
 - Skip and resume support: skip already-tagged files, skip names from a list, and append successes
     to a skip file as the run progresses.
-- Optional NDJSON output on stdout, one line per photo, that pipes cleanly into `jq`.
+- Optional NDJSON output on stdout, one line per photo, that pipes cleanly into `jq`, plus a JSON
+    run summary and a per-photo CSV report.
 - Timestamped, rotating log files plus a live progress bar on a TTY.
 - Configurable through CLI flags, environment variables, and a TOML config file.
 
