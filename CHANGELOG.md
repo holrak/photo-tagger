@@ -6,128 +6,66 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-03
+
 ### Added
 
-- `--vocabulary PATH`: restrict generated keywords to a controlled vocabulary, so a run cannot seed
-  a curated Lightroom catalog with near-duplicates of keywords it already has. Reads either shape of
-  Lightroom's *Metadata > Export Keywords*, the `.txt` (indented, with `{synonyms}`) and the `.csv`
-  (the same list behind four option columns), or a plain list of terms and `Animal|Bird|Osprey`
-  paths. A comment needs a space after the hash, so a keyword such as `#Diversity` stays a keyword.
-  Matching ignores case and punctuation, with a conservative fuzzy pass for typos, and every match
-  is rewritten to the file's own spelling **and** hierarchy, including a catalog that keeps its
-  keywords in lower case. Plural folding uses English rules, so it applies only to English output;
-  every other language matches on case, punctuation, synonyms, and the fuzzy pass, which still
-  unifies longer inflections (`Landschaften` with `Landschaft`). The vocabulary is also listed in
-  the prompt, so the model prefers those terms in the first place; that listing is part of the cache
-  namespace, so swapping files starts a fresh cache slice. Past 5,000 terms the run warns that the
-  fuzzy pass is off and the prompt listing is truncated.
+- `--vocabulary PATH`: keep generated keywords inside a controlled vocabulary, so a curated catalog
+  stops collecting near-duplicates. Reads a Lightroom keyword export or a plain list. Matching
+  ignores case, punctuation, and typos, and every match takes the file's own spelling and hierarchy.
+- `--vocabulary-strict`: drop a keyword the vocabulary does not cover instead of writing it as it
+  came.
+- `--session-gap MINUTES`: group the batch into shoots by capture time and make each shoot agree
+  with itself, so forty frames of one bird stop reaching the catalog as `Osprey`, `Ospreys`, and
+  `Bird|Osprey`.
+- `photo-tagger vocabulary`: build that vocabulary from the keywords your library already uses, read
+  off the photos with ExifTool. `--organize` adds an opt-in model pass that folds synonyms and adds
+  a hierarchy. Nothing is written to your photos.
+- `photo-tagger undo`: put back what a run wrote, from the journal every run now records. On by
+  default (`--no-undo-log`).
+- `photo-tagger watch`: tag photos as they arrive, each one once it stops changing.
+- GUI: all of the above, without a terminal. Keyword rules live in **Settings**, the three commands
+  in **Tools**.
+- GUI: **Back** and **Forward** over the photos and folder grids you have visited, as arrows above
+  the pane and in a new **Go** menu. Opening a photo from a thumbnail grid used to be a one-way
+  trip.
 
-- `--vocabulary-strict`: drop generated keywords the vocabulary does not cover instead of writing
-  them as-is. The run summary gains `vocabulary_mapped` (how many keywords were rewritten) and
-  `vocabulary_dropped` (each rejected term and how often it came up), so the vocabulary can grow on
-  purpose rather than by accident.
+### Changed
 
-- `--session-gap MINUTES`: group the batch into shoots (by EXIF capture time, falling back to file
-  mtime) and harmonize each one, so forty frames of the same bird stop landing in the catalog as
-  `Osprey`, `Ospreys`, `Bird|Osprey`, and `Wildlife|Raptor|Osprey`. A session is analyzed in full
-  before anything is written; its own output then becomes its vocabulary, with the majority spelling
-  and the majority hierarchy winning, and close-enough variants (`Закаты` and `Закат`,
-  `Landschaften` and `Landschaft`) folded onto the form the shoot used most. Deriving it from the
-  finished results rather than nudging the model keeps it deterministic: the same batch harmonizes
-  the same way at any `--workers` setting.
+- The HTTP dependency moved from `httpx` to `httpx2`.
 
-- `photo-tagger vocabulary`: build a controlled vocabulary out of the keywords a library already
-  uses, which is what `--vocabulary-strict` needs and what nothing until now could produce. It reads
-  the keywords on the photos themselves through ExifTool, so the application does not matter:
-  digiKam, darktable, Immich, PhotoPrism, Synology Photos and the rest all write XMP/IPTC keywords,
-  while only Lightroom exports a keyword list at all. Usage is counted per photo, hierarchies come
-  from `XMP-lr:HierarchicalSubject`, and `--from-export` reads a Lightroom export instead for a
-  catalog that is not on this machine (its counts are tree occurrences, a weaker signal). The rules
-  are deterministic and reported: keep a keyword used at least `--min-uses` times, drop measurements
-  and sentences, keep one spelling per concept, cap the file with `--max-terms` (default 4800, under
-  the size where matching gives up its fuzzy pass). `--report` writes a CSV naming every dropped
-  keyword and the rule that cut it, so the thresholds can be tuned rather than guessed. Nothing is
-  written to your photos or your catalog.
+### Fixed
 
-- `photo-tagger vocabulary --organize`: an opt-in model pass over the keywords that survived the
-  count, for the two things counting cannot settle. It folds synonyms (`Golden Light` becomes a
-  `{synonym}` of `Golden Hour`, so a photo tagged with it still matches) and gives the list a
-  hierarchy, with the categories chosen once up front so every chunk files against the same set
-  rather than inventing `Animal` in one and `Animals` in the next. It never decides what to keep,
-  and it never invents a keyword: every string it returns is matched back to one that was sent, and
-  anything else is discarded. A chunk that fails leaves its keywords exactly as the deterministic
-  pass left them. Categories do become new parent keywords, so the generated file lists them in its
-  header.
+- `--skip-tagged` and the GUI's **Tagged** column credit every photo that shares one XMP sidecar, so
+  a RAW and JPEG pair no longer reads as half untagged.
+- `>` separates a keyword hierarchy even when mixed with `<`.
+- Keyword files, skip lists, and the prompt file are read as `utf-8-sig`, so a byte-order mark no
+  longer corrupts the first line.
+- `--append-to-skip-file` is safe when two runs share one file.
+- A rejected credential (401 or 403) skips the retry pass instead of paying for a second round of
+  failing requests.
+- Tokens spent on failed calls are counted, so the summary no longer understates spend.
+- Tagging a batch that turns out to be empty no longer truncates the previous `--csv-file` report.
+- `--log-folder` is validated when the flags are parsed, and a logging failure exits cleanly.
+- `photo-tagger doctor` reports its warning about a redirected ExifTool binary.
+- The first run no longer stalls on exit while telemetry probes the hardware.
+- GUI: removing a folder from a large list, quitting the window, and the first drag-and-drop no
+  longer crash.
+- GUI: closing with unsaved proposals asks first.
+- GUI: the window no longer freezes on a folder that is still loading or a metadata scan of a large
+  folder, **Cancel** during a save is honored, and **Clear List** is refused while a save runs.
+- GUI: unchecking a subfolder repaints the folders above it.
+- GUI: a single-photo **Save** reports an ExifTool error instead of dying silently.
+- GUI: a per-photo **hint** no longer enters the shared cache.
 
-  Live testing against local models shaped three of its rules. A model asked only for synonyms folds
-  `Battery Pack` into `Camera Accessories` and `Black` into `Color`, destroying the narrower
-  keyword, and says so however firmly the prompt forbids it; given a `parent` field to name the
-  relation it can actually see, it stops. A group claiming more than three synonyms is refused
-  whole, because at that size it is not a synonym set but a category being poured into one keyword.
-  A category reply far longer than the twenty asked for is the keyword list echoed back, and is
-  refused rather than truncated into noise. The token budget is generous for the same reason: a
-  reasoning model spends thousands of tokens before its first brace, and a tight budget fails every
-  chunk with nothing to show.
+### Security
 
-  Every request asks for no reasoning (`reasoning_effort: "none"`), which servers that do not know
-  the setting ignore. Grouping a list of words is recall rather than deduction, and a reasoning
-  model left to itself deliberates for thousands of tokens over sixty of them. On a local 31B model
-  the setting was the difference between 13 minutes for sixteen keywords and 12 seconds.
-
-- `photo-tagger undo`: put back what a run wrote. Every run now records the files it writes to a
-  small JSON-lines journal under the state directory, so a batch tagged with the wrong prompt or
-  vocabulary is one command to revert: sidecars the run created are deleted, files it overwrote are
-  restored from ExifTool's `*_original` backup. `--list` shows the recorded runs, `--run PATH` picks
-  one, `--dry-run` reports the plan, and `--force` overrides the guard that leaves files edited
-  since the run alone. Recording is on by default (`--no-undo-log` disables it) and journals are
-  pruned to the 50 most recent runs and 90 days.
-
-- `photo-tagger watch`: watch folders and tag photos as they arrive, which is the import-time
-  workflow the tool was missing. Photos already present are tagged first, then each new one as it
-  lands. A file is only tagged once it has stopped changing (unchanged across two scans and at least
-  `--settle` seconds old), so a photo still being copied is left alone. Scanning is a plain
-  directory listing every `--interval` seconds, so it behaves the same on every platform and over
-  network shares, with no new dependency. Every tagging flag applies to each batch, and one agent,
-  cache, and report file are shared by the whole session, while each batch records an undo journal
-  of its own so `photo-tagger undo` puts back the last import and not every import since the watch
-  started; a batch with failures is logged and the watch continues.
-
-- GUI: all five of the above, without a terminal.
-
-  **Settings > Keyword Rules** holds the two that shape what a run writes. A **controlled
-  vocabulary** file is listed in the prompt (so the model prefers the catalog's terms) and snapped
-  onto afterwards (so it writes them whatever the model said), with a strict toggle that drops what
-  the file does not cover; the run's closing line names how many keywords were rewritten and which
-  were dropped. The listing is part of the cache namespace, so swapping files starts a fresh slice
-  instead of replaying keywords chosen under the old one, and snapping happens after the cache
-  lookup, so a vocabulary chosen today also applies to answers stored yesterday. A **session gap**
-  turns on shoot harmonization: every generation is followed by a pass that groups the proposals
-  into shoots and makes each one agree with itself. The CLI does this inside the run, holding a
-  session's writes until it is analyzed; the window writes nothing until you save, so it lands on
-  the proposals, before the review. **Tools > Harmonize Shoots Now** re-runs it after edits.
-
-  **Tools** carries the three that act on a library. **Build Vocabulary** counts the keywords the
-  photos already carry (or reads a Lightroom export), trims them by the same deterministic rules as
-  the command, optionally asks the model to fold synonyms and add a hierarchy, writes the optional
-  drop report, and offers to put the result straight to work. **Watch Folder** polls a folder and
-  generates each photo as it lands; saving is opt-in, because review-before-write is the point of
-  the window and an unattended import is what the CLI's `watch` is for. **Undo Writes** lists every
-  recorded run, previews what putting one back would do, and does it.
-
-  Saves from the window are now recorded in an undo journal too (**Settings > Record Saves for
-  Undo**, on by default), one per save, so `photo-tagger undo` and the dialog cover them and not
-  only CLI runs. The vocabulary, the session gap, and the undo-log toggle persist through *Save
-  Settings as Defaults*, so a CLI run picks up the same rules.
-
-- GUI: **Back** and **Forward** over the places the right-hand pane has shown, as arrows above the
-  pane and in a new **Go** menu with the platform's browser keys. Opening a photo from a folder's
-  thumbnail grid used to be a one-way trip: getting the contact sheet back meant finding the folder
-  row in the tree again, and there was no way at all to return to the photo you were comparing this
-  one against. Back now retraces the route actually taken, photo to photo and photo to grid, and the
-  label beside the arrows names what is open (`Shoot 1 / DSC_0042.NEF`) for when the tree row is
-  scrolled out of sight. **Go > Enclosing Folder** (`Cmd+Up` / `Alt+Up`) covers the case with no
-  route to retrace: a photo picked straight from the tree still jumps to its grid. Photos removed
-  from the list leave the trail with them, so Back never reopens a row that is gone.
+- The LM Studio provider no longer falls back to `OPENAI_API_KEY`. It is the default provider, so a
+  real OpenAI key went as a bearer token to whatever `--url` pointed at.
+- The API key is redacted from provider error logs and messages.
+- CSV report cells that start with `=`, `+`, `-`, or `@` are quoted, so a file name or a generated
+  title cannot run as a spreadsheet formula (CWE-1236).
+- Log files are created owner-only (mode 0600) on POSIX systems.
 
 ## [0.7.0] - 2026-08-08
 
@@ -200,40 +138,6 @@ All notable changes to this project are documented here. The format is based on
   generation no longer leaves the window stuck in the running state; removing photos prunes the
   visible grid and thumbnail cache; bulk actions no longer kick you out of the photo or folder being
   reviewed.
-- GUI: removing a folder from a large list no longer crashes the window (a hard SIGBUS, not a Python
-  traceback). Looking a row up used to walk the tree with a `QTreeWidgetItemIterator`, which PySide
-  never destroys, so every lookup left one registered with Qt's model pointing at a row; emptying
-  the tree then freed those rows without telling it, and the next removal read the freed memory.
-  Rows are now indexed by path, which also removes the stall the walk caused on folders of a few
-  thousand photos.
-- GUI: clicking away from a folder that is still loading no longer freezes the window until the
-  thumbnail in flight finishes decoding (seconds, for a big RAW); unchecking a subfolder now
-  repaints the folders above it instead of leaving them showing a full check; Clear List is refused
-  while a save is running, which used to empty the list under the writer and then report every photo
-  it did write as unsaved; and a metadata scan left running past its grace period no longer tears
-  down the scan started after it.
-- `photo-tagger undo` no longer restores an `*_original` that the run it is undoing never created. A
-  write with backups off passes `-overwrite_original` and leaves no backup, but any copy an earlier
-  run had left next to the photo was recorded as this run's, so undoing put back content that could
-  be months old and destroyed every edit made since.
-- GUI: quitting the window no longer crashes on the way out. `QCloseEvent` was named only in an
-  annotation, so PySide had to build its wrapper type from inside the callback delivering the event,
-  and shiboken does not check whether that succeeded. The drag-and-drop handlers had the same
-  exposure on the first drop.
-- GUI: Cancel is honored during an unattended watch. Cancelling a save used to be undone in the same
-  event-loop turn, writing every photo it had just spared; closing the window during shoot
-  harmonization no longer freezes until ExifTool has read the whole batch.
-- `photo-tagger watch` tags photos whose timestamp is in the future (a camera, card reader or NAS
-  whose clock runs fast, or any copy that preserved the source mtime). They could never satisfy the
-  `--settle` age check, so they were polled forever and silently never tagged.
-- `photo-tagger vocabulary` no longer folds English plurals into every catalog: a German library
-  used to lose one of `Alles` and `Alle` as a "variant" of the other. The command takes
-  `--output-language`, like the rest, and the GUI passes its metadata language. A broken ExifTool
-  now says so instead of reporting a library full of keywords as having none, and a file whose
-  `--organize` chunks failed says which keywords were left ungrouped rather than looking like a
-  considered verdict.
-- Tagging a batch that turns out to be empty no longer truncates the previous `--csv-file` report or
-  makes the model server round-trip it never needed.
 - The `gui` command only suggests installing the `[gui]` extra when PySide6/shiboken6 is actually
   missing; other import errors surface as themselves.
 - A failed cache initialization no longer leaks its SQLite connection.
@@ -447,3 +351,6 @@ Initial release.
 [0.3.0]: https://github.com/jbsilva/photo-tagger/compare/v0.2.2...v0.3.0
 [0.4.0]: https://github.com/jbsilva/photo-tagger/compare/v0.3.0...v0.4.0
 [0.5.0]: https://github.com/jbsilva/photo-tagger/compare/v0.4.0...v0.5.0
+[0.6.0]: https://github.com/jbsilva/photo-tagger/compare/v0.5.0...v0.6.0
+[0.7.0]: https://github.com/jbsilva/photo-tagger/compare/v0.6.0...v0.7.0
+[0.8.0]: https://github.com/jbsilva/photo-tagger/compare/v0.7.0...v0.8.0
