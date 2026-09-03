@@ -255,10 +255,13 @@ if TYPE_CHECKING:
 
 
 _RESOURCES = Path(__file__).parent / "resources"
+# The folder for everything the window writes for itself: the logs, the result cache, and the
+# vocabulary file the builder offers to create.
+_APP_DIR = Path.home() / ".photo-tagger"
 # A stable, cwd-independent place for the GUI's logs. The CLI defaults to ./logs, but a windowed
 # app has no meaningful working directory (it may be launched from Finder with cwd "/"), so the
 # logs live under the user's home where the "Open logs" button can always find them.
-_LOG_FOLDER = Path.home() / ".photo-tagger" / "logs"
+_LOG_FOLDER = _APP_DIR / "logs"
 _PREVIEW_MAX = 640
 _THUMB_MAX = 200  # pixels for the grid thumbnails the model never sees
 _THUMB_SIZE = 160  # icon box in the grid
@@ -281,10 +284,10 @@ _STATUS_COLOR = {FAILED: QColor("#f85149"), SAVED: QColor("#3fb950")}
 
 # The GUI cache lives next to the GUI logs unless the config names a cache_file. Sharing the
 # CLI's default would be wrong: the CLI has no default cache, it only caches when asked.
-_DEFAULT_CACHE_FILE = Path.home() / ".photo-tagger" / "cache.sqlite"
+_DEFAULT_CACHE_FILE = _APP_DIR / "cache.sqlite"
 # Where the vocabulary builder offers to write, next to the logs and the cache. It is only the
 # pre-filled suggestion; the dialog's Choose button puts the file wherever the user keeps theirs.
-_DEFAULT_VOCABULARY_FILE = Path.home() / ".photo-tagger" / "vocabulary.txt"
+_DEFAULT_VOCABULARY_FILE = _APP_DIR / "vocabulary.txt"
 
 _DOCS_URL = "https://jbsilva.github.io/photo-tagger/"
 _PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" placeholder
@@ -4141,7 +4144,11 @@ class MainWindow(QMainWindow):
         if self._build_thread is not None:
             return
         paths = self._item_paths() if self._build_from_photos.isChecked() else []
-        export = Path(text) if (text := self._build_export.text().strip()) else None
+        # Read both optional paths first. An assignment inside the argument list below reads as a
+        # puzzle, and the worker takes twelve arguments already.
+        export_text = self._build_export.text().strip()
+        report_text = self._build_report.text().strip()
+        export = Path(export_text) if export_text else None
         if not paths and export is None:
             self._build_status.setText(
                 _("Pick a source: the photos in the list, a keyword export, or both."),
@@ -4166,7 +4173,7 @@ class MainWindow(QMainWindow):
                 allow_digits=self._build_digits.isChecked(),
             ),
             flat=self._build_flat.isChecked(),
-            report_file=Path(text) if (text := self._build_report.text().strip()) else None,
+            report_file=Path(report_text) if report_text else None,
             organize_workers=self._build_organize_workers.value(),
             provider=self._provider_name() if organizing else None,
             model=self._model.currentText().strip(),
