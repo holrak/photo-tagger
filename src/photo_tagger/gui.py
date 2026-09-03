@@ -297,6 +297,11 @@ _NONE = gettext_noop("(none)")
 # Title of the warning box shown when persisting a setting to the config file fails.
 _CONFIG_SAVE_ERROR_TITLE = gettext_noop("Could not save the config file")
 
+# Button labels every dialog uses. Named once so the catalogs hold one entry each and the dialogs
+# cannot drift apart; the use sites translate them with _() like the other module-level strings.
+_CHOOSE = gettext_noop("Choose...")
+_CLOSE = gettext_noop("Close")
+
 # Right-pane placeholder copy. It adapts to the list: a getting-started nudge while empty, and a
 # "pick a photo" nudge once photos are loaded but none is open. This is what fills the right pane
 # when there is nothing to inspect, instead of an empty (and confusing) detail form.
@@ -1680,7 +1685,7 @@ class MainWindow(QMainWindow):
             tooltip("Check ExifTool and that the provider serves the model."),
         )
         self._test_button.clicked.connect(self._test_connection)
-        close = QPushButton(_("Close"))
+        close = QPushButton(_(_CLOSE))
         close.setDefault(True)
         close.clicked.connect(dialog.accept)
         buttons = QHBoxLayout()
@@ -3666,7 +3671,7 @@ class MainWindow(QMainWindow):
         note.setObjectName("hint")
         note.setWordWrap(True)
         box.addWidget(note)
-        close = QPushButton(_("Close"))
+        close = QPushButton(_(_CLOSE))
         close.setDefault(True)
         close.clicked.connect(dialog.accept)
         buttons = QHBoxLayout()
@@ -3692,7 +3697,7 @@ class MainWindow(QMainWindow):
         self._vocabulary_field = QLineEdit(str(self._vocabulary_path or ""))
         self._vocabulary_field.setReadOnly(True)
         self._vocabulary_field.setPlaceholderText(_("(no vocabulary file)"))
-        choose = QPushButton(_("Choose..."))
+        choose = QPushButton(_(_CHOOSE))
         choose.clicked.connect(self._choose_vocabulary)
         clear = QPushButton(_("Clear"))
         clear.clicked.connect(lambda: self._load_vocabulary(None))
@@ -3916,7 +3921,7 @@ class MainWindow(QMainWindow):
         self._build_button = QPushButton(_("Build"))
         self._build_button.setObjectName("primary")
         self._build_button.clicked.connect(self._start_vocabulary_build)
-        close = QPushButton(_("Close"))
+        close = QPushButton(_(_CLOSE))
         close.clicked.connect(dialog.accept)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -3947,7 +3952,7 @@ class MainWindow(QMainWindow):
                 "machine. Its counts are occurrences in the keyword tree, not photos.",
             ),
         )
-        choose = QPushButton(_("Choose..."))
+        choose = QPushButton(_(_CHOOSE))
         choose.clicked.connect(self._choose_keyword_export)
         row = QHBoxLayout()
         row.addWidget(self._build_export, stretch=1)
@@ -4028,7 +4033,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout(group)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self._build_output = QLineEdit(str(_DEFAULT_VOCABULARY_FILE))
-        output_choose = QPushButton(_("Choose..."))
+        output_choose = QPushButton(_(_CHOOSE))
         output_choose.clicked.connect(self._choose_vocabulary_output)
         output_row = QHBoxLayout()
         output_row.addWidget(self._build_output, stretch=1)
@@ -4043,7 +4048,7 @@ class MainWindow(QMainWindow):
                 "what makes the thresholds tunable rather than a guess.",
             ),
         )
-        report_choose = QPushButton(_("Choose..."))
+        report_choose = QPushButton(_(_CHOOSE))
         report_choose.clicked.connect(self._choose_drop_report)
         report_row = QHBoxLayout()
         report_row.addWidget(self._build_report, stretch=1)
@@ -4239,7 +4244,7 @@ class MainWindow(QMainWindow):
         self._undo_button = QPushButton(_("Undo"))
         self._undo_button.setObjectName("primary")
         self._undo_button.clicked.connect(lambda: self._run_undo(dry_run=False))
-        close = QPushButton(_("Close"))
+        close = QPushButton(_(_CLOSE))
         close.clicked.connect(dialog.accept)
         buttons = QHBoxLayout()
         buttons.addWidget(preview)
@@ -4396,7 +4401,7 @@ class MainWindow(QMainWindow):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self._watch_folder = QLineEdit()
         self._watch_folder.setPlaceholderText(_("(pick a folder)"))
-        choose = QPushButton(_("Choose..."))
+        choose = QPushButton(_(_CHOOSE))
         choose.clicked.connect(self._choose_watch_folder)
         folder_row = QHBoxLayout()
         folder_row.addWidget(self._watch_folder, stretch=1)
