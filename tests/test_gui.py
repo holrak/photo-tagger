@@ -3805,6 +3805,32 @@ def test_watching_can_save_without_reviewing(
     assert saved == [2]
 
 
+def test_cancelling_a_save_does_not_restart_it_under_a_watch(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Cancel must stop the batch, not pause it for one event-loop turn.
+
+    _reset_working puts the photos the save never reached back to READY, which is precisely what
+    _continue_watch treats as "unsaved, write them", so an unattended watch used to rewrite them
+    immediately and the cancel wrote every file anyway.
+    """
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    for path in (a, b):
+        window._items[str(path)].status = WORKING  # noqa: SLF001 - a save is mid-batch
+    saved: list[int] = []
+    monkeypatch.setattr(window, "_run_save", lambda items: saved.append(len(items)))
+    window._watch_settings = WatchSettings(folders=(tmp_path,), save=True)  # noqa: SLF001
+    window._cancelling = True  # noqa: SLF001 - the user pressed Cancel
+
+    window._on_save_finished()  # noqa: SLF001
+
+    assert saved == []
+    assert not window._cancelling  # noqa: SLF001 - and the flag is cleared for the next run
+
+
 def test_watching_leaves_saving_to_the_user_by_default(
     window: gui.MainWindow,
     tmp_path: Path,

@@ -812,6 +812,8 @@ _SCAN_STOP_TIMEOUT_MS = 3000
 _WATCH_STOP_TIMEOUT_MS = 3000
 # And for a vocabulary build, which has no stop hook at all: its model calls run to completion.
 _BUILD_STOP_TIMEOUT_MS = 3000
+# And for shoot harmonization, whose batched capture-time read has no stop hook either.
+_HARMONIZE_STOP_TIMEOUT_MS = 3000
 # Shorter for the grid thumbnails: _stop_thumbs runs on every navigation, so this is the longest
 # the window may sit still when the user clicks away from a folder that is still loading. One
 # decode is uninterruptible, and a big RAW takes seconds, so the wait usually times out.
@@ -3505,7 +3507,14 @@ class MainWindow(QMainWindow):
                 total,
             ).format(saved=self._saved_ok, n=total),
         )
+        cancelled = self._cancelling
         self._cancelling = False
+        if cancelled:
+            # _reset_working just put the photos this batch never reached back to READY, which is
+            # exactly what _continue_watch looks for. Chaining on would rewrite the photos the
+            # user stopped it from writing. The watch itself keeps running: whatever lands next
+            # still queues normally.
+            return
         self._continue_watch()
 
     def _teardown_save_thread(self) -> None:
@@ -3644,9 +3653,14 @@ class MainWindow(QMainWindow):
             )
         else:
             self._status.setText(self._generation_summary())
+        cancelled = self._cancelling
         self._cancelling = False
         self._resort()
         self._teardown_thread()
+        if cancelled:
+            # Same reasoning as the cancelled save: harmonizing and then saving unattended is
+            # more work on the batch the user just stopped.
+            return
         self._after_generation()
 
     def _generation_summary(self) -> str:
@@ -3999,14 +4013,27 @@ class MainWindow(QMainWindow):
         self._continue_watch()
 
     def _teardown_harmonize_thread(self) -> None:
-        """Join the harmonization thread and release both it and its worker."""
-        if self._harmonize_thread is not None:
-            self._harmonize_thread.quit()
-            self._harmonize_thread.wait()
-            self._harmonize_thread.deleteLater()
-            self._harmonize_thread = None
+        """
+        Join the harmonization thread and release both it and its worker.
+
+        Harmonizing reads every photo's capture time in one batched ExifTool call, which has no
+        stop hook and takes as long as it takes: minutes over a network share. Closing the window
+        used to sit out the whole of it with the UI frozen, so detach on a timeout the way the scan
+        and the watch do. The worker only reads, and cutting its connections first means a detached
+        one cannot report back into a window that has moved on.
+        """
         if self._harmonize_worker is not None:
+            self._harmonize_worker.disconnect(self)
             self._harmonize_worker.deleteLater()
+        if self._harmonize_thread is not None:
+            thread = self._harmonize_thread
+            thread.quit()
+            if thread.wait(_HARMONIZE_STOP_TIMEOUT_MS):
+                thread.deleteLater()
+            else:
+                logger.warning("gui_harmonize_stop_timed_out")
+                thread.finished.connect(thread.deleteLater)
+            self._harmonize_thread = None
         self._harmonize_worker = None
 
     # --- building a vocabulary ---------------------------------------------------------------
