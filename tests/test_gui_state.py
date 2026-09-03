@@ -1275,3 +1275,12 @@ def test_merged_config_text_drops_a_cleared_vocabulary(tmp_path: Path) -> None:
 
     cleared = merged_config_text(existing, _config_values())
     assert "vocabulary" not in tomllib.loads(cleared)["output"]
+
+
+def test_harmonize_sessions_skips_a_shoot_with_nothing_generated(tmp_path: Path) -> None:
+    """A shoot whose photos carry no keywords has nothing to agree on, and is left alone."""
+    photo = _photo(tmp_path / "a.jpg", 0)
+
+    result = harmonize_sessions({photo: []}, gap_minutes=30)
+
+    assert (result.sessions, result.keywords) == (1, {})

@@ -27,6 +27,7 @@ import os
 import subprocess  # nosec B404 - only used to reveal a photo in the OS file browser
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -62,9 +63,11 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -80,6 +83,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTextEdit,
@@ -115,7 +119,7 @@ from photo_tagger.config_file import find_config_file, load_config, user_config_
 from photo_tagger.csv_report import write_report
 from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
-from photo_tagger.errors import DiscoveryError, ProviderError
+from photo_tagger.errors import DiscoveryError, PhotoTaggerError, ProviderError
 from photo_tagger.gui_state import (
     ADDED,
     BADGE_FAILED,
@@ -141,14 +145,18 @@ from photo_tagger.gui_state import (
     SORT_STATUS,
     SORT_TAGGED,
     SORT_TYPE,
+    UNDO_OK_ACTIONS,
     WORKING,
     FolderNode,
     GuiConfigValues,
+    HarmonizeResult,
     PhotoItem,
     Proposal,
     SaveJob,
     SaveOptions,
+    WatchSettings,
     apply_proposal,
+    apply_vocabulary,
     build_save_job,
     build_tree,
     config_text_with_language,
@@ -161,9 +169,13 @@ from photo_tagger.gui_state import (
     file_type_label,
     filter_photos,
     format_existing_keywords,
+    harmonize_sessions,
+    harmonize_summary,
     hierarchy_preview,
+    journal_label,
     keyword_diff,
     keywords_to_text,
+    load_vocabulary_file,
     login_shell_path,
     merged_config_text,
     new_paths,
@@ -183,6 +195,11 @@ from photo_tagger.gui_state import (
     tagged_tooltip,
     thumb_badges,
     tooltip,
+    undo_action_label,
+    undo_summary,
+    vocabulary_status,
+    vocabulary_summary,
+    watch_status_text,
     wrap_tooltip,
 )
 from photo_tagger.i18n import _, gettext_noop, ngettext
@@ -200,14 +217,40 @@ from photo_tagger.metadata import (
     read_image_context,
     read_metadata_sources,
     write_metadata,
+    write_target,
 )
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES, ProviderName, get_backend
+from photo_tagger.undo import (
+    UndoError,
+    list_journals,
+    open_journal,
+    read_journal,
+    undo_run,
+)
+from photo_tagger.vocabulary import prompt_with_vocabulary
+from photo_tagger.vocabulary_build import (
+    KeywordCensus,
+    TrimRules,
+    census_from_export,
+    census_from_photos,
+    render_drop_report,
+    render_vocabulary,
+    trim,
+    vocabulary_header,
+)
+from photo_tagger.vocabulary_organize import organize
+from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS, watch_batches
 
 
 if TYPE_CHECKING:
     # Annotation-only on Python 3.14 (lazy), so no runtime import is needed.
     from exiftool import ExifToolHelper
     from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
+
+    from photo_tagger.undo import UndoJournal, UndoResult, WriteRecord
+    from photo_tagger.vocabulary import Vocabulary
+    from photo_tagger.vocabulary_build import TrimResult
+    from photo_tagger.vocabulary_organize import OrganizeStats
 
 
 _RESOURCES = Path(__file__).parent / "resources"
@@ -238,6 +281,9 @@ _STATUS_COLOR = {FAILED: QColor("#f85149"), SAVED: QColor("#3fb950")}
 # The GUI cache lives next to the GUI logs unless the config names a cache_file. Sharing the
 # CLI's default would be wrong: the CLI has no default cache, it only caches when asked.
 _DEFAULT_CACHE_FILE = Path.home() / ".photo-tagger" / "cache.sqlite"
+# Where the vocabulary builder offers to write, next to the logs and the cache. It is only the
+# pre-filled suggestion; the dialog's Choose button puts the file wherever the user keeps theirs.
+_DEFAULT_VOCABULARY_FILE = Path.home() / ".photo-tagger" / "vocabulary.txt"
 
 _DOCS_URL = "https://jbsilva.github.io/photo-tagger/"
 _PAGE_EMPTY = 0  # right-pane stack index for the idle "add or pick a photo" placeholder
@@ -463,12 +509,15 @@ class GenerateWorker(QObject):
         cache_file: Path | None = None,
         output_language: str = DEFAULT_OUTPUT_LANGUAGE,
         hints: dict[str, str] | None = None,
+        vocabulary: Vocabulary | None = None,
+        vocabulary_strict: bool = False,
     ) -> None:
         """
         Store the run parameters; nothing happens until :meth:`run`.
 
         *hints* maps a path (as ``str``) to the photographer's note for that photo; paths without
-        one need no entry.
+        one need no entry. *vocabulary* is listed in the prompt and snapped onto afterwards, exactly
+        as the CLI's ``--vocabulary`` does.
         """
         super().__init__()
         self._provider = provider
@@ -479,6 +528,12 @@ class GenerateWorker(QObject):
         self._cache_file = cache_file
         self._output_language = output_language
         self._hints = hints or {}
+        self._vocabulary = vocabulary
+        self._vocabulary_strict = vocabulary_strict
+        # The vocabulary listing rides in the user prompt (so the model prefers those terms in the
+        # first place), which also puts it in the cache namespace below: swapping vocabularies
+        # starts a fresh slice instead of replaying keywords chosen under the old one.
+        self._prompt = prompt_with_vocabulary(DEFAULT_USER_PROMPT, vocabulary)
         self._stop = False
 
     def stop(self) -> None:
@@ -534,7 +589,11 @@ class GenerateWorker(QObject):
         """Open the result cache for this run, degrading to no cache on any failure."""
         return open_cache(
             self._cache_file,
-            namespace=_gui_cache_namespace(self._model, self._output_language),
+            namespace=_gui_cache_namespace(
+                self._model,
+                self._output_language,
+                user_prompt=self._prompt,
+            ),
         )
 
     def _generate_one(self, agent: object, path: Path, cache: InferenceCache | None) -> Proposal:
@@ -546,7 +605,12 @@ class GenerateWorker(QObject):
         gps_info = {"position": context.gps_position} if context.gps_position else {}
         hint = self._hints.get(str(path), "").strip()
         prompt = build_contextual_prompt(
-            prompt_with_hint(DEFAULT_USER_PROMPT, hint),
+            # The hint goes in before the vocabulary listing, as it does on the CLI, so the two
+            # never reorder the prompt between runs and split the cache.
+            prompt_with_vocabulary(
+                prompt_with_hint(DEFAULT_USER_PROMPT, hint),
+                self._vocabulary,
+            ),
             context.existing_keywords.subject,
             context.location_tags,
             gps_info,
@@ -571,6 +635,20 @@ class GenerateWorker(QObject):
                 safe_cache_put(cache, content_key, inference, file_name=path.name)
         else:
             logger.info("gui_cache_hit", file=path.name)
+        # After the cache, not before it: a cached answer is the model's raw output, so a
+        # vocabulary chosen (or made stricter) since it was stored still applies to it.
+        snapped = apply_vocabulary(
+            inference.keywords,
+            self._vocabulary,
+            strict=self._vocabulary_strict,
+        )
+        if snapped.mapped or snapped.dropped:
+            logger.info(
+                "gui_vocabulary_applied",
+                file=path.name,
+                mapped=snapped.mapped,
+                dropped=snapped.dropped,
+            )
         return Proposal(
             path=path,
             existing_title=existing_title,
@@ -578,7 +656,7 @@ class GenerateWorker(QObject):
             existing_keywords=context.existing_keywords,
             title=inference.title,
             description=inference.description,
-            keywords=list(inference.keywords),
+            keywords=snapped.keywords,
             camera_info=dict(context.camera_info),
             location_tags=dict(context.location_tags),
             gps_position=context.gps_position,
@@ -587,6 +665,8 @@ class GenerateWorker(QObject):
             output_tokens=inference.output_tokens,
             total_tokens=inference.total_tokens,
             seconds=inference.seconds,
+            vocabulary_mapped=snapped.mapped,
+            vocabulary_dropped=snapped.dropped,
         )
 
 
@@ -605,12 +685,20 @@ class SaveWorker(QObject):
     file_done = Signal(str, bool)  # path, write succeeded
     finished = Signal()
 
-    def __init__(self, jobs: list[SaveJob], *, backup: bool, use_sidecar: bool) -> None:
+    def __init__(
+        self,
+        jobs: list[SaveJob],
+        *,
+        backup: bool,
+        use_sidecar: bool,
+        journal: UndoJournal | None = None,
+    ) -> None:
         """Store the resolved write jobs and the two file-level options; nothing runs until run."""
         super().__init__()
         self._jobs = jobs
         self._backup = backup
         self._use_sidecar = use_sidecar
+        self._journal = journal
         self._emitted = 0
         self._stop = False
 
@@ -637,6 +725,10 @@ class SaveWorker(QObject):
         for job in self._jobs:
             if self._stop:
                 return
+            # Whether the target already existed decides how undo reverts this write: restore the
+            # ExifTool backup, or delete the sidecar this save created. Only knowable beforehand.
+            target = write_target(job.path, use_sidecar=self._use_sidecar)
+            existed = target.exists()
             try:
                 ok = write_metadata(
                     job.path,
@@ -650,6 +742,8 @@ class SaveWorker(QObject):
             except Exception as exc:  # noqa: BLE001
                 logger.exception("gui_save_failed", file=job.path.name, error=str(exc))
                 ok = False
+            if ok and self._journal is not None:
+                self._journal.record(job.path, target, created=not existed)
             self._emitted += 1
             self.file_done.emit(str(job.path), ok)
 
@@ -694,6 +788,11 @@ class ThumbnailWorker(QObject):
 # Grace period _stop_scan gives an in-flight batched exiftool call to finish on its own before
 # detaching rather than blocking the caller. Comfortably above a normal scan's duration.
 _SCAN_STOP_TIMEOUT_MS = 3000
+# The same grace period for the folder watcher, which reacts to a stop within a fraction of a
+# second unless it is inside a slow poll (a huge folder, or a network share).
+_WATCH_STOP_TIMEOUT_MS = 3000
+# And for a vocabulary build, which has no stop hook at all: its model calls run to completion.
+_BUILD_STOP_TIMEOUT_MS = 3000
 
 
 class MetadataScanWorker(QObject):
@@ -725,17 +824,231 @@ class MetadataScanWorker(QObject):
         self.finished.emit()
 
 
-def _gui_cache_namespace(model: str, output_language: str) -> str:
+class HarmonizeWorker(QObject):
+    """
+    Groups the finished proposals into shoots and harmonizes each one, off the UI thread.
+
+    Grouping reads every photo's capture time through exiftool, which is a batched read but not an
+    instant one, so it does not belong in a click handler. The window applies the returned keywords
+    to its items when the result arrives.
+    """
+
+    done = Signal(object)  # HarmonizeResult
+    finished = Signal()
+
+    def __init__(
+        self,
+        keywords_by_path: dict[Path, list[str]],
+        *,
+        gap_minutes: float,
+        output_language: str,
+    ) -> None:
+        """Store the generated keywords to harmonize; nothing runs until :meth:`run`."""
+        super().__init__()
+        self._keywords = keywords_by_path
+        self._gap_minutes = gap_minutes
+        self._output_language = output_language
+
+    def run(self) -> None:
+        """Harmonize every session and emit the result, degrading to no change on failure."""
+        try:
+            result = harmonize_sessions(
+                self._keywords,
+                gap_minutes=self._gap_minutes,
+                output_language=self._output_language,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Harmonization is a refinement of proposals that are already usable; a broken
+            # exiftool must not cost the user the run they just waited for.
+            logger.exception("gui_harmonize_failed", error=str(exc))
+            result = HarmonizeResult()
+        self.done.emit(result)
+        self.finished.emit()
+
+
+class VocabularyBuildWorker(QObject):
+    """
+    Builds a controlled vocabulary out of a library's own keywords, off the UI thread.
+
+    The same three steps as ``photo-tagger vocabulary``: count what the photos (or a Lightroom
+    export) carry, trim the count with deterministic rules, and optionally ask the model to fold
+    synonyms and give the list a hierarchy. Only the result file is written; no photo is touched.
+    """
+
+    progress = Signal(str)
+    done = Signal(str, int)  # status message, keywords kept
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(  # noqa: PLR0913  # the source, the rules, the output, and the model are distinct
+        self,
+        paths: list[Path],
+        export_file: Path | None,
+        output: Path,
+        *,
+        rules: TrimRules,
+        flat: bool = False,
+        report_file: Path | None = None,
+        organize_workers: int = 1,
+        provider: ProviderName | None = None,
+        model: str = "",
+        api_base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Store what to read, how to trim it, and where to write it; nothing runs until run."""
+        super().__init__()
+        self._paths = paths
+        self._export_file = export_file
+        self._output = output
+        self._rules = rules
+        self._flat = flat
+        self._report_file = report_file
+        self._organize_workers = organize_workers
+        self._provider = provider
+        self._model = model
+        self._api_base_url = api_base_url
+        self._api_key = api_key
+
+    def run(self) -> None:
+        """Count, trim, optionally organize, and write the file, reporting either way."""
+        try:
+            census, source = self._census()
+            if not census.uses:
+                self.failed.emit(
+                    _("No keywords found: there is nothing to build a vocabulary from."),
+                )
+                self.finished.emit()
+                return
+            result = trim(census, self._rules)
+            stats: OrganizeStats | None = None
+            if self._provider is not None:
+                result, stats = self._organize(result)
+            header = vocabulary_header(
+                source,
+                len(result.kept),
+                len(result.dropped),
+                self._rules,
+                stats,
+            )
+            self._output.write_text(
+                render_vocabulary(result, header=header, flat=self._flat),
+                encoding="utf-8",
+            )
+            if self._report_file is not None:
+                self._report_file.write_text(render_drop_report(result), encoding="utf-8")
+        except PhotoTaggerError as exc:
+            logger.error("gui_vocabulary_build_failed", error=str(exc))
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001 - a broken exiftool or an unwritable path
+            logger.exception("gui_vocabulary_build_crashed", error=str(exc))
+            self.failed.emit(str(exc))
+        else:
+            self.done.emit(
+                _("Wrote {kept} keyword(s) to {file}, dropped {dropped}.").format(
+                    kept=len(result.kept),
+                    file=self._output.name,
+                    dropped=len(result.dropped),
+                ),
+                len(result.kept),
+            )
+        self.finished.emit()
+
+    def _census(self) -> tuple[KeywordCensus, str]:
+        """Count the keywords on the photos, in the export, or in both; also name the source."""
+        census = KeywordCensus()
+        sources: list[str] = []
+        if self._export_file is not None:
+            self.progress.emit(_("Reading {file}...").format(file=self._export_file.name))
+            census.merge(census_from_export(self._export_file.read_text(encoding="utf-8")))
+            sources.append(f"keyword export {self._export_file.name} (counts are tree occurrences)")
+        if self._paths:
+            self.progress.emit(
+                ngettext(
+                    "Reading the keywords on {n} photo...",
+                    "Reading the keywords on {n} photos...",
+                    len(self._paths),
+                ).format(n=len(self._paths)),
+            )
+            photos = census_from_photos(self._paths)
+            census.merge(photos)
+            sources.append(f"{photos.photos} photo(s)")
+        return census, " and ".join(sources)
+
+    def _organize(self, result: TrimResult) -> tuple[TrimResult, OrganizeStats]:
+        """Ask the model to fold synonyms and give the kept keywords a hierarchy."""
+        self.progress.emit(
+            _("Organizing {n} keyword(s) with {model}...").format(
+                n=len(result.kept),
+                model=self._model,
+            ),
+        )
+        return organize(
+            result,
+            provider_name=self._provider,
+            model_name=self._model,
+            api_base_url=self._api_base_url,
+            api_key=self._api_key,
+            workers=self._organize_workers,
+        )
+
+
+class WatchWorker(QObject):
+    """
+    Polls the watched folders for new photos, off the UI thread.
+
+    The same loop the CLI's ``watch`` command runs: a directory listing every few seconds, and a
+    file only counts once it has stopped changing. :meth:`stop` ends it at the next poll, and cuts
+    the wait short, so a Stop button does not have to sit out an interval.
+    """
+
+    batch = Signal(object)  # list[Path]
+    finished = Signal()
+
+    def __init__(self, settings: WatchSettings) -> None:
+        """Store what to watch; nothing runs until :meth:`run`."""
+        super().__init__()
+        self._settings = settings
+        self._stop = False
+
+    def stop(self) -> None:
+        """Ask the loop to end at the next poll."""
+        self._stop = True
+
+    def run(self) -> None:
+        """Emit each settled batch until the watch is stopped."""
+        settings = self._settings
+        try:
+            for batch in watch_batches(
+                list(settings.folders),
+                settings.extensions,
+                recursive=settings.recursive,
+                interval_seconds=settings.interval,
+                settle_seconds=settings.settle,
+                should_stop=lambda: self._stop,
+            ):
+                self.batch.emit(list(batch))
+        except Exception as exc:  # noqa: BLE001
+            # A watch that dies must not take the window with it; the user can start another.
+            logger.exception("gui_watch_failed", error=str(exc))
+        self.finished.emit()
+
+
+def _gui_cache_namespace(
+    model: str,
+    output_language: str,
+    user_prompt: str = DEFAULT_USER_PROMPT,
+) -> str:
     """
     Build the cache namespace for GUI runs: the model plus the GUI's fixed inference settings.
 
     The GUI runs the agent with the library defaults and sends images at ``_PREVIEW_MAX``, so those
     values (not the CLI flags) are what key its cache entries. The metadata language rides along so
-    switching it never replays results generated in the old language.
+    switching it never replays results generated in the old language, and so does the prompt, which
+    carries the controlled vocabulary when there is one.
     """
     return build_cache_namespace(
         model,
-        user_prompt=DEFAULT_USER_PROMPT,
+        user_prompt=user_prompt,
         temperature=DEFAULT_TEMPERATURE,
         max_tokens=DEFAULT_MAX_TOKENS,
         frequency_penalty=DEFAULT_FREQUENCY_PENALTY,
@@ -822,12 +1135,15 @@ class MainWindow(QMainWindow):
         # Telemetry on/off: a persisted Settings-menu choice wins over the config-file default.
         _pref = telemetry.read_gui_pref()
         self._telemetry_enabled = self._defaults.telemetry.enabled if _pref is None else _pref
+        self._init_keyword_rules()
 
         self.setWindowTitle(f"Photo Tagger {__version__}")
         self.setWindowIcon(_app_icon())
         self.resize(1180, 760)
         self.setAcceptDrops(True)
         self._placeholder_pixmap = _make_placeholder()
+        # Where the vocabulary builder last wrote, so a finished build can offer to use it.
+        self._built_vocabulary: Path | None = None
         # Built before the panes: both Save buttons (detail pane and bottom bar) attach it.
         self._save_options_menu = self._build_save_options_menu()
 
@@ -844,16 +1160,22 @@ class MainWindow(QMainWindow):
         splitter.setSizes([500, 680])
         layout.addWidget(splitter, stretch=1)
         layout.addLayout(self._build_bottom_bar())
+        # After the panes: these dialogs read the header and folder-scan widgets when they open.
+        self._keyword_rules_dialog = self._build_keyword_rules_dialog()
+        self._builder_dialog = self._build_vocabulary_dialog()
+        self._undo_dialog = self._build_undo_dialog()
+        self._watch_dialog = self._build_watch_dialog()
         self._build_menus()
         self._refresh_save_tooltips()
         self._show_empty()
+        self._load_vocabulary(self._vocabulary_path, announce=False)
 
     def _init_worker_state(self) -> None:
         """
         Seed the handles for every background job the window runs.
 
-        Four independent jobs, each with its own thread so one never waits on another: generation,
-        saving, grid thumbnails, and the metadata scan.
+        Each job has its own thread so one never waits on another: generation, saving, grid
+        thumbnails, the metadata scan, shoot harmonization, the vocabulary build, and the watcher.
         """
         self._thread: QThread | None = None
         self._worker: GenerateWorker | None = None
@@ -864,12 +1186,43 @@ class MainWindow(QMainWindow):
         # update the Tagged column without re-reading the file.
         self._save_jobs: dict[str, SaveJob] = {}
         self._saved_ok = 0
+        # The undo journal the batch in flight is recording into. None while idle, or when
+        # recording is switched off in Settings.
+        self._save_journal: UndoJournal | None = None
         # When the run in flight started, for the elapsed/remaining readout. None while idle.
         self._run_started: float | None = None
         self._thumb_thread: QThread | None = None
         self._thumb_worker: ThumbnailWorker | None = None
         self._scan_thread: QThread | None = None
         self._scan_worker: MetadataScanWorker | None = None
+        self._harmonize_thread: QThread | None = None
+        self._harmonize_worker: HarmonizeWorker | None = None
+        self._build_thread: QThread | None = None
+        self._build_worker: VocabularyBuildWorker | None = None
+        self._watch_thread: QThread | None = None
+        self._watch_worker: WatchWorker | None = None
+        # What the running watch was started with, and what it has picked up. None while idle.
+        self._watch_settings: WatchSettings | None = None
+        self._watch_added = 0
+        # Photos the watch added while a run was already in flight, generated when it frees up.
+        self._watch_pending: list[str] = []
+
+    def _init_keyword_rules(self) -> None:
+        """
+        Seed the settings that decide which keywords a run ends up writing.
+
+        The vocabulary file itself is read at the end of construction (it is disk IO, and a failure
+        needs the status bar to report it); this only records what was configured.
+        """
+        output = self._defaults.output
+        self._vocabulary_path: Path | None = output.vocabulary
+        self._vocabulary: Vocabulary | None = None
+        self._vocabulary_error = ""
+        self._vocabulary_strict = output.vocabulary_strict
+        self._session_gap = output.session_gap_minutes
+        # What the vocabulary did over the run in flight, for its closing summary line.
+        self._vocabulary_mapped = 0
+        self._vocabulary_dropped: dict[str, int] = {}
 
     def _init_grid_view_state(self) -> None:
         """
@@ -886,7 +1239,7 @@ class MainWindow(QMainWindow):
     # --- construction ----------------------------------------------------------------------
 
     def _build_menus(self) -> None:
-        """Build the menu bar: File actions, a Settings telemetry toggle, and Help."""
+        """Build the menu bar: File actions, the Tools jobs, the Settings toggles, and Help."""
         menubar = self.menuBar()
 
         # Kept on self: QAction.menu() hands out a transient wrapper that shiboken may delete,
@@ -909,7 +1262,24 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
 
-        settings_menu = menubar.addMenu(_("Settings"))
+        self._build_tools_menu(menubar)
+        self._build_settings_menu(menubar)
+
+        help_menu = self._help_menu = menubar.addMenu(_("Help"))
+        help_menu.addAction(
+            _("Documentation"),
+            lambda: QDesktopServices.openUrl(QUrl(_DOCS_URL)),
+        )
+        help_menu.addSeparator()
+        help_menu.addAction(_("Test Connection"), self._test_connection)
+        help_menu.addAction(_("Open Logs"), self._open_logs)
+        help_menu.addSeparator()
+        about_action = help_menu.addAction(_("About Photo Tagger"), self._show_about)
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _build_settings_menu(self, menubar: QMenu) -> None:
+        """Build the Settings menu: the toggles and the two languages, then the config actions."""
+        settings_menu = self._settings_menu = menubar.addMenu(_("Settings"))
         settings_menu.setToolTipsVisible(True)
         self._cache_action = QAction(_("Cache AI Results"), self)
         self._cache_action.setCheckable(True)
@@ -935,6 +1305,27 @@ class MainWindow(QMainWindow):
         )
         self._telemetry_action.toggled.connect(self._on_telemetry_toggled)
         settings_menu.addAction(self._telemetry_action)
+        self._undo_log_action = QAction(_("Record Saves for Undo"), self)
+        self._undo_log_action.setCheckable(True)
+        self._undo_log_action.setChecked(self._defaults.artifacts.undo_log)
+        self._undo_log_action.setToolTip(
+            tooltip(
+                "Record every file a save writes, so Tools > Undo Writes can put it back. On by "
+                "default: the saves worth undoing are the ones nobody planned to.",
+            ),
+        )
+        settings_menu.addAction(self._undo_log_action)
+        settings_menu.addSeparator()
+        keyword_rules = settings_menu.addAction(
+            _("Keyword Rules..."),
+            self._show_keyword_rules,
+        )
+        keyword_rules.setToolTip(
+            tooltip(
+                "The controlled vocabulary generated keywords are snapped onto, and whether the "
+                "keywords of one shoot are made to agree with each other.",
+            ),
+        )
         settings_menu.addSeparator()
         self._build_language_menu(settings_menu)
         self._build_output_language_menu(settings_menu)
@@ -958,17 +1349,42 @@ class MainWindow(QMainWindow):
             ),
         )
 
-        help_menu = self._help_menu = menubar.addMenu(_("Help"))
-        help_menu.addAction(
-            _("Documentation"),
-            lambda: QDesktopServices.openUrl(QUrl(_DOCS_URL)),
+    def _build_tools_menu(self, menubar: QMenu) -> None:
+        """Build the Tools menu: the jobs that act on a whole library rather than one photo."""
+        menu = self._tools_menu = menubar.addMenu(_("Tools"))
+        menu.setToolTipsVisible(True)
+
+        build = menu.addAction(_("Build Vocabulary..."), self._show_vocabulary_builder)
+        build.setToolTip(
+            tooltip(
+                "Write a keyword file out of the keywords your photos already carry, which is what "
+                "the strict vocabulary needs to enforce.",
+            ),
         )
-        help_menu.addSeparator()
-        help_menu.addAction(_("Test Connection"), self._test_connection)
-        help_menu.addAction(_("Open Logs"), self._open_logs)
-        help_menu.addSeparator()
-        about_action = help_menu.addAction(_("About Photo Tagger"), self._show_about)
-        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        self._harmonize_action = menu.addAction(_("Harmonize Shoots Now"), self._harmonize_now)
+        self._harmonize_action.setToolTip(
+            tooltip(
+                "Make the keywords of each shoot agree with each other: the spelling and the "
+                "hierarchy most of the shoot used win for all of it. Runs automatically after "
+                "every generation once a session gap is set (Settings > Keyword Rules).",
+            ),
+        )
+        menu.addSeparator()
+        self._watch_action = menu.addAction(_("Watch Folder..."), self._toggle_watch)
+        self._watch_action.setToolTip(
+            tooltip(
+                "Tag photos as they arrive: point it at the folder your card reader or sync client "
+                "fills, and each new photo joins the list and is generated for review.",
+            ),
+        )
+        menu.addSeparator()
+        undo = menu.addAction(_("Undo Writes..."), self._show_undo_dialog)
+        undo.setToolTip(
+            tooltip(
+                "Put back what a recorded run wrote: sidecars it created are deleted, files it "
+                "overwrote are restored from the ExifTool backup. Covers CLI runs too.",
+            ),
+        )
 
     def _build_language_menu(self, settings_menu: QMenu) -> None:
         """Add the Language submenu: System Default plus every shipped catalog."""
@@ -1094,6 +1510,10 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
+        if self._vocabulary_path is not None:
+            # The language decides whether plurals fold onto their singular, and that shapes the
+            # vocabulary's lookup index, so it has to be built again for the new one.
+            self._load_vocabulary(self._vocabulary_path, announce=False)
         self._status.setText(
             _("Metadata language set to {language} for the next generation.").format(
                 language=normalized,
@@ -1127,6 +1547,10 @@ class MainWindow(QMainWindow):
             use_sidecar=not self._embed.isChecked(),
             backup_xmp=self._backup.isChecked(),
             telemetry_enabled=self._telemetry_enabled,
+            vocabulary=self._vocabulary_path,
+            vocabulary_strict=self._vocabulary_strict,
+            session_gap_minutes=self._session_gap,
+            undo_log=self._undo_log_action.isChecked(),
         )
 
     def _config_target(self) -> Path:
@@ -2218,7 +2642,8 @@ class MainWindow(QMainWindow):
         if folder:
             self._add_inputs([Path(folder)])
 
-    def _add_inputs(self, paths: list[Path]) -> None:
+    def _add_inputs(self, paths: list[Path]) -> list[Path]:
+        """Add the photos under *paths* to the list, returning the ones that were not there yet."""
         found = expand_inputs(
             paths,
             self._extensions.text().strip(),
@@ -2227,12 +2652,13 @@ class MainWindow(QMainWindow):
         fresh = new_paths([Path(p) for p in self._items], found)
         if not fresh:
             self._update_status()
-            return
+            return []
         for path in fresh:
             self._items[str(path)] = PhotoItem(path=path)
         self._rebuild_tree()
         self._update_status()
         self._start_metadata_scan()
+        return fresh
 
     def _remove_selected(self) -> None:
         """Remove every selected row (files, and folders with their contents) from the list."""
@@ -2787,6 +3213,19 @@ class MainWindow(QMainWindow):
         """Report whether at least one write toggle (Title/Description/Keywords) is on."""
         return self._save_options().any_field
 
+    def _open_undo_journal(self) -> UndoJournal | None:
+        """
+        Open a journal for the save about to run, or None when recording is switched off.
+
+        One journal per save, the way the CLI writes one per run: undoing then puts back exactly the
+        batch you regret rather than everything this window has ever written. The file is only
+        created once something is actually recorded.
+        """
+        return open_journal(
+            datetime.now(tz=UTC),
+            enabled=self._undo_log_action.isChecked(),
+        )
+
     def _write_item(self, item: PhotoItem) -> bool:
         """
         Write the item's checked fields to disk; return success.
@@ -2796,6 +3235,10 @@ class MainWindow(QMainWindow):
         """
         options = self._save_options()
         job = build_save_job(item, options)
+        journal = self._open_undo_journal()
+        # Whether the target exists decides how undo reverts this write, and only holds before it.
+        target = write_target(job.path, use_sidecar=options.use_sidecar)
+        existed = target.exists()
         try:
             ok = write_metadata(
                 job.path,
@@ -2809,6 +3252,8 @@ class MainWindow(QMainWindow):
             # as a failed save, not an uncaught exception Qt swallows into the log unseen.
             logger.exception("gui_save_single_failed", error=str(exc), file=str(job.path))
             ok = False
+        if ok and journal is not None:
+            journal.record(job.path, target, created=not existed)
         self._apply_write_result(item, job, ok=ok)
         return ok
 
@@ -2878,10 +3323,12 @@ class MainWindow(QMainWindow):
         )
 
         self._save_thread = QThread(self)
+        self._save_journal = self._open_undo_journal()
         self._save_worker = SaveWorker(
             jobs,
             backup=options.backup,
             use_sidecar=options.use_sidecar,
+            journal=self._save_journal,
         )
         self._save_worker.moveToThread(self._save_thread)
         self._save_thread.started.connect(self._save_worker.run)
@@ -2913,6 +3360,13 @@ class MainWindow(QMainWindow):
         self._save_jobs = {}
         self._resort()
         self._teardown_save_thread()
+        if self._save_journal is not None and self._save_journal.entries:
+            logger.info(
+                "gui_undo_journal_written",
+                file=str(self._save_journal.path),
+                entries=self._save_journal.entries,
+            )
+        self._save_journal = None
         # Last, so the tally is not overwritten by the per-file status refresh above.
         self._status.setText(
             ngettext(
@@ -2928,6 +3382,7 @@ class MainWindow(QMainWindow):
             ).format(saved=self._saved_ok, n=total),
         )
         self._cancelling = False
+        self._continue_watch()
 
     def _teardown_save_thread(self) -> None:
         """Join the save thread and release both it and its worker."""
@@ -2977,6 +3432,8 @@ class MainWindow(QMainWindow):
             # Clear a stale failure banner the moment its photo is re-queued.
             self._update_error_banner(current)
         self._cancelling = False
+        self._vocabulary_mapped = 0
+        self._vocabulary_dropped = {}
         self._set_running(running=True, total=len(items))
         self._status.setText(
             ngettext("Generating {n} photo...", "Generating {n} photos...", len(items)).format(
@@ -2994,6 +3451,8 @@ class MainWindow(QMainWindow):
             cache_file=self._active_cache_file() if use_cache else None,
             output_language=self._output_language,
             hints={str(item.path): item.hint for item in items if item.hint},
+            vocabulary=self._vocabulary,
+            vocabulary_strict=self._vocabulary_strict,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -3007,6 +3466,9 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         apply_proposal(item, proposal)
+        self._vocabulary_mapped += proposal.vocabulary_mapped
+        for term in proposal.vocabulary_dropped:
+            self._vocabulary_dropped[term] = self._vocabulary_dropped.get(term, 0) + 1
         self._session_tagged.add(str(item.path))
         self._refresh_status_cell(item)
         self._advance_progress()
@@ -3058,10 +3520,28 @@ class MainWindow(QMainWindow):
                 ).format(n=reset),
             )
         else:
-            self._status.setText(_("Generation finished."))
+            self._status.setText(self._generation_summary())
         self._cancelling = False
         self._resort()
         self._teardown_thread()
+        self._after_generation()
+
+    def _generation_summary(self) -> str:
+        """Build the closing line of a run: that it finished, plus what the vocabulary did."""
+        finished = _("Generation finished.")
+        summary = vocabulary_summary(self._vocabulary_mapped, self._vocabulary_dropped)
+        return f"{finished} {summary}" if summary else finished
+
+    def _after_generation(self) -> None:
+        """
+        Harmonize the shoots when a session gap is set, then let a running watch carry on.
+
+        Harmonization is what ``--session-gap`` does inside a CLI run; here it lands on the
+        proposals, before the review, so the keywords you see are the ones a save would write.
+        """
+        if self._start_harmonize(announce=False):
+            return  # _on_harmonize_finished picks the chain back up
+        self._continue_watch()
 
     def _reset_working(self) -> int:
         """
@@ -3104,6 +3584,8 @@ class MainWindow(QMainWindow):
         self._retry_button.setEnabled(not running and self._has_failures())
         self._test_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)
+        # Harmonizing rewrites the proposals a run is still producing, so it waits its turn.
+        self._harmonize_action.setEnabled(not running)
         if running:
             self._start_progress(total)
         else:
@@ -3164,6 +3646,933 @@ class MainWindow(QMainWindow):
             self._worker.deleteLater()
         self._worker = None
         self._set_running(running=False)
+
+    # --- keyword rules: the vocabulary and the session gap -----------------------------------
+
+    def _build_keyword_rules_dialog(self) -> QDialog:
+        """Build the dialog holding the two settings that decide which keywords get written."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_("Keyword rules"))
+        dialog.setMinimumWidth(620)
+        box = QVBoxLayout(dialog)
+        box.addWidget(self._build_vocabulary_group())
+        box.addWidget(self._build_session_group())
+        note = QLabel(
+            _(
+                "Kept for this session. Settings > Save Settings as Defaults writes them to the "
+                "config file, which CLI runs read too.",
+            ),
+        )
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        box.addWidget(note)
+        close = QPushButton(_("Close"))
+        close.setDefault(True)
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        box.addLayout(buttons)
+        return dialog
+
+    def _build_vocabulary_group(self) -> QGroupBox:
+        """Build the controlled-vocabulary half of the Keyword rules dialog."""
+        group = QGroupBox(_("Controlled vocabulary"))
+        layout = QVBoxLayout(group)
+        blurb = QLabel(
+            _(
+                "Restrict generated keywords to the terms in a keyword file: every match is "
+                "rewritten to the file's own spelling and hierarchy, so a run cannot fill your "
+                "catalog with near-duplicates of keywords you already have.",
+            ),
+        )
+        blurb.setWordWrap(True)
+        layout.addWidget(blurb)
+
+        self._vocabulary_field = QLineEdit(str(self._vocabulary_path or ""))
+        self._vocabulary_field.setReadOnly(True)
+        self._vocabulary_field.setPlaceholderText(_("(no vocabulary file)"))
+        choose = QPushButton(_("Choose..."))
+        choose.clicked.connect(self._choose_vocabulary)
+        clear = QPushButton(_("Clear"))
+        clear.clicked.connect(lambda: self._load_vocabulary(None))
+        build = QPushButton(_("Build..."))
+        build.setToolTip(tooltip("Write one from the keywords your own photos already carry."))
+        build.clicked.connect(self._show_vocabulary_builder)
+        row = QHBoxLayout()
+        row.addWidget(self._vocabulary_field, stretch=1)
+        row.addWidget(choose)
+        row.addWidget(clear)
+        row.addWidget(build)
+        layout.addLayout(row)
+
+        self._vocabulary_label = QLabel(vocabulary_status(None, None))
+        self._vocabulary_label.setObjectName("hint")
+        self._vocabulary_label.setWordWrap(True)
+        layout.addWidget(self._vocabulary_label)
+
+        self._strict_box = QCheckBox(_("Write only keywords the vocabulary covers"))
+        self._strict_box.setChecked(self._vocabulary_strict)
+        self._strict_box.setToolTip(
+            tooltip(
+                "Drop generated keywords the vocabulary does not have instead of writing them as "
+                "they came. The status bar names what was dropped, so the vocabulary can grow on "
+                "purpose rather than by accident.",
+            ),
+        )
+        self._strict_box.toggled.connect(self._on_strict_toggled)
+        layout.addWidget(self._strict_box)
+        return group
+
+    def _build_session_group(self) -> QGroupBox:
+        """Build the shoot-harmonization half of the Keyword rules dialog."""
+        group = QGroupBox(_("Shoot harmonization"))
+        layout = QVBoxLayout(group)
+        blurb = QLabel(
+            _(
+                "Group photos into shoots separated by this many idle minutes (by capture time, "
+                "falling back to the file date) and make each shoot's keywords agree with itself: "
+                "the spelling and the hierarchy most of the shoot used win for all of it. It runs "
+                "over the proposals after each generation, so you still review before saving.",
+            ),
+        )
+        blurb.setWordWrap(True)
+        layout.addWidget(blurb)
+
+        self._session_gap_box = QDoubleSpinBox()
+        self._session_gap_box.setRange(0.0, 1440.0)
+        self._session_gap_box.setDecimals(0)
+        self._session_gap_box.setSingleStep(15.0)
+        self._session_gap_box.setValue(self._session_gap)
+        self._session_gap_box.setSuffix(_(" minutes"))
+        self._session_gap_box.setSpecialValueText(_("off"))
+        self._session_gap_box.setToolTip(
+            tooltip("Zero treats every photo on its own, which is the default."),
+        )
+        self._session_gap_box.valueChanged.connect(self._on_session_gap_changed)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(_("Split shoots after")))
+        row.addWidget(self._session_gap_box)
+        row.addStretch(1)
+        layout.addLayout(row)
+        return group
+
+    def _show_keyword_rules(self) -> None:
+        """Open the Keyword rules dialog on the values currently in force."""
+        self._vocabulary_field.setText(str(self._vocabulary_path or ""))
+        self._strict_box.setChecked(self._vocabulary_strict)
+        self._session_gap_box.setValue(self._session_gap)
+        self._refresh_vocabulary_label()
+        self._keyword_rules_dialog.exec()
+
+    def _choose_vocabulary(self) -> None:
+        """Pick a keyword file and put it in force for the next generation."""
+        chosen, _filter = QFileDialog.getOpenFileName(
+            self._keyword_rules_dialog,
+            _("Choose a vocabulary file"),
+            str(self._vocabulary_path or ""),
+            _("Keyword files (*.txt *.csv);;All files (*)"),
+        )
+        if chosen:
+            self._load_vocabulary(Path(chosen))
+
+    def _load_vocabulary(self, path: Path | None, *, announce: bool = True) -> None:
+        """
+        Put *path* in force as the controlled vocabulary, or clear it when None.
+
+        A file that cannot be used is kept as the chosen path but not as a vocabulary, so the dialog
+        can show which file was refused and why instead of quietly writing without one.
+        """
+        self._vocabulary_path = path
+        self._vocabulary = None
+        self._vocabulary_error = ""
+        if path is not None:
+            self._vocabulary, self._vocabulary_error = load_vocabulary_file(
+                path,
+                output_language=self._output_language,
+            )
+            if self._vocabulary is None:
+                logger.warning(
+                    "gui_vocabulary_unusable",
+                    file=str(path),
+                    error=self._vocabulary_error,
+                )
+        self._vocabulary_field.setText(str(path or ""))
+        self._refresh_vocabulary_label()
+        if announce or self._vocabulary_error:
+            self._status.setText(
+                vocabulary_status(self._vocabulary_path, self._vocabulary, self._vocabulary_error),
+            )
+
+    def _refresh_vocabulary_label(self) -> None:
+        """Keep the dialog's status line describing the vocabulary actually in force."""
+        self._vocabulary_label.setText(
+            vocabulary_status(self._vocabulary_path, self._vocabulary, self._vocabulary_error),
+        )
+
+    def _on_strict_toggled(self, strict: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
+        """Remember whether keywords outside the vocabulary are dropped."""
+        self._vocabulary_strict = strict
+
+    def _on_session_gap_changed(self, minutes: float) -> None:
+        """Remember the idle gap that separates one shoot from the next."""
+        self._session_gap = minutes
+
+    # --- shoot harmonization -----------------------------------------------------------------
+
+    def _harmonize_now(self) -> None:
+        """Menu action: harmonize the proposals on hand, explaining when there is nothing to do."""
+        if self._session_gap <= 0:
+            self._status.setText(_("Set a session gap first: Settings > Keyword Rules."))
+            return
+        self._start_harmonize()
+
+    def _start_harmonize(self, *, announce: bool = True) -> bool:
+        """
+        Harmonize the generated proposals on a background thread; report whether it started.
+
+        Grouping photos into shoots reads every capture time through exiftool, so it does not run in
+        the click handler. Callers use the return value to know whether to wait for it.
+        """
+        if self._harmonize_thread is not None or self._busy() or self._session_gap <= 0:
+            return False
+        self._commit_current()
+        keywords = {
+            item.path: list(item.keywords) for item in self._items.values() if item.has_proposal
+        }
+        if not keywords:
+            if announce:
+                self._status.setText(harmonize_summary(HarmonizeResult()))
+            return False
+        self._harmonize_thread = QThread(self)
+        self._harmonize_worker = HarmonizeWorker(
+            keywords,
+            gap_minutes=self._session_gap,
+            output_language=self._output_language,
+        )
+        self._harmonize_worker.moveToThread(self._harmonize_thread)
+        self._harmonize_thread.started.connect(self._harmonize_worker.run)
+        self._harmonize_worker.done.connect(self._on_harmonize_done)
+        self._harmonize_worker.finished.connect(self._on_harmonize_finished)
+        self._harmonize_thread.start()
+        return True
+
+    def _on_harmonize_done(self, result: HarmonizeResult) -> None:
+        """Apply the harmonized keywords to their photos and report what moved."""
+        for key, keywords in result.keywords.items():
+            item = self._items.get(key)
+            if item is not None:
+                item.keywords = list(keywords)
+        if self._current is not None and str(self._current.path) in result.keywords:
+            # The open photo's keyword box is showing what harmonization just replaced.
+            self._keywords.setPlainText(keywords_to_text(self._current.keywords))
+        self._status.setText(harmonize_summary(result))
+
+    def _on_harmonize_finished(self) -> None:
+        """Release the harmonization thread, then let a running watch carry on."""
+        if self._closing:
+            return
+        self._teardown_harmonize_thread()
+        self._continue_watch()
+
+    def _teardown_harmonize_thread(self) -> None:
+        """Join the harmonization thread and release both it and its worker."""
+        if self._harmonize_thread is not None:
+            self._harmonize_thread.quit()
+            self._harmonize_thread.wait()
+            self._harmonize_thread.deleteLater()
+            self._harmonize_thread = None
+        if self._harmonize_worker is not None:
+            self._harmonize_worker.deleteLater()
+        self._harmonize_worker = None
+
+    # --- building a vocabulary ---------------------------------------------------------------
+
+    def _build_vocabulary_dialog(self) -> QDialog:
+        """Build the dialog behind Tools > Build Vocabulary."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_("Build a vocabulary"))
+        dialog.setMinimumWidth(660)
+        box = QVBoxLayout(dialog)
+        intro = QLabel(
+            _(
+                "Reads the keywords your photos already carry, keeps the ones that earn their "
+                "place, and writes them as a keyword file to review and edit. Nothing is written "
+                "to your photos.",
+            ),
+        )
+        intro.setWordWrap(True)
+        box.addWidget(intro)
+        box.addWidget(self._build_source_group())
+        box.addWidget(self._build_rules_group())
+        box.addWidget(self._build_organize_group())
+        box.addWidget(self._build_output_group())
+
+        self._build_status = QLabel("")
+        self._build_status.setObjectName("hint")
+        self._build_status.setWordWrap(True)
+        box.addWidget(self._build_status)
+
+        self._build_button = QPushButton(_("Build"))
+        self._build_button.setObjectName("primary")
+        self._build_button.clicked.connect(self._start_vocabulary_build)
+        close = QPushButton(_("Close"))
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self._build_button)
+        box.addLayout(buttons)
+        return dialog
+
+    def _build_source_group(self) -> QGroupBox:
+        """Build the source picker: the photos in the list, a keyword export, or both."""
+        group = QGroupBox(_("Read from"))
+        form = QFormLayout(group)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._build_from_photos = QCheckBox(_("The photos in the list"))
+        self._build_from_photos.setChecked(True)
+        self._build_from_photos.setToolTip(
+            tooltip(
+                "Counts the keywords on the photos themselves, through ExifTool, so any "
+                "application that writes XMP or IPTC counts, not only Lightroom.",
+            ),
+        )
+        form.addRow("", self._build_from_photos)
+        self._build_export = QLineEdit()
+        self._build_export.setPlaceholderText(_("(optional)"))
+        self._build_export.setToolTip(
+            tooltip(
+                "A Lightroom keyword export (.txt or .csv), for a catalog that is not on this "
+                "machine. Its counts are occurrences in the keyword tree, not photos.",
+            ),
+        )
+        choose = QPushButton(_("Choose..."))
+        choose.clicked.connect(self._choose_keyword_export)
+        row = QHBoxLayout()
+        row.addWidget(self._build_export, stretch=1)
+        row.addWidget(choose)
+        form.addRow(_("Keyword export"), row)
+        return group
+
+    def _build_rules_group(self) -> QGroupBox:
+        """Build the deterministic filters that turn the keyword count into a file."""
+        defaults = TrimRules()
+        group = QGroupBox(_("Keep a keyword when"))
+        form = QFormLayout(group)
+        self._build_min_uses = QSpinBox()
+        self._build_min_uses.setRange(1, 1000)
+        self._build_min_uses.setValue(defaults.min_uses)
+        self._build_min_uses.setToolTip(
+            tooltip(
+                "The most useful knob: in a catalog an AI has been writing to, most keywords are "
+                "used once and are one-offs rather than vocabulary.",
+            ),
+        )
+        form.addRow(_("Used at least this often"), self._build_min_uses)
+        self._build_max_terms = QSpinBox()
+        self._build_max_terms.setRange(0, 100_000)
+        self._build_max_terms.setValue(defaults.max_terms or 0)
+        self._build_max_terms.setSpecialValueText(_("no cap"))
+        self._build_max_terms.setToolTip(
+            tooltip(
+                "Caps the file, dropping the least used first. The default keeps it under the "
+                "5000 terms above which matching gives up its fuzzy pass.",
+            ),
+        )
+        form.addRow(_("And the file holds at most"), self._build_max_terms)
+        self._build_digits = QCheckBox(_("Keep keywords containing digits"))
+        self._build_digits.setToolTip(
+            tooltip(
+                "Off by default: a keyword with a digit is nearly always a measurement or a model "
+                "number ('19.5V', '0 Percent Battery') rather than a subject.",
+            ),
+        )
+        form.addRow("", self._build_digits)
+        self._build_flat = QCheckBox(_("Write bare keywords, without their hierarchies"))
+        self._build_flat.setToolTip(
+            tooltip(
+                "Worth using when the source hierarchy is not trustworthy, since a vocabulary "
+                "imposes its own on every photo it matches.",
+            ),
+        )
+        form.addRow("", self._build_flat)
+        return group
+
+    def _build_organize_group(self) -> QGroupBox:
+        """Build the opt-in model pass over the keywords that survived the count."""
+        group = self._build_organize = QGroupBox(_("Organize with the model"))
+        group.setCheckable(True)
+        group.setChecked(False)
+        group.setToolTip(
+            tooltip(
+                "Asks the model for the two things counting cannot settle: which keywords are "
+                "synonyms of each other (folded into one, the rest kept so they still match), and "
+                "what hierarchy the list should have. It never decides what to keep, and never "
+                "invents a keyword. Needs a reachable provider.",
+            ),
+        )
+        form = QFormLayout(group)
+        self._build_organize_workers = QSpinBox()
+        self._build_organize_workers.setRange(1, 16)
+        self._build_organize_workers.setValue(1)
+        self._build_organize_workers.setToolTip(
+            tooltip("Model requests to run at once; the list is sent in chunks."),
+        )
+        form.addRow(_("Requests at once"), self._build_organize_workers)
+        return group
+
+    def _build_output_group(self) -> QGroupBox:
+        """Build the output pickers: the generated file, and the optional drop report."""
+        group = QGroupBox(_("Write to"))
+        form = QFormLayout(group)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._build_output = QLineEdit(str(_DEFAULT_VOCABULARY_FILE))
+        output_choose = QPushButton(_("Choose..."))
+        output_choose.clicked.connect(self._choose_vocabulary_output)
+        output_row = QHBoxLayout()
+        output_row.addWidget(self._build_output, stretch=1)
+        output_row.addWidget(output_choose)
+        form.addRow(_("Vocabulary file"), output_row)
+
+        self._build_report = QLineEdit()
+        self._build_report.setPlaceholderText(_("(optional)"))
+        self._build_report.setToolTip(
+            tooltip(
+                "A CSV naming every dropped keyword, its count, and the rule that cut it. This is "
+                "what makes the thresholds tunable rather than a guess.",
+            ),
+        )
+        report_choose = QPushButton(_("Choose..."))
+        report_choose.clicked.connect(self._choose_drop_report)
+        report_row = QHBoxLayout()
+        report_row.addWidget(self._build_report, stretch=1)
+        report_row.addWidget(report_choose)
+        form.addRow(_("Drop report"), report_row)
+        return group
+
+    def _show_vocabulary_builder(self) -> None:
+        """Open the builder, refreshing the photo count it would read from."""
+        count = len(self._items)
+        self._build_from_photos.setText(
+            ngettext("The {n} photo in the list", "The {n} photos in the list", count).format(
+                n=count,
+            ),
+        )
+        self._build_status.setText("")
+        self._builder_dialog.exec()
+
+    def _choose_keyword_export(self) -> None:
+        """Pick the Lightroom keyword export to count instead of (or as well as) the photos."""
+        chosen, _filter = QFileDialog.getOpenFileName(
+            self._builder_dialog,
+            _("Choose a keyword export"),
+            "",
+            _("Keyword exports (*.txt *.csv);;All files (*)"),
+        )
+        if chosen:
+            self._build_export.setText(chosen)
+
+    def _choose_vocabulary_output(self) -> None:
+        """Pick where the generated vocabulary file is written."""
+        chosen, _filter = QFileDialog.getSaveFileName(
+            self._builder_dialog,
+            _("Write the vocabulary to"),
+            self._build_output.text() or str(_DEFAULT_VOCABULARY_FILE),
+            _("Keyword files (*.txt);;All files (*)"),
+        )
+        if chosen:
+            self._build_output.setText(chosen)
+
+    def _choose_drop_report(self) -> None:
+        """Pick where the CSV of dropped keywords is written."""
+        chosen, _filter = QFileDialog.getSaveFileName(
+            self._builder_dialog,
+            _("Write the drop report to"),
+            self._build_report.text() or "dropped-keywords.csv",
+            _("CSV files (*.csv);;All files (*)"),
+        )
+        if chosen:
+            self._build_report.setText(chosen)
+
+    def _start_vocabulary_build(self) -> None:
+        """Read the builder's choices and run the build on a background thread."""
+        if self._build_thread is not None:
+            return
+        paths = self._item_paths() if self._build_from_photos.isChecked() else []
+        export = Path(text) if (text := self._build_export.text().strip()) else None
+        if not paths and export is None:
+            self._build_status.setText(
+                _("Pick a source: the photos in the list, a keyword export, or both."),
+            )
+            return
+        output = Path(self._build_output.text().strip() or str(_DEFAULT_VOCABULARY_FILE))
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._build_status.setText(str(exc))
+            return
+        self._built_vocabulary = output
+        organizing = self._build_organize.isChecked()
+        self._build_thread = QThread(self)
+        self._build_worker = VocabularyBuildWorker(
+            paths,
+            export,
+            output,
+            rules=TrimRules(
+                min_uses=self._build_min_uses.value(),
+                max_terms=self._build_max_terms.value() or None,
+                allow_digits=self._build_digits.isChecked(),
+            ),
+            flat=self._build_flat.isChecked(),
+            report_file=Path(text) if (text := self._build_report.text().strip()) else None,
+            organize_workers=self._build_organize_workers.value(),
+            provider=self._provider_name() if organizing else None,
+            model=self._model.currentText().strip(),
+            api_base_url=self._url.text().strip() or None,
+            api_key=self._api_key_value(),
+        )
+        self._build_worker.moveToThread(self._build_thread)
+        self._build_thread.started.connect(self._build_worker.run)
+        self._build_worker.progress.connect(self._build_status.setText)
+        self._build_worker.done.connect(self._on_build_done)
+        self._build_worker.failed.connect(self._on_build_failed)
+        self._build_worker.finished.connect(self._on_build_finished)
+        self._build_button.setEnabled(False)
+        self._build_status.setText(_("Working..."))
+        self._build_thread.start()
+
+    def _on_build_done(self, message: str, kept: int) -> None:
+        """Report the finished file and offer to put it straight to work."""
+        if self._closing:
+            # The file is written; the window it would report to is on its way out.
+            return
+        self._build_status.setText(message)
+        self._status.setText(message)
+        if not kept:
+            return
+        reply = QMessageBox.question(
+            self._builder_dialog,
+            _("Use this vocabulary?"),
+            _("Snap the keywords of the next generation onto the file you just built?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._load_vocabulary(self._built_vocabulary)
+
+    def _on_build_failed(self, message: str) -> None:
+        """Report a build that produced nothing, in the dialog and the status bar."""
+        if self._closing:
+            return
+        self._build_status.setText(message)
+        self._status.setText(message)
+
+    def _on_build_finished(self) -> None:
+        """Release the build thread and let the dialog be used again."""
+        if self._closing:
+            return
+        self._teardown_build_thread()
+        self._build_button.setEnabled(True)
+
+    def _teardown_build_thread(self) -> None:
+        """
+        Join the vocabulary-build thread and release both it and its worker.
+
+        A build that is still organizing is a run of model calls that cannot be interrupted, so a
+        thread that does not stop promptly is detached rather than allowed to block the close. It
+        writes one file and exits; nothing it does afterwards touches the window.
+        """
+        if self._build_thread is not None:
+            thread = self._build_thread
+            thread.quit()
+            if thread.wait(_BUILD_STOP_TIMEOUT_MS):
+                thread.deleteLater()
+            else:
+                logger.warning("gui_vocabulary_build_still_running")
+                thread.finished.connect(thread.deleteLater)
+            self._build_thread = None
+        if self._build_worker is not None:
+            self._build_worker.deleteLater()
+        self._build_worker = None
+
+    # --- undo --------------------------------------------------------------------------------
+
+    def _build_undo_dialog(self) -> QDialog:
+        """Build the dialog behind Tools > Undo Writes."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_("Undo writes"))
+        dialog.setMinimumWidth(660)
+        box = QVBoxLayout(dialog)
+        intro = QLabel(
+            _(
+                "Every recorded run, newest first, from this window and from the command line. "
+                "Undoing deletes the sidecars a run created and restores the files it overwrote "
+                "from their ExifTool backup.",
+            ),
+        )
+        intro.setWordWrap(True)
+        box.addWidget(intro)
+
+        self._journal_list = QListWidget()
+        self._journal_list.setMinimumHeight(150)
+        box.addWidget(self._journal_list, stretch=1)
+
+        self._undo_force = QCheckBox(_("Also revert files changed since the run"))
+        self._undo_force.setToolTip(
+            tooltip(
+                "Off by default: a file that changed since the run was edited afterwards, and "
+                "that edit is not this run's to undo.",
+            ),
+        )
+        box.addWidget(self._undo_force)
+
+        self._undo_details = _readonly_box(120)
+        self._undo_details.setPlaceholderText(_("What happened to each file appears here."))
+        box.addWidget(self._undo_details)
+
+        preview = QPushButton(_("Preview"))
+        preview.setToolTip(
+            tooltip("Report what undoing would put back, without touching anything."),
+        )
+        preview.clicked.connect(lambda: self._run_undo(dry_run=True))
+        self._undo_button = QPushButton(_("Undo"))
+        self._undo_button.setObjectName("primary")
+        self._undo_button.clicked.connect(lambda: self._run_undo(dry_run=False))
+        close = QPushButton(_("Close"))
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addWidget(preview)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self._undo_button)
+        box.addLayout(buttons)
+        return dialog
+
+    def _show_undo_dialog(self) -> None:
+        """Open the undo dialog on a freshly-read list of recorded runs."""
+        self._refresh_journals()
+        self._undo_dialog.exec()
+
+    def _refresh_journals(self) -> None:
+        """List the recorded runs, newest first, with how many files each one wrote."""
+        self._journal_list.clear()
+        for path in list_journals():
+            try:
+                entries = len(read_journal(path))
+            except UndoError as exc:  # pragma: no cover - one unreadable journal, not the list
+                logger.warning("gui_journal_unreadable", file=str(path), error=str(exc))
+                continue
+            entry = QListWidgetItem(journal_label(path, entries))
+            entry.setData(_PATH_ROLE, str(path))
+            self._journal_list.addItem(entry)
+        listed = self._journal_list.count()
+        if listed:
+            self._journal_list.setCurrentRow(0)
+        else:
+            self._undo_details.setPlainText(_("No recorded runs to undo."))
+        self._undo_button.setEnabled(bool(listed))
+
+    def _run_undo(self, *, dry_run: bool) -> None:
+        """Put back (or preview putting back) everything the selected run wrote."""
+        entry = self._journal_list.currentItem()
+        if entry is None:
+            self._undo_details.setPlainText(_("Pick a run first."))
+            return
+        try:
+            records = read_journal(Path(entry.data(_PATH_ROLE)))
+        except UndoError as exc:
+            QMessageBox.warning(self._undo_dialog, _("Could not read that run"), str(exc))
+            return
+        if not records:
+            self._undo_details.setPlainText(_("That run recorded no writes."))
+            return
+        if not dry_run and not self._confirm_undo(len(records)):
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            results = undo_run(records, force=self._undo_force.isChecked(), dry_run=dry_run)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._undo_details.setPlainText(_undo_details_text(results, dry_run=dry_run))
+        summary = undo_summary(results)
+        self._status.setText(
+            _("Preview: {summary}").format(summary=summary) if dry_run else summary,
+        )
+        if not dry_run:
+            self._apply_undo_results(records, results)
+            self._refresh_journals()
+
+    def _confirm_undo(self, count: int) -> bool:
+        """Ask before reverting: this rewrites files, and the run may not be the one in mind."""
+        reply = QMessageBox.question(
+            self._undo_dialog,
+            _("Undo this run?"),
+            ngettext(
+                "Put back {n} file? Sidecars the run created are deleted, and files it "
+                "overwrote are restored from their backup.",
+                "Put back {n} files? Sidecars the run created are deleted, and files it "
+                "overwrote are restored from their backup.",
+                count,
+            ).format(n=count),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _apply_undo_results(
+        self,
+        records: list[WriteRecord],
+        results: list[UndoResult],
+    ) -> None:
+        """Put the photos whose writes were reverted back into their pre-save state."""
+        images = {record.target: record.image for record in records}
+        touched = False
+        for result in results:
+            if result.action not in UNDO_OK_ACTIONS:
+                continue
+            item = self._items.get(images.get(str(result.target), ""))
+            if item is None:
+                continue
+            # What is on the file changed under us, so everything read from it is stale: the
+            # proposal is still worth keeping, the file's own metadata is not.
+            item.status = READY if item.has_proposal else PENDING
+            item.known_fields = None
+            item.loaded = False
+            item.sources_read = False
+            self._refresh_status_cell(item)
+            touched = True
+        if not touched:
+            return
+        self._start_metadata_scan()
+        if self._current is not None:
+            self._show_item(self._current)
+
+    # --- watching a folder ---------------------------------------------------------------------
+
+    def _build_watch_dialog(self) -> QDialog:
+        """Build the dialog behind Tools > Watch Folder."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_("Watch a folder"))
+        dialog.setMinimumWidth(600)
+        box = QVBoxLayout(dialog)
+        intro = QLabel(
+            _(
+                "Point this at the folder your card reader, tethered capture, or sync client "
+                "fills. Photos already there are picked up first, then each new one as it lands.",
+            ),
+        )
+        intro.setWordWrap(True)
+        box.addWidget(intro)
+        box.addLayout(self._build_watch_form())
+
+        self._watch_generate = QCheckBox(_("Generate each new photo"))
+        self._watch_generate.setChecked(True)
+        box.addWidget(self._watch_generate)
+        self._watch_save = QCheckBox(_("Save it too, without reviewing"))
+        self._watch_save.setToolTip(
+            tooltip(
+                "Off by default: the window is built around reviewing before writing. Turn it on "
+                "for an unattended import, where it behaves like the CLI's watch command.",
+            ),
+        )
+        box.addWidget(self._watch_save)
+
+        start = QPushButton(_("Start Watching"))
+        start.setObjectName("primary")
+        start.clicked.connect(self._start_watch_from_dialog)
+        cancel = QPushButton(_("Cancel"))
+        cancel.clicked.connect(dialog.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(start)
+        box.addLayout(buttons)
+        return dialog
+
+    def _build_watch_form(self) -> QFormLayout:
+        """Build the watch dialog's form: which folder to poll, how often, and how long to wait."""
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._watch_folder = QLineEdit()
+        self._watch_folder.setPlaceholderText(_("(pick a folder)"))
+        choose = QPushButton(_("Choose..."))
+        choose.clicked.connect(self._choose_watch_folder)
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(self._watch_folder, stretch=1)
+        folder_row.addWidget(choose)
+        form.addRow(_("Folder"), folder_row)
+
+        self._watch_recursive = QCheckBox(_("Include subfolders"))
+        self._watch_recursive.setChecked(self._recursive.isChecked())
+        form.addRow("", self._watch_recursive)
+
+        self._watch_interval = QDoubleSpinBox()
+        self._watch_interval.setRange(1.0, 3600.0)
+        self._watch_interval.setDecimals(0)
+        self._watch_interval.setValue(DEFAULT_INTERVAL_SECONDS)
+        self._watch_interval.setSuffix(_(" seconds"))
+        self._watch_interval.setToolTip(
+            tooltip(
+                "How often the folder is listed. Polling behaves the same on every platform and "
+                "over network shares.",
+            ),
+        )
+        form.addRow(_("Check every"), self._watch_interval)
+
+        self._watch_settle = QDoubleSpinBox()
+        self._watch_settle.setRange(0.0, 600.0)
+        self._watch_settle.setDecimals(0)
+        self._watch_settle.setValue(DEFAULT_SETTLE_SECONDS)
+        self._watch_settle.setSuffix(_(" seconds"))
+        self._watch_settle.setToolTip(
+            tooltip(
+                "How long a file must sit unchanged before it is picked up, so a photo still "
+                "being copied is left alone until the copy finishes.",
+            ),
+        )
+        form.addRow(_("Settle for"), self._watch_settle)
+        return form
+
+    def _choose_watch_folder(self) -> None:
+        """Pick the folder to watch."""
+        folder = QFileDialog.getExistingDirectory(
+            self._watch_dialog,
+            _("Choose a folder to watch"),
+            self._watch_folder.text(),
+        )
+        if folder:
+            self._watch_folder.setText(folder)
+
+    def _toggle_watch(self) -> None:
+        """Stop the running watch, or open the dialog to start one."""
+        if self._watch_settings is not None:
+            self._stop_watch()
+            return
+        self._watch_dialog.exec()
+
+    def _start_watch_from_dialog(self) -> None:
+        """Turn the dialog's choices into a watch and start it."""
+        folder = self._watch_folder.text().strip()
+        if not folder:
+            QMessageBox.warning(
+                self._watch_dialog,
+                _("Pick a folder"),
+                _("Choose the folder to watch first."),
+            )
+            return
+        self._watch_dialog.accept()
+        self._start_watch(
+            WatchSettings(
+                folders=(Path(folder),),
+                extensions=self._extensions.text().strip(),
+                recursive=self._watch_recursive.isChecked(),
+                interval=self._watch_interval.value(),
+                settle=self._watch_settle.value(),
+                generate=self._watch_generate.isChecked(),
+                save=self._watch_save.isChecked(),
+            ),
+        )
+
+    def _start_watch(self, settings: WatchSettings) -> None:
+        """Poll *settings*' folders on a background thread until the watch is stopped."""
+        if self._watch_thread is not None:
+            return
+        self._watch_settings = settings
+        self._watch_added = 0
+        self._watch_pending = []
+        self._watch_thread = QThread(self)
+        self._watch_worker = WatchWorker(settings)
+        self._watch_worker.moveToThread(self._watch_thread)
+        self._watch_thread.started.connect(self._watch_worker.run)
+        self._watch_worker.batch.connect(self._on_watch_batch)
+        self._watch_worker.finished.connect(self._on_watch_finished)
+        self._watch_thread.start()
+        self._watch_action.setText(_("Stop Watching"))
+        self._status.setText(watch_status_text(settings, added=0))
+        logger.info(
+            "gui_watch_started",
+            folders=[str(folder) for folder in settings.folders],
+            interval=settings.interval,
+            generate=settings.generate,
+            save=settings.save,
+        )
+
+    def _on_watch_batch(self, paths: list[Path]) -> None:
+        """Add the photos a poll found and queue them for generation when asked to."""
+        settings = self._watch_settings
+        if settings is None:
+            return
+        fresh = self._add_inputs(list(paths))
+        if not fresh:
+            return
+        self._watch_added += len(fresh)
+        self._status.setText(watch_status_text(settings, added=self._watch_added))
+        if not settings.generate:
+            return
+        self._watch_pending += [str(path) for path in fresh]
+        if not self._busy():
+            self._generate_watched()
+
+    def _generate_watched(self) -> None:
+        """Run the model on the photos the watch queued, skipping any already dealt with."""
+        queued, self._watch_pending = self._watch_pending, []
+        targets = [
+            item
+            for key in queued
+            if (item := self._items.get(key)) is not None and item.status == PENDING
+        ]
+        if targets:
+            self._run_generation(targets)
+
+    def _continue_watch(self) -> None:
+        """After a run: save unattended when the watch asks for it, then take what has landed."""
+        settings = self._watch_settings
+        if settings is None or self._busy():
+            return
+        unsaved = [
+            item for item in self._items.values() if item.has_proposal and item.status == READY
+        ]
+        if settings.save and self._write_fields_chosen() and unsaved:
+            self._run_save(unsaved)
+            return
+        if self._watch_pending:
+            self._generate_watched()
+
+    def _on_watch_finished(self) -> None:
+        """Clean up after a watch that ended on its own (an error, or a stop already asked for)."""
+        if self._closing:
+            return
+        self._stop_watch()
+
+    def _stop_watch(self) -> None:
+        """End the watch and put the menu action back to offering a new one."""
+        if self._watch_worker is not None:
+            self._watch_worker.stop()
+        self._teardown_watch_thread()
+        self._watch_settings = None
+        self._watch_pending = []
+        if not self._closing:
+            self._watch_action.setText(_("Watch Folder..."))
+            self._status.setText(_("Stopped watching."))
+
+    def _teardown_watch_thread(self) -> None:
+        """Join the watch thread and release both it and its worker."""
+        if self._watch_worker is not None:
+            self._watch_worker.deleteLater()
+        if self._watch_thread is not None:
+            thread = self._watch_thread
+            thread.quit()
+            if thread.wait(_WATCH_STOP_TIMEOUT_MS):
+                thread.deleteLater()
+            else:
+                # Still inside a poll: a huge folder, or a network share that is not answering.
+                # Detach rather than block the caller (a Stop click, or closeEvent); the worker
+                # only lists directories, so leaving it to finish costs nothing.
+                logger.warning("gui_watch_stop_timed_out")
+                thread.finished.connect(thread.deleteLater)
+            self._watch_thread = None
+        self._watch_worker = None
 
     # --- providers and diagnostics ---------------------------------------------------------
 
@@ -3304,10 +4713,15 @@ class MainWindow(QMainWindow):
             self._worker.stop()
         if self._save_worker is not None:
             self._save_worker.stop()
+        if self._watch_worker is not None:
+            self._watch_worker.stop()
         self._stop_thumbs()
         self._stop_scan()
         self._teardown_thread()
         self._teardown_save_thread()
+        self._teardown_harmonize_thread()
+        self._teardown_watch_thread()
+        self._teardown_build_thread()
         self._emit_telemetry()
         super().closeEvent(event)
 
@@ -3460,6 +4874,15 @@ def _check_results_html(results: list[CheckResult]) -> str:
         detail = html.escape(result.detail)
         blocks.append(f'{mark} <b>{name}</b><br><span style="color:#8a8a8a;">{detail}</span>')
     return "<br><br>".join(blocks)
+
+
+def _undo_details_text(results: list[UndoResult], *, dry_run: bool) -> str:
+    """Render one line per recorded write: what happened to it, and why when it was left alone."""
+    lines = [_("What undoing would do:") if dry_run else _("What was undone:")]
+    for result in results:
+        detail = f" ({result.detail})" if result.detail and not dry_run else ""
+        lines.append(f"  {undo_action_label(result.action)}: {result.target.name}{detail}")
+    return "\n".join(lines)
 
 
 def _diff_html(diff: list[tuple[str, str]]) -> str:

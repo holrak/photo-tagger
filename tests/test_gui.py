@@ -41,10 +41,15 @@ from photo_tagger.gui_state import (
     WORKING,
     Proposal,
     SaveJob,
+    WatchSettings,
 )
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE, ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
+from photo_tagger.undo import list_journals, read_journal
+from photo_tagger.vocabulary import Vocabulary
+from photo_tagger.vocabulary_build import KeywordCensus, TrimRules
+from photo_tagger.vocabulary_organize import OrganizeStats
 
 
 @pytest.fixture(scope="module")
@@ -1884,12 +1889,26 @@ def test_on_file_done_applies_proposal_to_item(window: gui.MainWindow, tmp_path:
 # ---------------------------------------------------------------------------
 
 
-def test_menu_bar_has_file_settings_help(window: gui.MainWindow) -> None:
-    """The window carries a real menu bar with File, Settings, and Help menus."""
+def test_menu_bar_has_file_tools_settings_help(window: gui.MainWindow) -> None:
+    """The window carries a real menu bar with File, Tools, Settings, and Help menus."""
     titles = [action.text() for action in window.menuBar().actions()]
     assert "File" in titles
+    assert "Tools" in titles
     assert "Settings" in titles
     assert "Help" in titles
+
+
+def test_tools_menu_offers_every_library_job(window: gui.MainWindow) -> None:
+    """Building, harmonizing, watching, and undoing all live one click away."""
+    entries = [action.text() for action in window._tools_menu.actions()]  # noqa: SLF001
+    assert entries == [
+        "Build Vocabulary...",
+        "Harmonize Shoots Now",
+        "",  # separator
+        "Watch Folder...",
+        "",  # separator
+        "Undo Writes...",
+    ]
 
 
 def test_telemetry_toggle_defaults_on_and_persists(window: gui.MainWindow) -> None:
@@ -3084,3 +3103,717 @@ def test_description_boxes_grow_only_with_content(
     grown = window._description.minimumHeight()  # noqa: SLF001
     assert grown > short
     assert grown <= 140  # noqa: PLR2004 - the documented cap
+
+
+# ---------------------------------------------------------------------------
+# Controlled vocabulary
+# ---------------------------------------------------------------------------
+
+
+def _keyword_file(tmp_path: Path, text: str = "Animal|Bird|Osprey\nSunset\n") -> Path:
+    """Write a small vocabulary file, the shape a Lightroom export or a build produces."""
+    path = tmp_path / "keywords.txt"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_worker_snaps_keywords_onto_the_vocabulary(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generated keyword comes back spelled and filed the way the catalog has it."""
+    _stub_generation(monkeypatch)
+    monkeypatch.setattr(
+        gui,
+        "analyze_image_with_ai",
+        lambda **_k: InferenceResult(title="T", description="D", keywords=["ospreys", "Tractor"]),
+    )
+    vocabulary = Vocabulary.from_entries(["Animal|Bird|Osprey"])
+    proposals: list[Proposal] = []
+    worker = gui.GenerateWorker("lmstudio", "m", None, [Path("/a.jpg")], vocabulary=vocabulary)
+    worker.file_done.connect(proposals.append)
+
+    worker.run()
+
+    assert proposals[0].keywords == ["Osprey<Bird<Animal", "Tractor"]
+    assert proposals[0].vocabulary_mapped == 1
+    assert proposals[0].vocabulary_dropped == []
+
+
+def test_worker_strict_vocabulary_drops_what_the_catalog_lacks(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strict mode reports the rejects, so the vocabulary can grow on purpose."""
+    _stub_generation(monkeypatch)
+    monkeypatch.setattr(
+        gui,
+        "analyze_image_with_ai",
+        lambda **_k: InferenceResult(title="T", description="D", keywords=["Osprey", "Tractor"]),
+    )
+    proposals: list[Proposal] = []
+    worker = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [Path("/a.jpg")],
+        vocabulary=Vocabulary.from_entries(["Osprey"]),
+        vocabulary_strict=True,
+    )
+    worker.file_done.connect(proposals.append)
+
+    worker.run()
+
+    assert proposals[0].keywords == ["Osprey"]
+    assert proposals[0].vocabulary_dropped == ["Tractor"]
+
+
+def test_worker_lists_the_vocabulary_in_the_prompt(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model is told the catalog's terms, so it prefers them before any snapping."""
+    _stub_generation(monkeypatch)
+    prompts: list[str] = []
+
+    def capture(**kwargs: object) -> InferenceResult:
+        prompts.append(str(kwargs["user_prompt"]))
+        return InferenceResult(title="T", description="D", keywords=[])
+
+    monkeypatch.setattr(gui, "analyze_image_with_ai", capture)
+    worker = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [Path("/a.jpg")],
+        vocabulary=Vocabulary.from_entries(["Animal|Bird|Osprey"]),
+    )
+
+    worker.run()
+
+    assert "Controlled Vocabulary" in prompts[0]
+    assert "Animal > Bird > Osprey" in prompts[0]
+
+
+def test_vocabulary_is_part_of_the_cache_namespace(qapp: QApplication) -> None:
+    """Swapping vocabularies starts a fresh cache slice instead of replaying the old keywords."""
+    plain = gui.GenerateWorker("lmstudio", "m", None, [])
+    with_vocabulary = gui.GenerateWorker(
+        "lmstudio",
+        "m",
+        None,
+        [],
+        vocabulary=Vocabulary.from_entries(["Osprey"]),
+    )
+    namespace = gui._gui_cache_namespace  # noqa: SLF001
+    assert namespace("m", "English", plain._prompt) != namespace(  # noqa: SLF001
+        "m",
+        "English",
+        with_vocabulary._prompt,  # noqa: SLF001
+    )
+
+
+def test_run_generation_hands_the_vocabulary_to_the_worker(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the Keyword rules dialog set is what the run uses."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": photo})
+    window._load_vocabulary(_keyword_file(tmp_path))  # noqa: SLF001
+    window._strict_box.setChecked(True)  # noqa: SLF001
+    monkeypatch.setattr(gui.QThread, "start", lambda *_a, **_k: None)
+
+    window._run_generation([window._items[str(photo)]])  # noqa: SLF001
+
+    worker = window._worker  # noqa: SLF001
+    assert worker is not None
+    assert worker._vocabulary is not None  # noqa: SLF001
+    assert worker._vocabulary.match("ospreys") == "Osprey"  # noqa: SLF001
+    assert worker._vocabulary_strict is True  # noqa: SLF001
+
+
+def test_loading_an_unusable_vocabulary_says_why(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """A file with no keywords in it is refused, and the window says so rather than writing."""
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# just a comment\n", encoding="utf-8")
+
+    window._load_vocabulary(empty)  # noqa: SLF001
+
+    assert window._vocabulary is None  # noqa: SLF001
+    assert "no keywords" in window._status.text()  # noqa: SLF001
+    assert "no keywords" in window._vocabulary_label.text()  # noqa: SLF001
+
+
+def test_clearing_the_vocabulary_writes_keywords_as_they_come(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Clearing is how you get the model's own wording back."""
+    window._load_vocabulary(_keyword_file(tmp_path))  # noqa: SLF001
+    assert window._vocabulary is not None  # noqa: SLF001
+
+    window._load_vocabulary(None)  # noqa: SLF001
+
+    assert window._vocabulary_path is None  # noqa: SLF001
+    assert window._vocabulary_field.text() == ""  # noqa: SLF001
+    assert "No vocabulary" in window._vocabulary_label.text()  # noqa: SLF001
+
+
+def test_generation_summary_reports_what_the_vocabulary_changed(
+    window: gui.MainWindow,
+) -> None:
+    """The closing status line of a run names the rejected terms, not just a count."""
+    window._vocabulary_mapped = 2  # noqa: SLF001
+    window._vocabulary_dropped = {"Tractor": 3}  # noqa: SLF001
+
+    summary = window._generation_summary()  # noqa: SLF001
+
+    assert summary.startswith("Generation finished.")
+    assert "2 keywords rewritten" in summary
+    assert "Tractor" in summary
+
+
+def test_keyword_rules_persist_to_the_config_file(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Save Settings as Defaults carries the rules over to CLI runs too."""
+    listing = _keyword_file(tmp_path)
+    window._load_vocabulary(listing)  # noqa: SLF001
+    window._strict_box.setChecked(True)  # noqa: SLF001
+    window._session_gap_box.setValue(45.0)  # noqa: SLF001
+
+    values = window._current_config_values()  # noqa: SLF001
+
+    assert values.vocabulary == listing
+    assert values.vocabulary_strict is True
+    assert values.session_gap_minutes == 45.0  # noqa: PLR2004 - the value just set
+
+
+# ---------------------------------------------------------------------------
+# Shoot harmonization
+# ---------------------------------------------------------------------------
+
+
+def _drain_harmonize(window: gui.MainWindow, timeout: float = 10.0) -> None:
+    """Pump the event loop until the background harmonization finishes."""
+    deadline = time.monotonic() + timeout
+    while window._harmonize_thread is not None:  # noqa: SLF001
+        assert time.monotonic() < deadline, "the harmonization never finished"
+        QApplication.processEvents()
+
+
+def test_harmonizing_makes_a_shoot_agree_with_itself(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two frames of one bird stop landing in the catalog as two keywords."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    window._items[str(a)].keywords = ["Osprey"]  # noqa: SLF001
+    window._items[str(b)].keywords = ["Ospreys"]  # noqa: SLF001
+    monkeypatch.setattr("photo_tagger.sessions.read_capture_times", lambda *_a, **_k: {})
+    window._session_gap = 60.0  # noqa: SLF001
+
+    assert window._start_harmonize() is True  # noqa: SLF001
+    _drain_harmonize(window)
+
+    assert window._items[str(b)].keywords == ["Osprey"]  # noqa: SLF001
+    assert "harmonized" in window._status.text()  # noqa: SLF001
+
+
+def test_harmonize_now_needs_a_session_gap(window: gui.MainWindow) -> None:
+    """Without a gap there are no shoots to harmonize, so the window says what to set."""
+    window._session_gap = 0.0  # noqa: SLF001
+
+    window._harmonize_now()  # noqa: SLF001
+
+    assert window._harmonize_thread is None  # noqa: SLF001
+    assert "session gap" in window._status.text()  # noqa: SLF001
+
+
+def test_harmonizing_with_nothing_generated_says_so(window: gui.MainWindow) -> None:
+    """Harmonization works on proposals, so an empty list is a nudge rather than a no-op."""
+    window._session_gap = 60.0  # noqa: SLF001
+
+    assert window._start_harmonize() is False  # noqa: SLF001
+    assert "generate some photos first" in window._status.text()  # noqa: SLF001
+
+
+def test_a_finished_run_harmonizes_when_a_gap_is_set(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI harmonizes inside the run; the window does it to the proposals, before review."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    window._items[str(a)].keywords = ["Sunset"]  # noqa: SLF001
+    window._items[str(b)].keywords = ["Sunsets"]  # noqa: SLF001
+    monkeypatch.setattr("photo_tagger.sessions.read_capture_times", lambda *_a, **_k: {})
+    window._session_gap = 60.0  # noqa: SLF001
+
+    window._after_generation()  # noqa: SLF001
+    _drain_harmonize(window)
+
+    assert window._items[str(b)].keywords == ["Sunset"]  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Undo
+# ---------------------------------------------------------------------------
+
+
+def _save_two_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    """Save two photos for real enough that a sidecar lands on disk and is recorded."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+
+    def fake_write(path: Path, *_a: object, **_k: object) -> bool:
+        path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    window._save_selected()  # noqa: SLF001
+    _drain_save(window)
+    return a, b
+
+
+def test_a_save_records_what_it_wrote(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The window's own writes go into a journal, so its undo covers more than CLI runs."""
+    a, b = _save_two_photos(window, tmp_path, monkeypatch)
+
+    journals = list_journals()
+    assert len(journals) == 1
+    records = read_journal(journals[0])
+    assert {Path(record.target).name for record in records} == {"a.xmp", "b.xmp"}
+    assert {Path(record.image) for record in records} == {a, b}
+    assert all(record.created for record in records)  # neither sidecar existed before
+
+
+def test_switching_off_the_undo_log_records_nothing(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recording is a setting, and turning it off leaves no journal behind."""
+    window._undo_log_action.setChecked(False)  # noqa: SLF001
+
+    _save_two_photos(window, tmp_path, monkeypatch)
+
+    assert list_journals() == []
+
+
+def test_undo_puts_back_what_a_save_wrote(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Undoing a run deletes the sidecars it created and frees its photos to be saved again."""
+    a, b = _save_two_photos(window, tmp_path, monkeypatch)
+    window._refresh_journals()  # noqa: SLF001
+
+    window._run_undo(dry_run=False)  # noqa: SLF001
+
+    assert not a.with_suffix(".xmp").exists()
+    assert not b.with_suffix(".xmp").exists()
+    assert "Put back 2 files." in window._status.text()  # noqa: SLF001
+    assert window._items[str(a)].status == READY  # noqa: SLF001 - the proposal is still there
+    assert window._items[str(a)].known_fields is None  # noqa: SLF001 - and will be re-scanned
+
+
+def test_undo_preview_touches_nothing(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preview is how you check you picked the right run before anything is rewritten."""
+    a, _b = _save_two_photos(window, tmp_path, monkeypatch)
+    window._refresh_journals()  # noqa: SLF001
+
+    window._run_undo(dry_run=True)  # noqa: SLF001
+
+    assert a.with_suffix(".xmp").exists()
+    assert window._items[str(a)].status == SAVED  # noqa: SLF001
+    assert "Preview:" in window._status.text()  # noqa: SLF001
+    assert "What undoing would do:" in window._undo_details.toPlainText()  # noqa: SLF001
+
+
+def test_undo_list_shows_every_recorded_run(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One row per run, newest first, saying when it ran and how much it wrote."""
+    _save_two_photos(window, tmp_path, monkeypatch)
+
+    window._refresh_journals()  # noqa: SLF001
+
+    assert window._journal_list.count() == 1  # noqa: SLF001
+    assert "2 files" in window._journal_list.item(0).text()  # noqa: SLF001
+    assert window._undo_button.isEnabled()  # noqa: SLF001
+
+
+def test_undo_list_is_empty_before_anything_is_saved(window: gui.MainWindow) -> None:
+    """A fresh machine has nothing to undo, and the button says so by staying off."""
+    window._refresh_journals()  # noqa: SLF001
+
+    assert window._journal_list.count() == 0  # noqa: SLF001
+    assert not window._undo_button.isEnabled()  # noqa: SLF001
+    assert "No recorded runs" in window._undo_details.toPlainText()  # noqa: SLF001
+
+
+def test_undo_without_a_selected_run_asks_for_one(window: gui.MainWindow) -> None:
+    """Undo acts on one run, so it will not guess which."""
+    window._run_undo(dry_run=False)  # noqa: SLF001
+    assert "Pick a run first." in window._undo_details.toPlainText()  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Watching a folder
+# ---------------------------------------------------------------------------
+
+
+def _settled(path: Path) -> Path:
+    """Write a photo whose mtime is old enough for the watcher to call it finished."""
+    _jpeg(path)
+    stamp = time.time() - 60
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_watch_worker_emits_a_batch_and_stops(qapp: QApplication, tmp_path: Path) -> None:
+    """The worker hands finished photos to the window and ends when it is told to."""
+    photo = _settled(tmp_path / "a.jpg")
+    worker = gui.WatchWorker(
+        WatchSettings(folders=(tmp_path,), extensions="jpg", interval=0.0, settle=0.0),
+    )
+    batches: list[list[Path]] = []
+    worker.batch.connect(lambda paths: (batches.append(paths), worker.stop()))
+
+    worker.run()
+
+    assert batches == [[photo]]
+
+
+def test_watching_adds_new_photos_and_generates_them(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photo that lands in the folder joins the list and is generated for review."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    window._extensions.setText("jpg")  # noqa: SLF001
+    generated: list[list[Path]] = []
+    monkeypatch.setattr(
+        window,
+        "_run_generation",
+        lambda items, **_k: generated.append([item.path for item in items]),
+    )
+    window._watch_settings = WatchSettings(folders=(tmp_path,), extensions="jpg")  # noqa: SLF001
+
+    window._on_watch_batch([photo])  # noqa: SLF001
+
+    assert str(photo) in window._items  # noqa: SLF001
+    assert generated == [[photo]]
+    assert "1 photo added" in window._status.text()  # noqa: SLF001
+
+
+def test_watching_queues_photos_that_land_mid_run(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photo arriving during a run waits for it rather than starting a second one."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    window._extensions.setText("jpg")  # noqa: SLF001
+    generated: list[list[Path]] = []
+    monkeypatch.setattr(
+        window,
+        "_run_generation",
+        lambda items, **_k: generated.append([item.path for item in items]),
+    )
+    monkeypatch.setattr(window, "_busy", lambda: True)
+    window._watch_settings = WatchSettings(folders=(tmp_path,), extensions="jpg")  # noqa: SLF001
+
+    window._on_watch_batch([photo])  # noqa: SLF001
+    assert generated == []
+    assert window._watch_pending == [str(photo)]  # noqa: SLF001
+
+    monkeypatch.setattr(window, "_busy", lambda: False)
+    window._continue_watch()  # noqa: SLF001
+    assert generated == [[photo]]
+
+
+def test_watching_can_save_without_reviewing(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unattended import: opt in, and each generated photo is written straight away."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    for path in (a, b):
+        window._items[str(path)].status = READY  # noqa: SLF001
+    saved: list[int] = []
+    monkeypatch.setattr(window, "_run_save", lambda items: saved.append(len(items)))
+    window._watch_settings = WatchSettings(folders=(tmp_path,), save=True)  # noqa: SLF001
+
+    window._continue_watch()  # noqa: SLF001
+
+    assert saved == [2]
+
+
+def test_watching_leaves_saving_to_the_user_by_default(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review-before-write is the window's whole point, so a watch does not write by itself."""
+    a, b = _two_ready_photos(window, tmp_path, monkeypatch)
+    for path in (a, b):
+        window._items[str(path)].status = READY  # noqa: SLF001
+    saved: list[int] = []
+    monkeypatch.setattr(window, "_run_save", lambda items: saved.append(len(items)))
+    window._watch_settings = WatchSettings(folders=(tmp_path,))  # noqa: SLF001
+
+    window._continue_watch()  # noqa: SLF001
+
+    assert saved == []
+
+
+def test_starting_and_stopping_a_watch_flips_the_menu_action(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """One menu entry both starts and stops the watch, and says which it will do."""
+    window._start_watch(  # noqa: SLF001
+        WatchSettings(folders=(tmp_path,), extensions="jpg", interval=1.0),
+    )
+    assert window._watch_action.text() == "Stop Watching"  # noqa: SLF001
+
+    window._toggle_watch()  # noqa: SLF001
+
+    assert window._watch_settings is None  # noqa: SLF001
+    assert window._watch_thread is None  # noqa: SLF001
+    assert window._watch_action.text() == "Watch Folder..."  # noqa: SLF001
+    assert "Stopped watching." in window._status.text()  # noqa: SLF001
+
+
+def test_starting_a_watch_needs_a_folder(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty folder field is a mistake worth naming, not an empty watch."""
+    warned: list[str] = []
+    monkeypatch.setattr(
+        gui.QMessageBox,
+        "warning",
+        lambda _parent, title, _text: warned.append(title),
+    )
+    window._watch_folder.setText("")  # noqa: SLF001
+
+    window._start_watch_from_dialog()  # noqa: SLF001
+
+    assert warned == ["Pick a folder"]
+    assert window._watch_settings is None  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Building a vocabulary
+# ---------------------------------------------------------------------------
+
+
+def _census() -> KeywordCensus:
+    """Build a small keyword count, like reading a library's photos would produce."""
+    census = KeywordCensus()
+    census.add(["Animal", "Bird"], weight=5)
+    census.add(["Sunset"], weight=4)
+    census.add(["Fluke"], weight=1)
+    return census
+
+
+def test_vocabulary_build_worker_writes_a_file_and_a_report(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The build keeps what earns its place and says what it dropped, without touching a photo."""
+    monkeypatch.setattr(gui, "census_from_photos", lambda *_a, **_k: _census())
+    output = tmp_path / "vocabulary.txt"
+    report = tmp_path / "dropped.csv"
+    worker = gui.VocabularyBuildWorker(
+        [Path("/a.jpg")],
+        None,
+        output,
+        rules=TrimRules(min_uses=2),
+        report_file=report,
+    )
+    done: list[tuple[str, int]] = []
+    worker.done.connect(lambda message, kept: done.append((message, kept)))
+
+    worker.run()
+
+    text = output.read_text(encoding="utf-8")
+    assert "# photo-tagger vocabulary: 3 keywords kept, 1 dropped." in text
+    assert "Animal|Bird" in text
+    assert "Fluke" not in text
+    assert "Fluke,1,rare,used 1x" in report.read_text(encoding="utf-8")
+    assert done[0][1] == 3  # noqa: PLR2004 - Animal, Bird, Sunset
+
+
+def test_vocabulary_build_worker_reports_an_empty_library(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A library with no keywords cannot seed a vocabulary, and no file is written."""
+    monkeypatch.setattr(gui, "census_from_photos", lambda *_a, **_k: KeywordCensus())
+    output = tmp_path / "vocabulary.txt"
+    worker = gui.VocabularyBuildWorker([Path("/a.jpg")], None, output, rules=TrimRules())
+    failures: list[str] = []
+    worker.failed.connect(failures.append)
+
+    worker.run()
+
+    assert "No keywords found" in failures[0]
+    assert not output.exists()
+
+
+def test_vocabulary_build_worker_organizes_when_asked(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional model pass runs with the chosen provider, and says so in the file."""
+    monkeypatch.setattr(gui, "census_from_photos", lambda *_a, **_k: _census())
+    passed: dict[str, object] = {}
+
+    def fake_organize(result: object, **kwargs: object) -> tuple[object, OrganizeStats]:
+        passed.update(kwargs)
+        return result, OrganizeStats(model_name="qwen-vl", categories=["Animal"], grouped=1)
+
+    monkeypatch.setattr(gui, "organize", fake_organize)
+    output = tmp_path / "vocabulary.txt"
+    worker = gui.VocabularyBuildWorker(
+        [Path("/a.jpg")],
+        None,
+        output,
+        rules=TrimRules(min_uses=2),
+        organize_workers=3,
+        provider="lmstudio",
+        model="qwen-vl",
+    )
+
+    worker.run()
+
+    assert passed["workers"] == 3  # noqa: PLR2004 - the value the dialog was set to
+    assert passed["provider_name"] == "lmstudio"
+    assert "# Organized by qwen-vl" in output.read_text(encoding="utf-8")
+
+
+def test_vocabulary_build_worker_reads_an_export_too(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A catalog that is not on this machine is still a source, through its keyword export."""
+    monkeypatch.setattr(gui, "census_from_photos", lambda *_a, **_k: _census())
+    export = tmp_path / "export.txt"
+    export.write_text("Osprey\nOsprey\n", encoding="utf-8")
+    output = tmp_path / "vocabulary.txt"
+    worker = gui.VocabularyBuildWorker(
+        [Path("/a.jpg")],
+        export,
+        output,
+        rules=TrimRules(min_uses=2),
+    )
+
+    worker.run()
+
+    text = output.read_text(encoding="utf-8")
+    assert "Osprey" in text
+    assert "keyword export export.txt" in text
+    assert "photo(s)" in text
+
+
+def test_starting_a_build_needs_a_source(window: gui.MainWindow) -> None:
+    """With neither the photo list nor an export there is nothing to count."""
+    window._build_from_photos.setChecked(False)  # noqa: SLF001
+    window._build_export.setText("")  # noqa: SLF001
+
+    window._start_vocabulary_build()  # noqa: SLF001
+
+    assert window._build_thread is None  # noqa: SLF001
+    assert "Pick a source" in window._build_status.text()  # noqa: SLF001
+
+
+def test_starting_a_build_uses_the_dialog_settings(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rules the dialog shows are the rules the build runs with."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": photo})
+    monkeypatch.setattr(gui.QThread, "start", lambda *_a, **_k: None)
+    window._build_output.setText(str(tmp_path / "v.txt"))  # noqa: SLF001
+    window._build_min_uses.setValue(5)  # noqa: SLF001
+    window._build_max_terms.setValue(0)  # noqa: SLF001 - "no cap"
+    window._build_digits.setChecked(True)  # noqa: SLF001
+
+    window._start_vocabulary_build()  # noqa: SLF001
+
+    worker = window._build_worker  # noqa: SLF001
+    assert worker is not None
+    assert worker._rules == TrimRules(min_uses=5, max_terms=None, allow_digits=True)  # noqa: SLF001
+    assert worker._paths == [photo]  # noqa: SLF001
+    assert worker._provider is None  # noqa: SLF001 - organizing was left off
+    assert not window._build_button.isEnabled()  # noqa: SLF001
+
+
+def test_a_finished_build_offers_to_use_the_file(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """Building a vocabulary and then having to go and choose it would be two steps too many."""
+    listing = _keyword_file(tmp_path)
+    window._built_vocabulary = listing  # noqa: SLF001
+
+    # The window fixture answers every question dialog with Yes.
+    window._on_build_done("Wrote 2 keyword(s) to keywords.txt, dropped 0.", 2)  # noqa: SLF001
+
+    assert window._vocabulary_path == listing  # noqa: SLF001
+    assert window._vocabulary is not None  # noqa: SLF001
+    assert window._vocabulary.match("ospreys") == "Osprey"  # noqa: SLF001
+
+
+def test_changing_the_metadata_language_reloads_the_vocabulary(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plural folding is English-only, so the lookup index has to be rebuilt for a new language."""
+    monkeypatch.setenv("PHOTO_TAGGER_CONFIG", str(tmp_path / "config.toml"))
+    window._load_vocabulary(_keyword_file(tmp_path, "Landschaft\n"))  # noqa: SLF001
+    assert window._vocabulary is not None  # noqa: SLF001
+    assert window._vocabulary.fold_plurals is True  # noqa: SLF001
+
+    window._set_output_language("German")  # noqa: SLF001
+
+    assert window._vocabulary is not None  # noqa: SLF001
+    assert window._vocabulary.fold_plurals is False  # noqa: SLF001
