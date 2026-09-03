@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photo-tagger VERSION\n"
 "Report-Msgid-Bugs-To: python@juliobs.com\n"
-"POT-Creation-Date: 2026-08-16 00:04+0200\n"
+"POT-Creation-Date: 2026-08-16 00:05+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: Julio Batista Silva <python@juliobs.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -277,7 +277,7 @@ msgid ""
 "> Keyword Rules)."
 msgstr ""
 
-#: src/photo_tagger/gui.py:1378 src/photo_tagger/gui.py:4561
+#: src/photo_tagger/gui.py:1378 src/photo_tagger/gui.py:4565
 msgid "Watch Folder..."
 msgstr ""
 
@@ -500,7 +500,7 @@ msgstr ""
 msgid "File types"
 msgstr ""
 
-#: src/photo_tagger/gui.py:1795 src/photo_tagger/gui.py:4411
+#: src/photo_tagger/gui.py:1795 src/photo_tagger/gui.py:4415
 msgid "Include subfolders"
 msgstr ""
 
@@ -896,7 +896,7 @@ msgid ""
 "photo has actually failed."
 msgstr ""
 
-#: src/photo_tagger/gui.py:2573 src/photo_tagger/gui.py:4389
+#: src/photo_tagger/gui.py:2573 src/photo_tagger/gui.py:4393
 msgid "Cancel"
 msgstr ""
 
@@ -1423,27 +1423,31 @@ msgid "No recorded runs to undo."
 msgstr ""
 
 #: src/photo_tagger/gui.py:4285
+msgid "Wait for the run in progress to finish first."
+msgstr ""
+
+#: src/photo_tagger/gui.py:4289
 msgid "Pick a run first."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4290
+#: src/photo_tagger/gui.py:4294
 msgid "Could not read that run"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4293 src/photo_tagger/gui_state.py:849
+#: src/photo_tagger/gui.py:4297 src/photo_tagger/gui_state.py:849
 msgid "That run recorded no writes."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4305
+#: src/photo_tagger/gui.py:4309
 #, python-brace-format
 msgid "Preview: {summary}"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4315
+#: src/photo_tagger/gui.py:4319
 msgid "Undo this run?"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4317
+#: src/photo_tagger/gui.py:4321
 #, python-brace-format
 msgid ""
 "Put back {n} file? Sidecars the run created are deleted, and files it "
@@ -1454,126 +1458,126 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:4361
+#: src/photo_tagger/gui.py:4365
 msgid "Watch a folder"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4366
+#: src/photo_tagger/gui.py:4370
 msgid ""
 "Point this at the folder your card reader, tethered capture, or sync "
 "client fills. Photos already there are picked up first, then each new one"
 " as it lands."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4374
+#: src/photo_tagger/gui.py:4378
 msgid "Generate each new photo"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4377
+#: src/photo_tagger/gui.py:4381
 msgid "Save it too, without reviewing"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4380
+#: src/photo_tagger/gui.py:4384
 msgid ""
 "Off by default: the window is built around reviewing before writing. Turn"
 " it on for an unattended import, where it behaves like the CLI's watch "
 "command."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4386
+#: src/photo_tagger/gui.py:4390
 msgid "Start Watching"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4403
+#: src/photo_tagger/gui.py:4407
 msgid "(pick a folder)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4409
+#: src/photo_tagger/gui.py:4413
 msgid "Folder"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4419 src/photo_tagger/gui.py:4432
+#: src/photo_tagger/gui.py:4423 src/photo_tagger/gui.py:4436
 msgid " seconds"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4422
+#: src/photo_tagger/gui.py:4426
 msgid ""
 "How often the folder is listed. Polling behaves the same on every "
 "platform and over network shares."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4426
+#: src/photo_tagger/gui.py:4430
 msgid "Check every"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4435
+#: src/photo_tagger/gui.py:4439
 msgid ""
 "How long a file must sit unchanged before it is picked up, so a photo "
 "still being copied is left alone until the copy finishes."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4439
+#: src/photo_tagger/gui.py:4443
 msgid "Settle for"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4446
+#: src/photo_tagger/gui.py:4450
 msgid "Choose a folder to watch"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4465
+#: src/photo_tagger/gui.py:4469
 msgid "Pick a folder"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4466
+#: src/photo_tagger/gui.py:4470
 msgid "Choose the folder to watch first."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4496
+#: src/photo_tagger/gui.py:4500
 msgid "Stop Watching"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4562
+#: src/photo_tagger/gui.py:4566
 msgid "Stopped watching."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4592
+#: src/photo_tagger/gui.py:4596
 msgid "Could not list models"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4602
+#: src/photo_tagger/gui.py:4606
 #, python-brace-format
 msgid "Found {n} model on {provider}."
 msgid_plural "Found {n} models on {provider}."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/photo_tagger/gui.py:4620
+#: src/photo_tagger/gui.py:4624
 msgid "Connection check"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4655
+#: src/photo_tagger/gui.py:4659
 msgid "ready (cached)"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4708
+#: src/photo_tagger/gui.py:4712
 msgid "Unsaved changes"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4709
+#: src/photo_tagger/gui.py:4713
 msgid ""
 "Some photos have generated proposals that have not been saved. Close "
 "anyway?"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4748
+#: src/photo_tagger/gui.py:4752
 msgid "Anonymous usage telemetry"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4749
+#: src/photo_tagger/gui.py:4753
 msgid "Photo Tagger sends anonymous usage stats to guide development."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4752
+#: src/photo_tagger/gui.py:4756
 msgid ""
 "Collected: model name, batch size, OS, CPU/GPU model, RAM size, timing, "
 "and anonymous crash reports (error type and code location only).\n"
@@ -1584,43 +1588,43 @@ msgid ""
 "Telemetry."
 msgstr ""
 
-#: src/photo_tagger/gui.py:4758
+#: src/photo_tagger/gui.py:4762
 msgid "Keep Enabled"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4759
+#: src/photo_tagger/gui.py:4763
 msgid "Turn It Off"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4808
+#: src/photo_tagger/gui.py:4812
 msgid "generation failed"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4809
+#: src/photo_tagger/gui.py:4813
 msgid "saved"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4810
+#: src/photo_tagger/gui.py:4814
 msgid "generated, not saved yet"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4811
+#: src/photo_tagger/gui.py:4815
 msgid "already has metadata"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4812
+#: src/photo_tagger/gui.py:4816
 msgid "has an XMP sidecar"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4886
+#: src/photo_tagger/gui.py:4890
 msgid "What undoing would do:"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4886
+#: src/photo_tagger/gui.py:4890
 msgid "What was undone:"
 msgstr ""
 
-#: src/photo_tagger/gui.py:4900
+#: src/photo_tagger/gui.py:4904
 msgid "(no change)"
 msgstr ""
 

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: photo-tagger VERSION\n"
 "Report-Msgid-Bugs-To: python@juliobs.com\n"
-"POT-Creation-Date: 2026-08-16 00:04+0200\n"
+"POT-Creation-Date: 2026-08-16 00:05+0200\n"
 "PO-Revision-Date: 2026-07-10 22:30+0200\n"
 "Last-Translator: Julio Batista Silva <python@juliobs.com>\n"
 "Language: pt_BR\n"
@@ -54,8 +54,8 @@ msgid ""
 msgstr ""
 "Selecione uma foto para revisá-la.\n"
 "\n"
-"Gerar propõe um título, uma descrição e palavras-chave que você pode "
-"editar antes de salvar."
+"Gerar propõe um título, uma descrição e palavras-chave que você pode editar "
+"antes de salvar."
 
 #: src/photo_tagger/gui.py:320
 msgid "working..."
@@ -160,11 +160,11 @@ msgstr "Exportar Relatório CSV..."
 
 #: src/photo_tagger/gui.py:1259
 msgid ""
-"Save a CSV report of every photo: generated and existing metadata, EXIF, "
-"and token usage."
+"Save a CSV report of every photo: generated and existing metadata, EXIF, and"
+" token usage."
 msgstr ""
-"Salva um relatório CSV de todas as fotos: metadados gerados e existentes,"
-" EXIF e uso de tokens."
+"Salva um relatório CSV de todas as fotos: metadados gerados e existentes, "
+"EXIF e uso de tokens."
 
 #: src/photo_tagger/gui.py:1264
 msgid "Clear List"
@@ -205,9 +205,9 @@ msgstr "Armazenar Resultados de IA em Cache"
 #: src/photo_tagger/gui.py:1294
 #, python-brace-format
 msgid ""
-"Reuse earlier results for unchanged photos ({cache_file}). Uncheck to "
-"call the model again for everything; a single photo can skip the cache "
-"from its right-click menu."
+"Reuse earlier results for unchanged photos ({cache_file}). Uncheck to call "
+"the model again for everything; a single photo can skip the cache from its "
+"right-click menu."
 msgstr ""
 "Reutiliza resultados anteriores para fotos inalteradas ({cache_file}). "
 "Desmarque para chamar o modelo novamente para tudo; uma única foto pode "
@@ -219,13 +219,13 @@ msgstr "Enviar Telemetria Anônima"
 
 #: src/photo_tagger/gui.py:1306
 msgid ""
-"Anonymous usage stats (model, batch size, OS, CPU/GPU model, RAM, timing)"
-" and crash reports (error type and code location only). No photos, error "
+"Anonymous usage stats (model, batch size, OS, CPU/GPU model, RAM, timing) "
+"and crash reports (error type and code location only). No photos, error "
 "messages, or personal data."
 msgstr ""
 "Estatísticas de uso anônimas (modelo, tamanho do lote, SO, modelo de "
-"CPU/GPU, RAM, tempos) e relatórios de falha (apenas tipo de erro e local "
-"no código). Nenhuma foto, mensagem de erro ou dado pessoal."
+"CPU/GPU, RAM, tempos) e relatórios de falha (apenas tipo de erro e local no "
+"código). Nenhuma foto, mensagem de erro ou dado pessoal."
 
 #: src/photo_tagger/gui.py:1313
 msgid "Record Saves for Undo"
@@ -233,12 +233,12 @@ msgstr "Registrar Gravações para Desfazer"
 
 #: src/photo_tagger/gui.py:1318
 msgid ""
-"Record every file a save writes, so Tools > Undo Writes can put it back. "
-"On by default: the saves worth undoing are the ones nobody planned to."
+"Record every file a save writes, so Tools > Undo Writes can put it back. On "
+"by default: the saves worth undoing are the ones nobody planned to."
 msgstr ""
 "Registra cada arquivo que uma gravação escreve, para que Ferramentas > "
-"Desfazer Gravações possa restaurá-lo. Ativado por padrão: as gravações "
-"que vale a pena desfazer são as que ninguém planejou."
+"Desfazer Gravações possa restaurá-lo. Ativado por padrão: as gravações que "
+"vale a pena desfazer são as que ninguém planejou."
 
 #: src/photo_tagger/gui.py:1325
 msgid "Keyword Rules..."
@@ -246,11 +246,11 @@ msgstr "Regras de Palavras-chave..."
 
 #: src/photo_tagger/gui.py:1330
 msgid ""
-"The controlled vocabulary generated keywords are snapped onto, and "
-"whether the keywords of one shoot are made to agree with each other."
+"The controlled vocabulary generated keywords are snapped onto, and whether "
+"the keywords of one shoot are made to agree with each other."
 msgstr ""
-"O vocabulário controlado ao qual as palavras-chave geradas são ajustadas,"
-" e se as palavras-chave de uma mesma sessão são harmonizadas entre si."
+"O vocabulário controlado ao qual as palavras-chave geradas são ajustadas, e "
+"se as palavras-chave de uma mesma sessão são harmonizadas entre si."
 
 #: src/photo_tagger/gui.py:1339
 msgid "Save Settings as Defaults..."
@@ -258,13 +258,13 @@ msgstr "Salvar Configurações como Padrão..."
 
 #: src/photo_tagger/gui.py:1344
 msgid ""
-"Update the config file with the current provider, model, URL, file types,"
-" and save options. Other settings and comments in the file are preserved;"
-" the API key is never written."
+"Update the config file with the current provider, model, URL, file types, "
+"and save options. Other settings and comments in the file are preserved; the"
+" API key is never written."
 msgstr ""
 "Atualiza o arquivo de configuração com o provedor, modelo, URL, tipos de "
-"arquivo e opções de gravação atuais. As demais configurações e "
-"comentários do arquivo são preservados; a chave de API nunca é gravada."
+"arquivo e opções de gravação atuais. As demais configurações e comentários "
+"do arquivo são preservados; a chave de API nunca é gravada."
 
 #: src/photo_tagger/gui.py:1349
 msgid "Edit Config File..."
@@ -272,13 +272,13 @@ msgstr "Editar Arquivo de Configuração..."
 
 #: src/photo_tagger/gui.py:1352
 msgid ""
-"Open the config file in your default editor for the settings the GUI does"
-" not surface (prompt file, sampling, workers, filters, ...). Created if "
+"Open the config file in your default editor for the settings the GUI does "
+"not surface (prompt file, sampling, workers, filters, ...). Created if "
 "missing."
 msgstr ""
 "Abre o arquivo de configuração no seu editor padrão para as opções que a "
-"interface não expõe (arquivo de prompt, amostragem, workers, filtros, "
-"...). Criado se não existir."
+"interface não expõe (arquivo de prompt, amostragem, workers, filtros, ...). "
+"Criado se não existir."
 
 #: src/photo_tagger/gui.py:1359
 msgid "Tools"
@@ -290,11 +290,11 @@ msgstr "Construir Vocabulário..."
 
 #: src/photo_tagger/gui.py:1365
 msgid ""
-"Write a keyword file out of the keywords your photos already carry, which"
-" is what the strict vocabulary needs to enforce."
+"Write a keyword file out of the keywords your photos already carry, which is"
+" what the strict vocabulary needs to enforce."
 msgstr ""
-"Gera um arquivo de palavras-chave a partir das que suas fotos já têm, que"
-" é o que o vocabulário estrito precisa para ser aplicado."
+"Gera um arquivo de palavras-chave a partir das que suas fotos já têm, que é "
+"o que o vocabulário estrito precisa para ser aplicado."
 
 #: src/photo_tagger/gui.py:1369
 msgid "Harmonize Shoots Now"
@@ -302,29 +302,27 @@ msgstr "Harmonizar Sessões Agora"
 
 #: src/photo_tagger/gui.py:1372
 msgid ""
-"Make the keywords of each shoot agree with each other: the spelling and "
-"the hierarchy most of the shoot used win for all of it. Runs "
-"automatically after every generation once a session gap is set (Settings "
-"> Keyword Rules)."
+"Make the keywords of each shoot agree with each other: the spelling and the "
+"hierarchy most of the shoot used win for all of it. Runs automatically after"
+" every generation once a session gap is set (Settings > Keyword Rules)."
 msgstr ""
 "Faz as palavras-chave de cada sessão concordarem entre si: a grafia e a "
 "hierarquia usadas na maior parte da sessão valem para toda ela. Roda "
 "automaticamente depois de cada geração quando há um intervalo de sessão "
 "definido (Configurações > Regras de Palavras-chave)."
 
-#: src/photo_tagger/gui.py:1378 src/photo_tagger/gui.py:4561
+#: src/photo_tagger/gui.py:1378 src/photo_tagger/gui.py:4565
 msgid "Watch Folder..."
 msgstr "Monitorar Pasta..."
 
 #: src/photo_tagger/gui.py:1381
 msgid ""
-"Tag photos as they arrive: point it at the folder your card reader or "
-"sync client fills, and each new photo joins the list and is generated for"
-" review."
+"Tag photos as they arrive: point it at the folder your card reader or sync "
+"client fills, and each new photo joins the list and is generated for review."
 msgstr ""
-"Etiqueta as fotos conforme elas chegam: aponte para a pasta que seu "
-"leitor de cartão ou cliente de sincronização preenche, e cada foto nova "
-"entra na lista e é gerada para revisão."
+"Etiqueta as fotos conforme elas chegam: aponte para a pasta que seu leitor "
+"de cartão ou cliente de sincronização preenche, e cada foto nova entra na "
+"lista e é gerada para revisão."
 
 #: src/photo_tagger/gui.py:1386
 msgid "Undo Writes..."
@@ -332,13 +330,12 @@ msgstr "Desfazer Gravações..."
 
 #: src/photo_tagger/gui.py:1389
 msgid ""
-"Put back what a recorded run wrote: sidecars it created are deleted, "
-"files it overwrote are restored from the ExifTool backup. Covers CLI runs"
-" too."
+"Put back what a recorded run wrote: sidecars it created are deleted, files "
+"it overwrote are restored from the ExifTool backup. Covers CLI runs too."
 msgstr ""
-"Restaura o que uma execução registrada gravou: os sidecars que ela criou "
-"são apagados e os arquivos que ela sobrescreveu são restaurados do backup"
-" do ExifTool. Vale também para execuções na linha de comando."
+"Restaura o que uma execução registrada gravou: os sidecars que ela criou são"
+" apagados e os arquivos que ela sobrescreveu são restaurados do backup do "
+"ExifTool. Vale também para execuções na linha de comando."
 
 #: src/photo_tagger/gui.py:1396
 msgid "Language"
@@ -346,8 +343,8 @@ msgstr "Idioma"
 
 #: src/photo_tagger/gui.py:1399
 msgid ""
-"Language of the app itself (menus, buttons, messages). The language of "
-"the generated metadata is set under Metadata Language."
+"Language of the app itself (menus, buttons, messages). The language of the "
+"generated metadata is set under Metadata Language."
 msgstr ""
 "Idioma do próprio aplicativo (menus, botões, mensagens). O idioma dos "
 "metadados gerados é definido em Idioma dos Metadados."
@@ -366,11 +363,11 @@ msgstr "Idioma dos Metadados"
 
 #: src/photo_tagger/gui.py:1436
 msgid ""
-"Language of the generated titles, descriptions, and keywords. The "
-"language of the app itself is set under Language."
+"Language of the generated titles, descriptions, and keywords. The language "
+"of the app itself is set under Language."
 msgstr ""
-"Idioma dos títulos, descrições e palavras-chave gerados. O idioma do "
-"próprio aplicativo é definido em Idioma."
+"Idioma dos títulos, descrições e palavras-chave gerados. O idioma do próprio"
+" aplicativo é definido em Idioma."
 
 #: src/photo_tagger/gui.py:1445
 msgid "Other..."
@@ -378,13 +375,13 @@ msgstr "Outro..."
 
 #: src/photo_tagger/gui.py:1448
 msgid ""
-"Any language name the model understands works; it is sent to the model as"
-" is. Saved to the config file, which the CLI's --output-language default "
-"also reads."
+"Any language name the model understands works; it is sent to the model as "
+"is. Saved to the config file, which the CLI's --output-language default also"
+" reads."
 msgstr ""
 "Qualquer nome de idioma que o modelo entenda funciona; ele é enviado ao "
-"modelo como está. Salvo no arquivo de configuração, de onde a CLI também "
-"lê o padrão de --output-language."
+"modelo como está. Salvo no arquivo de configuração, de onde a CLI também lê "
+"o padrão de --output-language."
 
 #: src/photo_tagger/gui.py:1491
 msgid "Language for the generated titles, descriptions, and keywords:"
@@ -415,21 +412,17 @@ msgstr "Padrões salvos em {target}."
 
 #: src/photo_tagger/gui.py:1602
 msgid "Describe photos and add keywords with a vision-language model."
-msgstr ""
-"Descreva fotos e adicione palavras-chave com um modelo de visão e "
-"linguagem."
+msgstr "Descreva fotos e adicione palavras-chave com um modelo de visão e linguagem."
 
 #: src/photo_tagger/gui.py:1618
 msgid "Backend that serves the vision-language model."
 msgstr "Backend que serve o modelo de visão e linguagem."
 
 #: src/photo_tagger/gui.py:1626
-msgid ""
-"Model identifier. Type it, or press Refresh to list what the provider "
-"serves."
+msgid "Model identifier. Type it, or press Refresh to list what the provider serves."
 msgstr ""
-"Identificador do modelo. Digite-o ou pressione Atualizar para listar o "
-"que o provedor serve."
+"Identificador do modelo. Digite-o ou pressione Atualizar para listar o que o"
+" provedor serve."
 
 #: src/photo_tagger/gui.py:1629
 msgid "Refresh"
@@ -465,9 +458,7 @@ msgstr "(URL padrão do provedor)"
 
 #: src/photo_tagger/gui.py:1661
 msgid "Provider API base URL. Leave blank to use the provider's default."
-msgstr ""
-"URL base da API do provedor. Deixe em branco para usar o padrão do "
-"provedor."
+msgstr "URL base da API do provedor. Deixe em branco para usar o padrão do provedor."
 
 #: src/photo_tagger/gui.py:1663
 msgid "Base URL"
@@ -481,13 +472,13 @@ msgstr "(usa a variável de ambiente do provedor)"
 msgid ""
 "API key for the provider. Leave blank to use the provider's environment "
 "variable (OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY, or "
-"OLLAMA_API_KEY). Required for OpenAI. A typed key is used for this "
-"session only and is never written to disk."
+"OLLAMA_API_KEY). Required for OpenAI. A typed key is used for this session "
+"only and is never written to disk."
 msgstr ""
-"Chave de API do provedor. Deixe em branco para usar a variável de "
-"ambiente do provedor (OPENAI_API_KEY, LM_STUDIO_API_KEY, "
-"LLAMA_CPP_API_KEY ou OLLAMA_API_KEY). Obrigatória para a OpenAI. Uma "
-"chave digitada vale só para esta sessão e nunca é gravada em disco."
+"Chave de API do provedor. Deixe em branco para usar a variável de ambiente "
+"do provedor (OPENAI_API_KEY, LM_STUDIO_API_KEY, LLAMA_CPP_API_KEY ou "
+"OLLAMA_API_KEY). Obrigatória para a OpenAI. Uma chave digitada vale só para "
+"esta sessão e nunca é gravada em disco."
 
 #: src/photo_tagger/gui.py:1681
 msgid "API key"
@@ -520,8 +511,8 @@ msgid ""
 "exists.\n"
 "Tagged: metadata already on the file ({legend})."
 msgstr ""
-"Clique no cabeçalho de uma coluna para ordenar. Tipo: extensão do "
-"arquivo, +xmp quando existe um sidecar.\n"
+"Clique no cabeçalho de uma coluna para ordenar. Tipo: extensão do arquivo, "
+"+xmp quando existe um sidecar.\n"
 "Etiquetada: metadados já presentes no arquivo ({legend})."
 
 #: src/photo_tagger/gui.py:1738
@@ -532,13 +523,12 @@ msgstr ""
 
 #: src/photo_tagger/gui.py:1755
 msgid ""
-"Add photos (click), or open the arrow for adding a whole folder and for "
-"the folder-scan options. Dragging files or folders onto the window also "
-"works."
+"Add photos (click), or open the arrow for adding a whole folder and for the "
+"folder-scan options. Dragging files or folders onto the window also works."
 msgstr ""
-"Adicione fotos (clique) ou abra a seta para adicionar uma pasta inteira e"
-" para as opções de varredura de pastas. Arrastar arquivos ou pastas para "
-"a janela também funciona."
+"Adicione fotos (clique) ou abra a seta para adicionar uma pasta inteira e "
+"para as opções de varredura de pastas. Arrastar arquivos ou pastas para a "
+"janela também funciona."
 
 #: src/photo_tagger/gui.py:1765
 msgid "Select"
@@ -562,14 +552,14 @@ msgid ""
 "Case-insensitive: jpg matches .JPG. Note jpeg is separate from jpg."
 msgstr ""
 "Extensões a procurar nas pastas (separadas por vírgula).\n"
-"Sem distinção de maiúsculas: jpg encontra .JPG. Note que jpeg é separado "
-"de jpg."
+"Sem distinção de maiúsculas: jpg encontra .JPG. Note que jpeg é separado de "
+"jpg."
 
 #: src/photo_tagger/gui.py:1794
 msgid "File types"
 msgstr "Tipos de arquivo"
 
-#: src/photo_tagger/gui.py:1795 src/photo_tagger/gui.py:4411
+#: src/photo_tagger/gui.py:1795 src/photo_tagger/gui.py:4415
 msgid "Include subfolders"
 msgstr "Incluir subpastas"
 
@@ -595,13 +585,13 @@ msgstr "Desmarcar Já Etiquetadas"
 
 #: src/photo_tagger/gui.py:1815
 msgid ""
-"Uncheck photos that already have the chosen metadata (in the image or its"
-" XMP sidecar), e.g. 'a title and a description' to skip those while "
-"keeping keyword-only photos. Mirrors the CLI's --skip-tagged."
+"Uncheck photos that already have the chosen metadata (in the image or its "
+"XMP sidecar), e.g. 'a title and a description' to skip those while keeping "
+"keyword-only photos. Mirrors the CLI's --skip-tagged."
 msgstr ""
-"Desmarca fotos que já têm os metadados escolhidos (na imagem ou no "
-"sidecar XMP), p. ex. 'título e descrição' para pular essas mantendo as "
-"fotos só com palavras-chave. Espelha o --skip-tagged da CLI."
+"Desmarca fotos que já têm os metadados escolhidos (na imagem ou no sidecar "
+"XMP), p. ex. 'título e descrição' para pular essas mantendo as fotos só com "
+"palavras-chave. Espelha o --skip-tagged da CLI."
 
 #: src/photo_tagger/gui.py:1832
 msgid "Uncheck From Skip List..."
@@ -609,11 +599,11 @@ msgstr "Desmarcar por Lista de Exclusão..."
 
 #: src/photo_tagger/gui.py:1835
 msgid ""
-"Uncheck photos whose filename or full path is listed in a text file (one "
-"per line), like the CLI's --skip-from."
+"Uncheck photos whose filename or full path is listed in a text file (one per"
+" line), like the CLI's --skip-from."
 msgstr ""
-"Desmarca fotos cujo nome ou caminho completo esteja listado em um arquivo"
-" de texto (um por linha), como o --skip-from da CLI."
+"Desmarca fotos cujo nome ou caminho completo esteja listado em um arquivo de"
+" texto (um por linha), como o --skip-from da CLI."
 
 #: src/photo_tagger/gui.py:1844 src/photo_tagger/gui.py:1854
 msgid "Add photos before selecting."
@@ -750,8 +740,8 @@ msgstr "Existente"
 
 #: src/photo_tagger/gui.py:2285
 msgid ""
-"Where the existing metadata was read from: the image file, an XMP "
-"sidecar, or both."
+"Where the existing metadata was read from: the image file, an XMP sidecar, "
+"or both."
 msgstr ""
 "De onde os metadados existentes foram lidos: do arquivo de imagem, de um "
 "sidecar XMP ou de ambos."
@@ -786,8 +776,7 @@ msgid ""
 "'Duck<Bird<Animal'); the changes and resulting paths show below."
 msgstr ""
 "Palavras-chave a gravar, uma por linha. Use '<' para hierarquia (p. ex. "
-"'Pato<Ave<Animal'); as mudanças e os caminhos resultantes aparecem "
-"abaixo."
+"'Pato<Ave<Animal'); as mudanças e os caminhos resultantes aparecem abaixo."
 
 #: src/photo_tagger/gui.py:2325
 msgid "Keywords"
@@ -799,8 +788,8 @@ msgstr "Mudanças de palavras-chave"
 
 #: src/photo_tagger/gui.py:2340
 msgid ""
-"Show exactly what saving will change: added and removed keywords, plus "
-"the resulting keyword tree."
+"Show exactly what saving will change: added and removed keywords, plus the "
+"resulting keyword tree."
 msgstr ""
 "Mostra exatamente o que salvar vai mudar: palavras-chave adicionadas e "
 "removidas, mais a árvore de palavras-chave resultante."
@@ -816,8 +805,8 @@ msgid ""
 "The keyword tree that saving will write (stored as Lightroom hierarchy "
 "paths)."
 msgstr ""
-"A árvore de palavras-chave que salvar gravará (armazenada como caminhos "
-"de hierarquia do Lightroom)."
+"A árvore de palavras-chave que salvar gravará (armazenada como caminhos de "
+"hierarquia do Lightroom)."
 
 #: src/photo_tagger/gui.py:2364
 msgid "Changes"
@@ -877,14 +866,13 @@ msgstr "Manter Backup do ExifTool"
 
 #: src/photo_tagger/gui.py:2421
 msgid ""
-"Let ExifTool save the untouched file as *_original before writing. "
-"Uncheck to write in place, which leaves no extra copies filling up the "
-"disk on a large batch (make sure you have a backup elsewhere)."
+"Let ExifTool save the untouched file as *_original before writing. Uncheck "
+"to write in place, which leaves no extra copies filling up the disk on a "
+"large batch (make sure you have a backup elsewhere)."
 msgstr ""
-"Deixa o ExifTool salvar o arquivo original como *_original antes de "
-"gravar. Desmarque para gravar no lugar, sem deixar cópias extras ocupando"
-" o disco em um lote grande (garanta que você tenha um backup em outro "
-"lugar)."
+"Deixa o ExifTool salvar o arquivo original como *_original antes de gravar. "
+"Desmarque para gravar no lugar, sem deixar cópias extras ocupando o disco em"
+" um lote grande (garanta que você tenha um backup em outro lugar)."
 
 #: src/photo_tagger/gui.py:2454 src/photo_tagger/gui_state.py:1045
 msgid "title"
@@ -935,11 +923,11 @@ msgstr "Grava esta foto. {summary} Mude o que é gravado pela seta."
 #: src/photo_tagger/gui.py:2488
 #, python-brace-format
 msgid ""
-"Write the checked photos that have a generated proposal. {summary} Change"
-" what is written with the arrow."
+"Write the checked photos that have a generated proposal. {summary} Change "
+"what is written with the arrow."
 msgstr ""
-"Grava as fotos marcadas que têm uma proposta gerada. {summary} Mude o que"
-" é gravado pela seta."
+"Grava as fotos marcadas que têm uma proposta gerada. {summary} Mude o que é "
+"gravado pela seta."
 
 #: src/photo_tagger/gui.py:2497
 msgid "Hint for the AI"
@@ -951,16 +939,15 @@ msgstr "ex.: 'O animal é um veado, não um javali'"
 
 #: src/photo_tagger/gui.py:2503
 msgid ""
-"A note about this photo that the model trusts over its own reading of the"
-" image; useful when it misidentifies the subject. It is sent along on "
-"every generation of this photo (a hinted photo skips the cached result) "
-"and is never written to the file. Press Enter to regenerate right away."
+"A note about this photo that the model trusts over its own reading of the "
+"image; useful when it misidentifies the subject. It is sent along on every "
+"generation of this photo (a hinted photo skips the cached result) and is "
+"never written to the file. Press Enter to regenerate right away."
 msgstr ""
 "Uma nota sobre esta foto na qual o modelo confia mais do que na própria "
-"leitura da imagem; útil quando ele identifica o assunto errado. É enviada"
-" em toda geração desta foto (uma foto com dica ignora o resultado em "
-"cache) e nunca é gravada no arquivo. Pressione Enter para gerar "
-"novamente."
+"leitura da imagem; útil quando ele identifica o assunto errado. É enviada em"
+" toda geração desta foto (uma foto com dica ignora o resultado em cache) e "
+"nunca é gravada no arquivo. Pressione Enter para gerar novamente."
 
 #: src/photo_tagger/gui.py:2516
 msgid "Generate This Photo"
@@ -1000,15 +987,14 @@ msgstr ""
 "Executa o modelo novamente em cada foto que falhou ao gerar. Habilitado "
 "quando alguma foto realmente falhou."
 
-#: src/photo_tagger/gui.py:2573 src/photo_tagger/gui.py:4389
+#: src/photo_tagger/gui.py:2573 src/photo_tagger/gui.py:4393
 msgid "Cancel"
 msgstr "Cancelar"
 
 #: src/photo_tagger/gui.py:2576
 msgid ""
 "Stop the run in progress, generating or saving. The photo currently in "
-"flight finishes; the rest are left untouched so you can resume them "
-"later."
+"flight finishes; the rest are left untouched so you can resume them later."
 msgstr ""
 "Para a execução em andamento, geração ou gravação. A foto em andamento "
 "termina; as demais ficam intocadas para você retomá-las depois."
@@ -1072,9 +1058,7 @@ msgstr ""
 msgid "Deselected {n} photo from the skip list; {selected} still selected."
 msgid_plural "Deselected {n} photos from the skip list; {selected} still selected."
 msgstr[0] "Desmarcada {n} foto pela lista de exclusão; {selected} ainda selecionadas."
-msgstr[1] ""
-"Desmarcadas {n} fotos pela lista de exclusão; {selected} ainda "
-"selecionadas."
+msgstr[1] "Desmarcadas {n} fotos pela lista de exclusão; {selected} ainda selecionadas."
 
 #: src/photo_tagger/gui.py:2788
 msgid "No photos in the list matched the skip list."
@@ -1128,8 +1112,7 @@ msgstr "(nenhum metadado encontrado)"
 #, python-brace-format
 msgid ""
 "Generation failed: {error}\n"
-"Use 'Retry Failed' to try again, or Help > Open Logs for the full "
-"traceback."
+"Use 'Retry Failed' to try again, or Help > Open Logs for the full traceback."
 msgstr ""
 "A geração falhou: {error}\n"
 "Use 'Repetir Falhas' para tentar novamente, ou Ajuda > Abrir Logs para o "
@@ -1158,9 +1141,7 @@ msgstr "Mudanças de palavras-chave ({summary})"
 
 #: src/photo_tagger/gui.py:3279 src/photo_tagger/gui.py:3296
 msgid "Pick at least one field to write (Title, Description, or Keywords)."
-msgstr ""
-"Escolha ao menos um campo para gravar (Título, Descrição ou Palavras-"
-"chave)."
+msgstr "Escolha ao menos um campo para gravar (Título, Descrição ou Palavras-chave)."
 
 #: src/photo_tagger/gui.py:3286
 #, python-brace-format
@@ -1237,12 +1218,12 @@ msgstr "Regras de palavras-chave"
 
 #: src/photo_tagger/gui.py:3667
 msgid ""
-"Kept for this session. Settings > Save Settings as Defaults writes them "
-"to the config file, which CLI runs read too."
+"Kept for this session. Settings > Save Settings as Defaults writes them to "
+"the config file, which CLI runs read too."
 msgstr ""
-"Mantidas nesta sessão. Configurações > Salvar Configurações como Padrão "
-"as grava no arquivo de configuração, que as execuções na linha de comando"
-" também leem."
+"Mantidas nesta sessão. Configurações > Salvar Configurações como Padrão as "
+"grava no arquivo de configuração, que as execuções na linha de comando "
+"também leem."
 
 #: src/photo_tagger/gui.py:3685
 msgid "Controlled vocabulary"
@@ -1250,9 +1231,9 @@ msgstr "Vocabulário controlado"
 
 #: src/photo_tagger/gui.py:3689
 msgid ""
-"Restrict generated keywords to the terms in a keyword file: every match "
-"is rewritten to the file's own spelling and hierarchy, so a run cannot "
-"fill your catalog with near-duplicates of keywords you already have."
+"Restrict generated keywords to the terms in a keyword file: every match is "
+"rewritten to the file's own spelling and hierarchy, so a run cannot fill "
+"your catalog with near-duplicates of keywords you already have."
 msgstr ""
 "Restringe as palavras-chave geradas aos termos de um arquivo de palavras-"
 "chave: cada correspondência é reescrita com a grafia e a hierarquia do "
@@ -1281,13 +1262,13 @@ msgstr "Gravar apenas palavras-chave cobertas pelo vocabulário"
 
 #: src/photo_tagger/gui.py:3723
 msgid ""
-"Drop generated keywords the vocabulary does not have instead of writing "
-"them as they came. The status bar names what was dropped, so the "
-"vocabulary can grow on purpose rather than by accident."
+"Drop generated keywords the vocabulary does not have instead of writing them"
+" as they came. The status bar names what was dropped, so the vocabulary can "
+"grow on purpose rather than by accident."
 msgstr ""
 "Descarta as palavras-chave geradas que o vocabulário não tem, em vez de "
-"gravá-las como vieram. A barra de status nomeia o que foi descartado, "
-"para que o vocabulário cresça de propósito, e não por acidente."
+"gravá-las como vieram. A barra de status nomeia o que foi descartado, para "
+"que o vocabulário cresça de propósito, e não por acidente."
 
 #: src/photo_tagger/gui.py:3734
 msgid "Shoot harmonization"
@@ -1296,17 +1277,17 @@ msgstr "Harmonização de sessões"
 #: src/photo_tagger/gui.py:3738
 msgid ""
 "Group photos into shoots separated by this many idle minutes (by capture "
-"time, falling back to the file date) and make each shoot's keywords agree"
-" with itself: the spelling and the hierarchy most of the shoot used win "
-"for all of it. It runs over the proposals after each generation, so you "
-"still review before saving."
+"time, falling back to the file date) and make each shoot's keywords agree "
+"with itself: the spelling and the hierarchy most of the shoot used win for "
+"all of it. It runs over the proposals after each generation, so you still "
+"review before saving."
 msgstr ""
 "Agrupa as fotos em sessões separadas por esta quantidade de minutos de "
-"inatividade (pela hora de captura, ou pela data do arquivo quando ela "
-"falta) e faz as palavras-chave de cada sessão concordarem entre si: a "
-"grafia e a hierarquia usadas na maior parte da sessão valem para toda "
-"ela. Roda sobre as propostas depois de cada geração, então você ainda "
-"revisa antes de salvar."
+"inatividade (pela hora de captura, ou pela data do arquivo quando ela falta)"
+" e faz as palavras-chave de cada sessão concordarem entre si: a grafia e a "
+"hierarquia usadas na maior parte da sessão valem para toda ela. Roda sobre "
+"as propostas depois de cada geração, então você ainda revisa antes de "
+"salvar."
 
 #: src/photo_tagger/gui.py:3752
 msgid " minutes"
@@ -1335,8 +1316,8 @@ msgstr "Arquivos de palavras-chave (*.txt *.csv);;Todos os arquivos (*)"
 #: src/photo_tagger/gui.py:3831
 msgid "Set a session gap first: Settings > Keyword Rules."
 msgstr ""
-"Defina primeiro um intervalo de sessão: Configurações > Regras de "
-"Palavras-chave."
+"Defina primeiro um intervalo de sessão: Configurações > Regras de Palavras-"
+"chave."
 
 #: src/photo_tagger/gui.py:3899
 msgid "Build a vocabulary"
@@ -1344,13 +1325,13 @@ msgstr "Construir um vocabulário"
 
 #: src/photo_tagger/gui.py:3904
 msgid ""
-"Reads the keywords your photos already carry, keeps the ones that earn "
-"their place, and writes them as a keyword file to review and edit. "
-"Nothing is written to your photos."
+"Reads the keywords your photos already carry, keeps the ones that earn their"
+" place, and writes them as a keyword file to review and edit. Nothing is "
+"written to your photos."
 msgstr ""
-"Lê as palavras-chave que suas fotos já têm, mantém as que merecem seu "
-"lugar e as grava em um arquivo de palavras-chave para revisar e editar. "
-"Nada é gravado nas suas fotos."
+"Lê as palavras-chave que suas fotos já têm, mantém as que merecem seu lugar "
+"e as grava em um arquivo de palavras-chave para revisar e editar. Nada é "
+"gravado nas suas fotos."
 
 #: src/photo_tagger/gui.py:3921
 msgid "Build"
@@ -1378,8 +1359,8 @@ msgstr "(opcional)"
 
 #: src/photo_tagger/gui.py:3951
 msgid ""
-"A Lightroom keyword export (.txt or .csv), for a catalog that is not on "
-"this machine. Its counts are occurrences in the keyword tree, not photos."
+"A Lightroom keyword export (.txt or .csv), for a catalog that is not on this"
+" machine. Its counts are occurrences in the keyword tree, not photos."
 msgstr ""
 "Uma exportação de palavras-chave do Lightroom (.txt ou .csv), para um "
 "catálogo que não está nesta máquina. Suas contagens são ocorrências na "
@@ -1395,12 +1376,11 @@ msgstr "Manter uma palavra-chave quando"
 
 #: src/photo_tagger/gui.py:3973
 msgid ""
-"The most useful knob: in a catalog an AI has been writing to, most "
-"keywords are used once and are one-offs rather than vocabulary."
+"The most useful knob: in a catalog an AI has been writing to, most keywords "
+"are used once and are one-offs rather than vocabulary."
 msgstr ""
-"O ajuste mais útil: em um catálogo em que uma IA vem gravando, a maioria "
-"das palavras-chave aparece uma única vez e é caso isolado, não "
-"vocabulário."
+"O ajuste mais útil: em um catálogo em que uma IA vem gravando, a maioria das"
+" palavras-chave aparece uma única vez e é caso isolado, não vocabulário."
 
 #: src/photo_tagger/gui.py:3977
 msgid "Used at least this often"
@@ -1412,11 +1392,11 @@ msgstr "sem limite"
 
 #: src/photo_tagger/gui.py:3984
 msgid ""
-"Caps the file, dropping the least used first. The default keeps it under "
-"the 5000 terms above which matching gives up its fuzzy pass."
+"Caps the file, dropping the least used first. The default keeps it under the"
+" 5000 terms above which matching gives up its fuzzy pass."
 msgstr ""
-"Limita o arquivo, descartando primeiro as menos usadas. O padrão o mantém"
-" abaixo dos 5000 termos, acima dos quais a correspondência abre mão da "
+"Limita o arquivo, descartando primeiro as menos usadas. O padrão o mantém "
+"abaixo dos 5000 termos, acima dos quais a correspondência abre mão da "
 "passagem aproximada."
 
 #: src/photo_tagger/gui.py:3988
@@ -1429,8 +1409,8 @@ msgstr "Manter palavras-chave com dígitos"
 
 #: src/photo_tagger/gui.py:3992
 msgid ""
-"Off by default: a keyword with a digit is nearly always a measurement or "
-"a model number ('19.5V', '0 Percent Battery') rather than a subject."
+"Off by default: a keyword with a digit is nearly always a measurement or a "
+"model number ('19.5V', '0 Percent Battery') rather than a subject."
 msgstr ""
 "Desativado por padrão: uma palavra-chave com dígito quase sempre é uma "
 "medida ou um número de modelo ('19.5V', '0 Percent Battery'), e não um "
@@ -1442,8 +1422,8 @@ msgstr "Gravar palavras-chave simples, sem hierarquias"
 
 #: src/photo_tagger/gui.py:4000
 msgid ""
-"Worth using when the source hierarchy is not trustworthy, since a "
-"vocabulary imposes its own on every photo it matches."
+"Worth using when the source hierarchy is not trustworthy, since a vocabulary"
+" imposes its own on every photo it matches."
 msgstr ""
 "Vale a pena quando a hierarquia de origem não é confiável, já que um "
 "vocabulário impõe a sua a cada foto que ele casa."
@@ -1454,16 +1434,16 @@ msgstr "Organizar com o modelo"
 
 #: src/photo_tagger/gui.py:4014
 msgid ""
-"Asks the model for the two things counting cannot settle: which keywords "
-"are synonyms of each other (folded into one, the rest kept so they still "
-"match), and what hierarchy the list should have. It never decides what to"
-" keep, and never invents a keyword. Needs a reachable provider."
+"Asks the model for the two things counting cannot settle: which keywords are"
+" synonyms of each other (folded into one, the rest kept so they still "
+"match), and what hierarchy the list should have. It never decides what to "
+"keep, and never invents a keyword. Needs a reachable provider."
 msgstr ""
 "Pergunta ao modelo as duas coisas que a contagem não resolve: quais "
 "palavras-chave são sinônimas entre si (unificadas em uma, com as demais "
-"mantidas para que ainda casem) e que hierarquia a lista deve ter. Ele "
-"nunca decide o que manter, e nunca inventa uma palavra-chave. Precisa de "
-"um provedor acessível."
+"mantidas para que ainda casem) e que hierarquia a lista deve ter. Ele nunca "
+"decide o que manter, e nunca inventa uma palavra-chave. Precisa de um "
+"provedor acessível."
 
 #: src/photo_tagger/gui.py:4025
 msgid "Model requests to run at once; the list is sent in chunks."
@@ -1486,8 +1466,8 @@ msgid ""
 "A CSV naming every dropped keyword, its count, and the rule that cut it. "
 "This is what makes the thresholds tunable rather than a guess."
 msgstr ""
-"Um CSV que nomeia cada palavra-chave descartada, sua contagem e a regra "
-"que a cortou. É isso que torna os limites ajustáveis em vez de um chute."
+"Um CSV que nomeia cada palavra-chave descartada, sua contagem e a regra que "
+"a cortou. É isso que torna os limites ajustáveis em vez de um chute."
 
 #: src/photo_tagger/gui.py:4056
 msgid "Drop report"
@@ -1527,8 +1507,8 @@ msgstr "Arquivos CSV (*.csv);;Todos os arquivos (*)"
 #: src/photo_tagger/gui.py:4111
 msgid "Pick a source: the photos in the list, a keyword export, or both."
 msgstr ""
-"Escolha uma fonte: as fotos da lista, uma exportação de palavras-chave, "
-"ou ambas."
+"Escolha uma fonte: as fotos da lista, uma exportação de palavras-chave, ou "
+"ambas."
 
 #: src/photo_tagger/gui.py:4147
 msgid "Working..."
@@ -1541,8 +1521,8 @@ msgstr "Usar este vocabulário?"
 #: src/photo_tagger/gui.py:4162
 msgid "Snap the keywords of the next generation onto the file you just built?"
 msgstr ""
-"Ajustar as palavras-chave da próxima geração ao arquivo que você acabou "
-"de construir?"
+"Ajustar as palavras-chave da próxima geração ao arquivo que você acabou de "
+"construir?"
 
 #: src/photo_tagger/gui.py:4209
 msgid "Undo writes"
@@ -1551,13 +1531,12 @@ msgstr "Desfazer gravações"
 #: src/photo_tagger/gui.py:4214
 msgid ""
 "Every recorded run, newest first, from this window and from the command "
-"line. Undoing deletes the sidecars a run created and restores the files "
-"it overwrote from their ExifTool backup."
+"line. Undoing deletes the sidecars a run created and restores the files it "
+"overwrote from their ExifTool backup."
 msgstr ""
-"Todas as execuções registradas, da mais recente à mais antiga, desta "
-"janela e da linha de comando. Desfazer apaga os sidecars que a execução "
-"criou e restaura os arquivos que ela sobrescreveu a partir do backup do "
-"ExifTool."
+"Todas as execuções registradas, da mais recente à mais antiga, desta janela "
+"e da linha de comando. Desfazer apaga os sidecars que a execução criou e "
+"restaura os arquivos que ela sobrescreveu a partir do backup do ExifTool."
 
 #: src/photo_tagger/gui.py:4226
 msgid "Also revert files changed since the run"
@@ -1565,8 +1544,8 @@ msgstr "Reverter também os arquivos alterados desde a execução"
 
 #: src/photo_tagger/gui.py:4229
 msgid ""
-"Off by default: a file that changed since the run was edited afterwards, "
-"and that edit is not this run's to undo."
+"Off by default: a file that changed since the run was edited afterwards, and"
+" that edit is not this run's to undo."
 msgstr ""
 "Desativado por padrão: um arquivo que mudou desde a execução foi editado "
 "depois, e essa edição não cabe a esta execução desfazer."
@@ -1592,27 +1571,31 @@ msgid "No recorded runs to undo."
 msgstr "Nenhuma execução registrada para desfazer."
 
 #: src/photo_tagger/gui.py:4285
+msgid "Wait for the run in progress to finish first."
+msgstr "Espere a execução em andamento terminar primeiro."
+
+#: src/photo_tagger/gui.py:4289
 msgid "Pick a run first."
 msgstr "Escolha uma execução primeiro."
 
-#: src/photo_tagger/gui.py:4290
+#: src/photo_tagger/gui.py:4294
 msgid "Could not read that run"
 msgstr "Não foi possível ler essa execução"
 
-#: src/photo_tagger/gui.py:4293 src/photo_tagger/gui_state.py:849
+#: src/photo_tagger/gui.py:4297 src/photo_tagger/gui_state.py:849
 msgid "That run recorded no writes."
 msgstr "Essa execução não registrou nenhuma gravação."
 
-#: src/photo_tagger/gui.py:4305
+#: src/photo_tagger/gui.py:4309
 #, python-brace-format
 msgid "Preview: {summary}"
 msgstr "Prévia: {summary}"
 
-#: src/photo_tagger/gui.py:4315
+#: src/photo_tagger/gui.py:4319
 msgid "Undo this run?"
 msgstr "Desfazer esta execução?"
 
-#: src/photo_tagger/gui.py:4317
+#: src/photo_tagger/gui.py:4321
 #, python-brace-format
 msgid ""
 "Put back {n} file? Sidecars the run created are deleted, and files it "
@@ -1621,201 +1604,196 @@ msgid_plural ""
 "Put back {n} files? Sidecars the run created are deleted, and files it "
 "overwrote are restored from their backup."
 msgstr[0] ""
-"Restaurar {n} arquivo? Os sidecars que a execução criou são apagados, e "
-"os arquivos que ela sobrescreveu são restaurados do backup."
+"Restaurar {n} arquivo? Os sidecars que a execução criou são apagados, e os "
+"arquivos que ela sobrescreveu são restaurados do backup."
 msgstr[1] ""
-"Restaurar {n} arquivos? Os sidecars que a execução criou são apagados, e "
-"os arquivos que ela sobrescreveu são restaurados do backup."
+"Restaurar {n} arquivos? Os sidecars que a execução criou são apagados, e os "
+"arquivos que ela sobrescreveu são restaurados do backup."
 
-#: src/photo_tagger/gui.py:4361
+#: src/photo_tagger/gui.py:4365
 msgid "Watch a folder"
 msgstr "Monitorar uma pasta"
 
-#: src/photo_tagger/gui.py:4366
+#: src/photo_tagger/gui.py:4370
 msgid ""
-"Point this at the folder your card reader, tethered capture, or sync "
-"client fills. Photos already there are picked up first, then each new one"
-" as it lands."
+"Point this at the folder your card reader, tethered capture, or sync client "
+"fills. Photos already there are picked up first, then each new one as it "
+"lands."
 msgstr ""
-"Aponte para a pasta que seu leitor de cartão, captura conectada ou "
-"cliente de sincronização preenche. As fotos que já estão lá são pegas "
-"primeiro, e depois cada nova conforme chega."
+"Aponte para a pasta que seu leitor de cartão, captura conectada ou cliente "
+"de sincronização preenche. As fotos que já estão lá são pegas primeiro, e "
+"depois cada nova conforme chega."
 
-#: src/photo_tagger/gui.py:4374
+#: src/photo_tagger/gui.py:4378
 msgid "Generate each new photo"
 msgstr "Gerar cada foto nova"
 
-#: src/photo_tagger/gui.py:4377
+#: src/photo_tagger/gui.py:4381
 msgid "Save it too, without reviewing"
 msgstr "Salvar também, sem revisar"
 
-#: src/photo_tagger/gui.py:4380
+#: src/photo_tagger/gui.py:4384
 msgid ""
-"Off by default: the window is built around reviewing before writing. Turn"
-" it on for an unattended import, where it behaves like the CLI's watch "
-"command."
+"Off by default: the window is built around reviewing before writing. Turn it"
+" on for an unattended import, where it behaves like the CLI's watch command."
 msgstr ""
 "Desativado por padrão: a janela foi feita para revisar antes de gravar. "
 "Ative para uma importação sem supervisão, em que ela se comporta como o "
 "comando watch da linha de comando."
 
-#: src/photo_tagger/gui.py:4386
+#: src/photo_tagger/gui.py:4390
 msgid "Start Watching"
 msgstr "Começar a Monitorar"
 
-#: src/photo_tagger/gui.py:4403
+#: src/photo_tagger/gui.py:4407
 msgid "(pick a folder)"
 msgstr "(escolha uma pasta)"
 
-#: src/photo_tagger/gui.py:4409
+#: src/photo_tagger/gui.py:4413
 msgid "Folder"
 msgstr "Pasta"
 
-#: src/photo_tagger/gui.py:4419 src/photo_tagger/gui.py:4432
+#: src/photo_tagger/gui.py:4423 src/photo_tagger/gui.py:4436
 msgid " seconds"
 msgstr " segundos"
 
-#: src/photo_tagger/gui.py:4422
+#: src/photo_tagger/gui.py:4426
 msgid ""
-"How often the folder is listed. Polling behaves the same on every "
-"platform and over network shares."
+"How often the folder is listed. Polling behaves the same on every platform "
+"and over network shares."
 msgstr ""
 "Com que frequência a pasta é listada. A varredura se comporta igual em "
 "qualquer plataforma e em compartilhamentos de rede."
 
-#: src/photo_tagger/gui.py:4426
+#: src/photo_tagger/gui.py:4430
 msgid "Check every"
 msgstr "Verificar a cada"
 
-#: src/photo_tagger/gui.py:4435
-msgid ""
-"How long a file must sit unchanged before it is picked up, so a photo "
-"still being copied is left alone until the copy finishes."
-msgstr ""
-"Quanto tempo um arquivo precisa ficar sem mudar antes de ser pego, para "
-"que uma foto ainda sendo copiada fique intocada até a cópia terminar."
-
 #: src/photo_tagger/gui.py:4439
+msgid ""
+"How long a file must sit unchanged before it is picked up, so a photo still "
+"being copied is left alone until the copy finishes."
+msgstr ""
+"Quanto tempo um arquivo precisa ficar sem mudar antes de ser pego, para que "
+"uma foto ainda sendo copiada fique intocada até a cópia terminar."
+
+#: src/photo_tagger/gui.py:4443
 msgid "Settle for"
 msgstr "Estabilizar por"
 
-#: src/photo_tagger/gui.py:4446
+#: src/photo_tagger/gui.py:4450
 msgid "Choose a folder to watch"
 msgstr "Escolha uma pasta para monitorar"
 
-#: src/photo_tagger/gui.py:4465
+#: src/photo_tagger/gui.py:4469
 msgid "Pick a folder"
 msgstr "Escolha uma pasta"
 
-#: src/photo_tagger/gui.py:4466
+#: src/photo_tagger/gui.py:4470
 msgid "Choose the folder to watch first."
 msgstr "Escolha primeiro a pasta a monitorar."
 
-#: src/photo_tagger/gui.py:4496
+#: src/photo_tagger/gui.py:4500
 msgid "Stop Watching"
 msgstr "Parar de Monitorar"
 
-#: src/photo_tagger/gui.py:4562
+#: src/photo_tagger/gui.py:4566
 msgid "Stopped watching."
 msgstr "Monitoramento encerrado."
 
-#: src/photo_tagger/gui.py:4592
+#: src/photo_tagger/gui.py:4596
 msgid "Could not list models"
 msgstr "Não foi possível listar os modelos"
 
-#: src/photo_tagger/gui.py:4602
+#: src/photo_tagger/gui.py:4606
 #, python-brace-format
 msgid "Found {n} model on {provider}."
 msgid_plural "Found {n} models on {provider}."
 msgstr[0] "Encontrado {n} modelo em {provider}."
 msgstr[1] "Encontrados {n} modelos em {provider}."
 
-#: src/photo_tagger/gui.py:4620
+#: src/photo_tagger/gui.py:4624
 msgid "Connection check"
 msgstr "Verificação de conexão"
 
-#: src/photo_tagger/gui.py:4655
+#: src/photo_tagger/gui.py:4659
 msgid "ready (cached)"
 msgstr "pronto (em cache)"
 
-#: src/photo_tagger/gui.py:4708
+#: src/photo_tagger/gui.py:4712
 msgid "Unsaved changes"
 msgstr "Alterações não salvas"
 
-#: src/photo_tagger/gui.py:4709
-msgid ""
-"Some photos have generated proposals that have not been saved. Close "
-"anyway?"
-msgstr ""
-"Algumas fotos têm propostas geradas que não foram salvas. Fechar mesmo "
-"assim?"
+#: src/photo_tagger/gui.py:4713
+msgid "Some photos have generated proposals that have not been saved. Close anyway?"
+msgstr "Algumas fotos têm propostas geradas que não foram salvas. Fechar mesmo assim?"
 
-#: src/photo_tagger/gui.py:4748
+#: src/photo_tagger/gui.py:4752
 msgid "Anonymous usage telemetry"
 msgstr "Telemetria anônima de uso"
 
-#: src/photo_tagger/gui.py:4749
+#: src/photo_tagger/gui.py:4753
 msgid "Photo Tagger sends anonymous usage stats to guide development."
 msgstr ""
 "O Photo Tagger envia estatísticas de uso anônimas para orientar o "
 "desenvolvimento."
 
-#: src/photo_tagger/gui.py:4752
+#: src/photo_tagger/gui.py:4756
 msgid ""
-"Collected: model name, batch size, OS, CPU/GPU model, RAM size, timing, "
-"and anonymous crash reports (error type and code location only).\n"
+"Collected: model name, batch size, OS, CPU/GPU model, RAM size, timing, and "
+"anonymous crash reports (error type and code location only).\n"
 "Never: photos, file paths, filenames, tags, error messages, or personal "
 "data.\n"
 "\n"
 "You can turn this off now, or anytime from Settings > Send Anonymous "
 "Telemetry."
 msgstr ""
-"Coletado: nome do modelo, tamanho do lote, SO, modelo de CPU/GPU, "
-"quantidade de RAM, tempos e relatórios de falha anônimos (apenas tipo de "
-"erro e local no código).\n"
-"Nunca: fotos, caminhos de arquivo, nomes de arquivo, etiquetas, mensagens"
-" de erro ou dados pessoais.\n"
+"Coletado: nome do modelo, tamanho do lote, SO, modelo de CPU/GPU, quantidade"
+" de RAM, tempos e relatórios de falha anônimos (apenas tipo de erro e local "
+"no código).\n"
+"Nunca: fotos, caminhos de arquivo, nomes de arquivo, etiquetas, mensagens de"
+" erro ou dados pessoais.\n"
 "\n"
-"Você pode desativar agora, ou a qualquer momento em Configurações > "
-"Enviar Telemetria Anônima."
+"Você pode desativar agora, ou a qualquer momento em Configurações > Enviar "
+"Telemetria Anônima."
 
-#: src/photo_tagger/gui.py:4758
+#: src/photo_tagger/gui.py:4762
 msgid "Keep Enabled"
 msgstr "Manter Ativada"
 
-#: src/photo_tagger/gui.py:4759
+#: src/photo_tagger/gui.py:4763
 msgid "Turn It Off"
 msgstr "Desativar"
 
-#: src/photo_tagger/gui.py:4808
+#: src/photo_tagger/gui.py:4812
 msgid "generation failed"
 msgstr "falha na geração"
 
-#: src/photo_tagger/gui.py:4809
+#: src/photo_tagger/gui.py:4813
 msgid "saved"
 msgstr "salva"
 
-#: src/photo_tagger/gui.py:4810
+#: src/photo_tagger/gui.py:4814
 msgid "generated, not saved yet"
 msgstr "gerada, ainda não salva"
 
-#: src/photo_tagger/gui.py:4811
+#: src/photo_tagger/gui.py:4815
 msgid "already has metadata"
 msgstr "já tem metadados"
 
-#: src/photo_tagger/gui.py:4812
+#: src/photo_tagger/gui.py:4816
 msgid "has an XMP sidecar"
 msgstr "tem um sidecar XMP"
 
-#: src/photo_tagger/gui.py:4886
+#: src/photo_tagger/gui.py:4890
 msgid "What undoing would do:"
 msgstr "O que desfazer faria:"
 
-#: src/photo_tagger/gui.py:4886
+#: src/photo_tagger/gui.py:4890
 msgid "What was undone:"
 msgstr "O que foi desfeito:"
 
-#: src/photo_tagger/gui.py:4900
+#: src/photo_tagger/gui.py:4904
 msgid "(no change)"
 msgstr "(sem mudanças)"
 
@@ -1986,8 +1964,8 @@ msgid ""
 "{files} · {selected} selected · {generated} generated · {saved} saved · "
 "{failed} failed"
 msgstr ""
-"{files} · {selected} selecionadas · {generated} geradas · {saved} salvas "
-"· {failed} com falha"
+"{files} · {selected} selecionadas · {generated} geradas · {saved} salvas · "
+"{failed} com falha"
 
 #: src/photo_tagger/gui_state.py:962
 #, python-brace-format

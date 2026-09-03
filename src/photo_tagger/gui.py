@@ -4280,6 +4280,10 @@ class MainWindow(QMainWindow):
 
     def _run_undo(self, *, dry_run: bool) -> None:
         """Put back (or preview putting back) everything the selected run wrote."""
+        if not dry_run and self._busy():
+            # A save in flight is writing the very files an undo would be reverting.
+            self._undo_details.setPlainText(_("Wait for the run in progress to finish first."))
+            return
         entry = self._journal_list.currentItem()
         if entry is None:
             self._undo_details.setPlainText(_("Pick a run first."))

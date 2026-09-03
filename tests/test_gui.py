@@ -3817,3 +3817,19 @@ def test_changing_the_metadata_language_reloads_the_vocabulary(
 
     assert window._vocabulary is not None  # noqa: SLF001
     assert window._vocabulary.fold_plurals is False  # noqa: SLF001
+
+
+def test_undo_waits_for_a_run_in_progress(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A save in flight is writing the very files an undo would revert, so it has to finish."""
+    a, _b = _save_two_photos(window, tmp_path, monkeypatch)
+    window._refresh_journals()  # noqa: SLF001
+    monkeypatch.setattr(window, "_busy", lambda: True)
+
+    window._run_undo(dry_run=False)  # noqa: SLF001
+
+    assert a.with_suffix(".xmp").exists()
+    assert "Wait for the run in progress" in window._undo_details.toPlainText()  # noqa: SLF001
