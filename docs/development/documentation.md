@@ -102,6 +102,31 @@ flowchart LR
 ```
 ````
 
+## Keeping the docs in sync with the code
+
+Prose rots quietly: a flag gets renamed, a command gets added, and the pages keep describing the
+tool as it was. [`scripts/check_docs_sync.py`][check-docs-sync] guards against that by walking the
+live cyclopts app rather than a hand-maintained list, and it runs as a pre-commit hook whenever the
+package or the docs change:
+
+```bash
+uv run scripts/check_docs_sync.py
+```
+
+It enforces three rules:
+
+- Every subcommand (`doctor`, `watch`, `undo`, `gui`) is named in `README.md` and in the
+    [CLI reference](../usage/cli-reference.md).
+- Every flag the CLI accepts appears in the CLI reference, under at least one of its names. That
+    page promises to document every flag, so a new flag cannot ship undocumented.
+- Every flag-shaped token in the user-facing pages (`README.md`, the site index, and everything
+    under `usage/` and `getting-started/`, plus the telemetry and troubleshooting pages) is a flag
+    the CLI really has. Lines that invoke another tool, such as `uv sync --extra gui`, are skipped.
+
+The check is about coverage, not correctness: it cannot tell that a documented default is stale or
+that a description is now wrong. Environment variables and config keys are outside its reach too.
+When you change behavior rather than the flag surface, re-read the affected page yourself.
+
 ## Style
 
 Keep the prose consistent with the rest of the site:
@@ -120,4 +145,5 @@ Keep the prose consistent with the rest of the site:
     broken links and rendering mistakes that are easy to miss in raw Markdown, and the docs deploy runs
     automatically once your change lands on `main`.
 
+[check-docs-sync]: https://github.com/jbsilva/photo-tagger/blob/main/scripts/check_docs_sync.py
 [docs-workflow]: https://github.com/jbsilva/photo-tagger/blob/main/.github/workflows/docs.yml

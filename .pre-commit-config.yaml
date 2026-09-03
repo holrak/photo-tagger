@@ -125,6 +125,13 @@ repos:
         pass_filenames: false
         files: (pyproject\.toml|uv\.lock|SECURITY\.md|CHANGELOG\.md)
 
+      - id: check-docs-sync
+        name: check docs match the CLI
+        entry: uv run scripts/check_docs_sync.py
+        language: system
+        pass_filenames: false
+        files: (src/photo_tagger/.*\.py|README\.md|docs/.*\.md|check_docs_sync\.py)$
+
       - id: check-translations
         name: check compiled translations
         entry: uv run scripts/compile_translations.py --check

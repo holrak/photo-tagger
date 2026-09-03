@@ -197,6 +197,8 @@ stdouts
 Strasse
 Straße
 stubjpeg
+subapp
+subapps
 subcontrol
 subfolders
 superfences
