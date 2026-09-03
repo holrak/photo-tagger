@@ -1,12 +1,14 @@
 """Tests for the Qt-free GUI helpers (no PySide6, no display required)."""
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from photo_tagger.gui_state import (
+    _MAX_LISTED_DROPPED,
     ADDED,
     BADGE_FAILED,
     BADGE_METADATA,
@@ -37,10 +39,13 @@ from photo_tagger.gui_state import (
     WORKING,
     FolderNode,
     GuiConfigValues,
+    HarmonizeResult,
     PhotoItem,
     Proposal,
     SaveOptions,
+    WatchSettings,
     apply_proposal,
+    apply_vocabulary,
     build_save_job,
     build_tree,
     chain_to_display,
@@ -58,11 +63,16 @@ from photo_tagger.gui_state import (
     format_duration,
     format_existing_keywords,
     group_by_parent,
+    harmonize_sessions,
+    harmonize_summary,
     hierarchy_preview,
     hierarchy_tree_text,
+    journal_label,
+    journal_time,
     keyword_diff,
     keywords_to_save,
     keywords_to_text,
+    load_vocabulary_file,
     login_shell_path,
     merged_config_text,
     new_paths,
@@ -84,12 +94,19 @@ from photo_tagger.gui_state import (
     tagged_tooltip,
     thumb_badges,
     tooltip,
+    undo_action_label,
+    undo_summary,
+    vocabulary_status,
+    vocabulary_summary,
+    watch_status_text,
     wrap_tooltip,
 )
 from photo_tagger.i18n import activate
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE
 from photo_tagger.models import KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
+from photo_tagger.undo import CHANGED, DELETED, RESTORED, UndoResult
+from photo_tagger.vocabulary import Vocabulary
 
 
 def test_expand_inputs_walks_folders_and_keeps_files(tmp_path: Path) -> None:
@@ -1002,3 +1019,259 @@ def test_save_options_any_field_needs_one_toggle() -> None:
         write_description=False,
         write_keywords=False,
     ).any_field
+
+
+# ---------------------------------------------------------------------------
+# Controlled vocabulary
+# ---------------------------------------------------------------------------
+
+
+def _vocabulary() -> Vocabulary:
+    """Build a small catalog with one hierarchy, like a Lightroom export gives."""
+    return Vocabulary.from_entries(["Animal|Bird|Osprey", "Sunset"])
+
+
+def test_apply_vocabulary_without_one_passes_the_keywords_through() -> None:
+    """No vocabulary means the model's own wording is what the review pane shows."""
+    outcome = apply_vocabulary(["Ospreys", "Tractor"], None)
+    assert outcome.keywords == ["Ospreys", "Tractor"]
+    assert outcome.mapped == 0
+    assert outcome.dropped == []
+
+
+def test_apply_vocabulary_rewrites_onto_the_catalogs_spelling_and_hierarchy() -> None:
+    """A match comes back as the catalog spells it, carrying the catalog's own parents."""
+    outcome = apply_vocabulary(["ospreys", "Tractor"], _vocabulary())
+    assert outcome.keywords == ["Osprey<Bird<Animal", "Tractor"]
+    assert outcome.mapped == 1
+    assert outcome.dropped == []
+
+
+def test_apply_vocabulary_strict_drops_what_the_catalog_lacks() -> None:
+    """Strict mode is what stops a run seeding the catalog with new keywords."""
+    outcome = apply_vocabulary(["Ospreys", "Tractor"], _vocabulary(), strict=True)
+    assert outcome.keywords == ["Osprey<Bird<Animal"]
+    assert outcome.dropped == ["Tractor"]
+
+
+def test_load_vocabulary_file_reports_an_unusable_file(tmp_path: Path) -> None:
+    """Choosing the wrong file is a normal mistake, so it is a message, not an exception."""
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# only a comment\n", encoding="utf-8")
+
+    vocabulary, error = load_vocabulary_file(empty)
+
+    assert vocabulary is None
+    assert "no keywords" in error
+
+
+def test_load_vocabulary_file_reads_a_keyword_list(tmp_path: Path) -> None:
+    """A plain list of terms and paths loads the same way the CLI's --vocabulary does."""
+    listing = tmp_path / "keywords.txt"
+    listing.write_text("Animal|Bird|Osprey\nSunset\n", encoding="utf-8")
+
+    vocabulary, error = load_vocabulary_file(listing)
+
+    assert error == ""
+    assert vocabulary is not None
+    assert vocabulary.match("ospreys") == "Osprey"
+
+
+def test_vocabulary_status_describes_each_state(tmp_path: Path) -> None:
+    """The label under the picker says what is in force, including why a file was refused."""
+    assert "No vocabulary" in vocabulary_status(None, None)
+    assert vocabulary_status(tmp_path / "k.txt", None, "broken file") == "broken file"
+    loaded = vocabulary_status(tmp_path / "k.txt", _vocabulary())
+    assert "4 keywords" in loaded  # Animal, Bird, Osprey, Sunset
+    assert "k.txt" in loaded
+
+
+def test_vocabulary_summary_is_silent_when_nothing_changed() -> None:
+    """A vocabulary the batch already fits has nothing to report."""
+    assert vocabulary_summary(0, {}) == ""
+
+
+def test_vocabulary_summary_reports_rewrites_and_rejections() -> None:
+    """The summary is what tells you whether the vocabulary needs a new keyword."""
+    summary = vocabulary_summary(3, {"Tractor": 4, "Barn": 1})
+    assert "3 keywords rewritten" in summary
+    assert "2 keywords dropped" in summary
+    assert "Tractor, Barn" in summary  # most frequent first
+
+
+def test_vocabulary_summary_caps_the_named_terms() -> None:
+    """Naming every rejection would fill the status bar; the log keeps the full list."""
+    dropped = {f"Term{index}": 10 - index for index in range(8)}
+    summary = vocabulary_summary(0, dropped)
+    assert "8 keywords dropped" in summary
+    # Five names, then an ellipsis, which is six comma-separated pieces.
+    assert summary.count(",") == _MAX_LISTED_DROPPED
+    assert "..." in summary
+
+
+# ---------------------------------------------------------------------------
+# Shoot harmonization
+# ---------------------------------------------------------------------------
+
+
+def _photo(path: Path, minutes: int) -> Path:
+    """Create a file whose mtime sits *minutes* into a fixed morning, for session grouping."""
+    path.write_text("x")
+    stamp = datetime(2026, 5, 1, 9, 0, tzinfo=UTC).timestamp() + minutes * 60
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_harmonize_sessions_is_off_for_a_zero_gap(tmp_path: Path) -> None:
+    """Zero minutes means every photo stands on its own, exactly as before."""
+    photo = _photo(tmp_path / "a.jpg", 0)
+    assert harmonize_sessions({photo: ["Osprey"]}, gap_minutes=0) == HarmonizeResult()
+
+
+def test_harmonize_sessions_makes_one_shoot_agree_with_itself(tmp_path: Path) -> None:
+    """Two frames of one bird stop landing in the catalog as two keywords."""
+    first = _photo(tmp_path / "a.jpg", 0)
+    second = _photo(tmp_path / "b.jpg", 3)
+    third = _photo(tmp_path / "c.jpg", 6)
+
+    result = harmonize_sessions(
+        {first: ["Osprey"], second: ["Osprey"], third: ["Ospreys"]},
+        gap_minutes=30,
+    )
+
+    assert result.sessions == 1
+    # Only the odd one out changed, onto the spelling the shoot used most.
+    assert result.keywords == {str(third): ["Osprey"]}
+
+
+def test_harmonize_sessions_keeps_separate_shoots_apart(tmp_path: Path) -> None:
+    """A shoot two hours later is a different shoot, and settles its own wording."""
+    morning = _photo(tmp_path / "a.jpg", 0)
+    morning_two = _photo(tmp_path / "b.jpg", 4)
+    evening = _photo(tmp_path / "c.jpg", 300)
+
+    result = harmonize_sessions(
+        {morning: ["Sunrise"], morning_two: ["Sunrise"], evening: ["Sunsets"]},
+        gap_minutes=60,
+    )
+
+    # The evening frame is alone in its session, so its own spelling is the majority.
+    assert (result.sessions, result.keywords) == (2, {})
+
+
+def test_harmonize_summary_describes_each_outcome() -> None:
+    """The status line has to say something useful whether or not anything moved."""
+    assert "generate some photos first" in harmonize_summary(HarmonizeResult())
+    assert "already agreed" in harmonize_summary(HarmonizeResult(sessions=2))
+    changed = HarmonizeResult(keywords={"/a.jpg": ["Osprey"]}, sessions=3)
+    summary = harmonize_summary(changed)
+    assert "3 shoots" in summary
+    assert "1 photo" in summary
+
+
+# ---------------------------------------------------------------------------
+# Undo
+# ---------------------------------------------------------------------------
+
+
+def test_journal_time_parses_the_run_start_from_the_name() -> None:
+    """Journals are named after their UTC start time, which is what the list shows."""
+    assert journal_time(Path("20260501143005-4242.jsonl")) == datetime(
+        2026,
+        5,
+        1,
+        14,
+        30,
+        5,
+        tzinfo=UTC,
+    )
+    assert journal_time(Path("not-a-journal.jsonl")) is None
+
+
+def test_journal_label_names_the_run_and_its_size() -> None:
+    """One row per recorded run: when it ran, and how much it wrote."""
+    label = journal_label(Path("20260501143005-4242.jsonl"), 128)
+    assert "128 files" in label
+    assert "2026-05-01" in label
+
+
+def test_journal_label_falls_back_to_the_file_name() -> None:
+    """A journal named by hand still lists, rather than vanishing from the dialog."""
+    assert journal_label(Path("mine.jsonl"), 1).startswith("mine")
+
+
+def test_undo_action_label_translates_the_outcomes() -> None:
+    """The dialog reads in words, not in the log's identifiers."""
+    assert undo_action_label(RESTORED) == "restored"
+    assert undo_action_label(CHANGED) == "changed since the run"
+    assert undo_action_label("something-new") == "something-new"
+
+
+def test_undo_summary_counts_what_was_put_back() -> None:
+    """The status line separates what was reverted from what was deliberately left alone."""
+    assert "recorded no writes" in undo_summary([])
+    all_good = [UndoResult(Path("/a.xmp"), RESTORED), UndoResult(Path("/b.xmp"), DELETED)]
+    assert undo_summary(all_good) == "Put back 2 files."
+    mixed = [*all_good, UndoResult(Path("/c.xmp"), CHANGED, "changed since the run")]
+    assert undo_summary(mixed) == "Put back 2 files; left 1 alone."
+
+
+# ---------------------------------------------------------------------------
+# Watching a folder
+# ---------------------------------------------------------------------------
+
+
+def test_watch_status_text_names_the_folders(tmp_path: Path) -> None:
+    """The status bar says where the watch is looking, then what it has picked up."""
+    settings = WatchSettings(folders=(tmp_path / "Inbox",))
+    assert watch_status_text(settings, added=0) == "Watching Inbox for new photos..."
+    assert watch_status_text(settings, added=3) == "Watching Inbox: 3 photos added so far."
+
+
+def test_watch_settings_default_to_reviewing_before_writing() -> None:
+    """Generating is the point of watching; saving unattended has to be asked for."""
+    settings = WatchSettings()
+    assert settings.generate is True
+    assert settings.save is False
+
+
+def test_config_toml_text_carries_the_keyword_rules(tmp_path: Path) -> None:
+    """The vocabulary, the session gap, and undo logging are run settings, so they persist."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    from photo_tagger.cli_options import load_defaults  # noqa: PLC0415
+
+    listing = tmp_path / "keywords.txt"
+    text = config_toml_text(
+        _config_values(
+            vocabulary=listing,
+            vocabulary_strict=True,
+            session_gap_minutes=45.0,
+            undo_log=False,
+        ),
+    )
+    defaults = load_defaults(tomllib.loads(text))
+
+    assert (
+        defaults.output.vocabulary,
+        defaults.output.vocabulary_strict,
+        defaults.output.session_gap_minutes,
+        defaults.artifacts.undo_log,
+    ) == (listing, True, 45.0, False)
+
+
+def test_config_toml_text_omits_an_unset_vocabulary() -> None:
+    """No vocabulary chosen writes no key, so the CLI does not try to open a blank path."""
+    assert "vocabulary = " not in config_toml_text(_config_values())
+
+
+def test_merged_config_text_drops_a_cleared_vocabulary(tmp_path: Path) -> None:
+    """Clearing the vocabulary in the window removes it from the config file too."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    existing = '[output]\nvocabulary = "old.txt"\nvocabulary_strict = true\n'
+    kept = merged_config_text(existing, _config_values(vocabulary=tmp_path / "new.txt"))
+    assert tomllib.loads(kept)["output"]["vocabulary"] == str(tmp_path / "new.txt")
+
+    cleared = merged_config_text(existing, _config_values())
+    assert "vocabulary" not in tomllib.loads(cleared)["output"]
