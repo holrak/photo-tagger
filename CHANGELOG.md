@@ -202,6 +202,28 @@ All notable changes to this project are documented here. The format is based on
   while a save is running, which used to empty the list under the writer and then report every photo
   it did write as unsaved; and a metadata scan left running past its grace period no longer tears
   down the scan started after it.
+- `photo-tagger undo` no longer restores an `*_original` that the run it is undoing never created. A
+  write with backups off passes `-overwrite_original` and leaves no backup, but any copy an earlier
+  run had left next to the photo was recorded as this run's, so undoing put back content that could
+  be months old and destroyed every edit made since.
+- GUI: quitting the window no longer crashes on the way out. `QCloseEvent` was named only in an
+  annotation, so PySide had to build its wrapper type from inside the callback delivering the event,
+  and shiboken does not check whether that succeeded. The drag-and-drop handlers had the same
+  exposure on the first drop.
+- GUI: Cancel is honored during an unattended watch. Cancelling a save used to be undone in the same
+  event-loop turn, writing every photo it had just spared; closing the window during shoot
+  harmonization no longer freezes until ExifTool has read the whole batch.
+- `photo-tagger watch` tags photos whose timestamp is in the future (a camera, card reader or NAS
+  whose clock runs fast, or any copy that preserved the source mtime). They could never satisfy the
+  `--settle` age check, so they were polled forever and silently never tagged.
+- `photo-tagger vocabulary` no longer folds English plurals into every catalog: a German library
+  used to lose one of `Alles` and `Alle` as a "variant" of the other. The command takes
+  `--output-language`, like the rest, and the GUI passes its metadata language. A broken ExifTool
+  now says so instead of reporting a library full of keywords as having none, and a file whose
+  `--organize` chunks failed says which keywords were left ungrouped rather than looking like a
+  considered verdict.
+- Tagging a batch that turns out to be empty no longer truncates the previous `--csv-file` report or
+  makes the model server round-trip it never needed.
 - The `gui` command only suggests installing the `[gui]` extra when PySide6/shiboken6 is actually
   missing; other import errors surface as themselves.
 - A failed cache initialization no longer leaks its SQLite connection.
