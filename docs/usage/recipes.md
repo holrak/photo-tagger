@@ -147,6 +147,23 @@ photo-tagger \
 `vocabulary_dropped` then names each rejected term and how often it came up, which is the list to
 work from when deciding what to add to the catalog.
 
+## Make a shoot's keywords agree with themselves
+
+Group the batch into shoots and let each one settle on one spelling and one hierarchy per subject.
+
+```bash
+photo-tagger \
+  -i ~/Pictures/Trip \
+  --recursive \
+  --session-gap 60
+```
+
+Photos taken less than an hour apart are one session. Each session is analyzed in full, its own
+output becomes its vocabulary (majority spelling, majority hierarchy), and only then is anything
+written, so forty frames of the same bird cannot land in the catalog as `Osprey`, `Ospreys`,
+`Bird|Osprey`, and `Wildlife|Raptor|Osprey`. Photos are processed in capture order, and the result
+is the same at any `--workers` setting.
+
 ## Cache model outputs across reruns
 
 Store model outputs in a SQLite cache so reruns skip the model call when nothing relevant changed.

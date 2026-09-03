@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format is based on
   them as-is. The run summary gains `vocabulary_mapped` (how many keywords were rewritten) and
   `vocabulary_dropped` (each rejected term and how often it came up), so the vocabulary can grow on
   purpose rather than by accident.
+- `--session-gap MINUTES`: group the batch into shoots (by EXIF capture time, falling back to file
+  mtime) and harmonize each one, so forty frames of the same bird stop landing in the catalog as
+  `Osprey`, `Ospreys`, `Bird|Osprey`, and `Wildlife|Raptor|Osprey`. A session is analyzed in full
+  before anything is written; its own output then becomes its vocabulary, with the majority spelling
+  and the majority hierarchy winning. Deriving it from the finished results rather than nudging the
+  model keeps it deterministic: the same batch harmonizes the same way at any `--workers` setting.
 
 ## [0.7.0] - 2026-08-08
 

@@ -30,6 +30,8 @@ directly into each photo with `--embed-in-photo`.
 - Merges with existing metadata unless you opt-in to overwrite
 - Snaps keywords onto your own Lightroom keyword list, so a run cannot fill your catalog with
   near-duplicates of terms you already curate
+- Harmonizes each shoot: every frame of the same subject gets the same keyword and the same
+  hierarchy, instead of "Osprey" here and "Ospreys" there
 - Works with Ollama, LM Studio, llama.cpp, and any hosted OpenAI-compatible API
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow
@@ -167,6 +169,10 @@ Key options:
   and `Animal|Bird|Osprey` paths). Matching ignores case, punctuation, and plurals, and every match
   is rewritten to the file's own spelling and hierarchy. Add `--vocabulary-strict` to drop keywords
   the file does not cover; the run summary then lists every dropped term and how often it came up
+- `--session-gap MINUTES` – group photos into shoots separated by this much idle time (by capture
+  time, falling back to mtime) and make each shoot's keywords agree with itself: the spelling and
+  hierarchy most of the session used win for all of it. Nothing in a session is written until every
+  photo in it has been analyzed
 - `--prompt-file PATH` – override the default user prompt with the contents of `PATH`
 - `--summary-file PATH` – write a JSON run summary (token usage, success/failure counts) to `PATH`
   on completion
@@ -273,6 +279,12 @@ Keep generated keywords inside the vocabulary your Lightroom catalog already use
 
 ```bash
 photo-tagger -i ./shoot --vocabulary ~/lightroom-keywords.txt --vocabulary-strict
+```
+
+Tag a trip so every frame of the same subject agrees, grouping shoots an hour apart:
+
+```bash
+photo-tagger -i ~/Pictures/Trip -r --session-gap 60
 ```
 
 Use a custom prompt tuned for wildlife photography:

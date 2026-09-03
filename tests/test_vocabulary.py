@@ -9,10 +9,10 @@ from photo_tagger.vocabulary import (
     Vocabulary,
     VocabularyError,
     _lightroom_csv_keywords,
-    _loose_key,
     _parse_lines,
     _singularize,
     load_vocabulary,
+    loose_key,
 )
 
 
@@ -381,5 +381,5 @@ def test_singularize_handles_common_endings(plural: str, expected: str) -> None:
 
 def test_loose_key_normalizes_punctuation_and_case() -> None:
     """Punctuation, spacing, and case never distinguish two terms."""
-    assert _loose_key("Bird-of-Prey") == _loose_key("bird of prey")
-    assert _loose_key("Bird's Nest") == "bird s nest"
+    assert loose_key("Bird-of-Prey") == loose_key("bird of prey")
+    assert loose_key("Bird's Nest") == "bird s nest"

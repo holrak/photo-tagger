@@ -68,6 +68,7 @@ from photo_tagger.progress import batch_progress
 # Runtime import (not type-only): cyclopts evaluates the Annotated[ProviderName, ...] field
 # on the doctor command to validate the --provider choices, so it must exist at definition time.
 from photo_tagger.providers import ProviderName  # noqa: TC001
+from photo_tagger.sessions import plan_sessions
 from photo_tagger.vocabulary import load_vocabulary, prompt_with_vocabulary
 
 
@@ -451,6 +452,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
     hint: str | None,
     log: LogConfig,
     telemetry_enabled: bool,
+    session_gap_minutes: float,
 ) -> None:
     """Single-shot info log so the run's full configuration is captured up-front."""
     logger.info(
@@ -486,6 +488,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         max_keywords=options.max_new_keywords,
         vocabulary_terms=len(options.vocabulary.terms) if options.vocabulary else 0,
         vocabulary_strict=options.vocabulary_strict,
+        session_gap_minutes=session_gap_minutes,
         temperature=options.temperature,
         max_tokens=options.max_tokens,
         timeout_seconds=options.timeout_seconds,
@@ -694,6 +697,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         hint=inference.hint,
         log=log,
         telemetry_enabled=telemetry_config.enabled,
+        session_gap_minutes=output.session_gap_minutes,
     )
 
     image_files = apply_skip_file(
@@ -793,6 +797,10 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
                 progress=progress,
                 cache=cache,
                 on_image_result=on_image_result,
+                session_plan=plan_sessions(
+                    image_files,
+                    gap_minutes=output.session_gap_minutes,
+                ),
             )
     finally:
         if cache is not None:

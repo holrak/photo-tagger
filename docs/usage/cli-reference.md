@@ -95,6 +95,7 @@ sidecar next to each image and leaves the original untouched.
 | `--max-keywords` N                               | none (keep all)   | `-`     | Cap AI-generated keywords kept per photo before merging.                                            |
 | `--vocabulary` PATH                              | none              | `-`     | Restrict generated keywords to the terms in PATH (see below).                                       |
 | `--vocabulary-strict`                            | `false`           | `-`     | Drop generated keywords the vocabulary does not cover instead of writing them as-is.                |
+| `--session-gap` MINUTES                          | `0` (off)         | `-`     | Group photos into shoots and make each shoot's keywords agree with itself (see below).              |
 | `--dry-run`                                      | `false`           | `-`     | Run the model and log the proposed metadata, but write nothing.                                     |
 
 ### Controlled vocabulary
@@ -131,6 +132,36 @@ from when growing the vocabulary. `vocabulary_mapped` counts the rewrites.
 The vocabulary is listed in the prompt as well, so the model prefers your terms in the first place
 instead of being corrected afterwards. That listing is part of the cache namespace: swapping
 vocabulary files starts a fresh cache slice rather than replaying keywords chosen under the old one.
+
+### Sessions
+
+Each photo is analyzed on its own, so forty frames of the same bird can come back as `Osprey` here
+and `Ospreys` there, filed under `Bird<Animal` on one frame and `Raptor<Wildlife` on the next.
+Lightroom then shows four keywords where there is one subject.
+
+`--session-gap MINUTES` fixes that without needing a vocabulary file. The batch is split into shoots
+wherever the capture time (EXIF `DateTimeOriginal`, falling back to file mtime) jumps by more than
+the given gap. Every photo in a shoot is analyzed first, then the session's own output becomes its
+vocabulary: the spelling most of the session used wins, and so does the hierarchy most of it used.
+Only then is anything written.
+
+```bash
+photo-tagger -i ~/Pictures/Trip -r --session-gap 60
+```
+
+Because the vocabulary is derived from the finished results rather than fed to the model, the
+outcome does not depend on which photo finished first: the same batch harmonizes the same way every
+time, at any `--workers` setting. It composes with `--vocabulary`, which is applied per photo first.
+
+Two details worth knowing:
+
+- Photos are processed in capture order rather than the order they were listed.
+- Sessions run one after another (the photos inside one still run in parallel), and a session's
+    writes happen in a burst at its end. If a write fails there it is reported as failed and **not**
+    retried: the model work is already done and harmonized, and an ExifTool write that failed for a
+    filesystem reason is not the kind of failure a second attempt clears. Analysis failures are
+    still retried as usual, and a photo recovered by the retry pass lands on its shoot's agreed
+    terms.
 
 ## Filter
 

@@ -1,6 +1,7 @@
 """Tests for metadata helpers that don't need a real exiftool binary."""
 
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -25,6 +26,7 @@ from photo_tagger.metadata import (
     managed_helper,
     prompt_with_hint,
     read_caption,
+    read_capture_times,
     read_image_context,
     read_metadata_sources,
     write_metadata,
@@ -986,3 +988,54 @@ def test_read_metadata_sources_returns_empty_on_exiftool_error(tmp_path: Path) -
         patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
     ):
         assert read_metadata_sources(img) == []
+
+
+def test_read_capture_times_parses_exif_timestamps(tmp_path: Path) -> None:
+    """DateTimeOriginal comes back as a naive datetime in the camera's own local time."""
+    photo = tmp_path / "a.cr3"
+    photo.write_text("x")
+    helper = _fake_helper(
+        [{"SourceFile": str(photo), "EXIF:DateTimeOriginal": "2026:05:01 09:15:30"}],
+    )
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        times = read_capture_times([photo])
+
+    # Naive by definition: EXIF records the camera's own clock, with no zone.
+    assert times == {photo: datetime(2026, 5, 1, 9, 15, 30)}  # noqa: DTZ001
+
+
+def test_read_capture_times_skips_missing_and_malformed_values(tmp_path: Path) -> None:
+    """A blank or malformed tag leaves the path out, so the caller can fall back to mtime."""
+    blank = tmp_path / "blank.cr3"
+    broken = tmp_path / "broken.cr3"
+    for path in (blank, broken):
+        path.write_text("x")
+    helper = _fake_helper(
+        [
+            {"SourceFile": str(blank)},
+            {"SourceFile": str(broken), "EXIF:DateTimeOriginal": "0000:00:00 00:00:00"},
+            {"EXIF:DateTimeOriginal": "2026:05:01 09:15:30"},
+        ],
+    )
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        assert read_capture_times([blank, broken]) == {}
+
+
+def test_read_capture_times_returns_empty_for_no_existing_files(tmp_path: Path) -> None:
+    """Paths that are not files never reach exiftool."""
+    with patch("photo_tagger.metadata.ExifToolHelper") as ctor:
+        assert read_capture_times([tmp_path / "gone.cr3"]) == {}
+    ctor.assert_not_called()
+
+
+def test_read_capture_times_survives_an_exiftool_error(tmp_path: Path) -> None:
+    """An exiftool failure degrades to "no timestamps", not an exception."""
+    photo = tmp_path / "a.cr3"
+    photo.write_text("x")
+    helper = _fake_helper()
+    helper.get_tags.side_effect = ValueError("boom")
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        assert read_capture_times([photo]) == {}

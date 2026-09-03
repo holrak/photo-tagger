@@ -59,6 +59,7 @@ def _patches(captured: dict[str, Any]) -> Any:  # noqa: ANN401 - context manager
         captured["on_image_result"] = kwargs.get("on_image_result")
         captured["cache"] = kwargs.get("cache")
         captured["progress"] = kwargs.get("progress")
+        captured["session_plan"] = kwargs.get("session_plan")
         return None
 
     return (
@@ -202,6 +203,33 @@ def test_cli_vocabulary_reaches_the_pipeline_and_the_prompt(tmp_path: Path) -> N
     assert options.vocabulary.match("ospreys") == "Osprey"
     assert options.vocabulary_strict is True
     assert "- Animal > Bird > Osprey" in captured["user_prompt"]
+
+
+def test_cli_session_gap_builds_a_plan_for_the_batch(tmp_path: Path) -> None:
+    """--session-gap groups the resolved batch and hands the plan to run_batch."""
+    first = _make_jpeg(tmp_path / "a.cr3")
+    second = _make_jpeg(tmp_path / "b.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(first), "--input", str(second), "--session-gap", "30"])
+
+    plan = captured["session_plan"]
+    assert plan is not None
+    assert plan.sessions == [[first.resolve(), second.resolve()]]
+
+
+def test_cli_without_session_gap_passes_no_plan(tmp_path: Path) -> None:
+    """The default keeps the per-photo behavior, with no grouping pass at all."""
+    image = _make_jpeg(tmp_path / "img.cr3")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent, run_batch:
+        _run_app(["--input", str(image)])
+
+    assert captured["session_plan"] is None
 
 
 def test_cli_exits_when_the_vocabulary_file_has_no_terms(tmp_path: Path) -> None:

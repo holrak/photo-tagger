@@ -31,6 +31,7 @@ from photo_tagger.metadata import (
     write_metadata,
 )
 from photo_tagger.models import KeywordSet
+from photo_tagger.sessions import build_session_vocabulary
 
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 
     from photo_tagger.metadata import ImageContext
     from photo_tagger.models import GeneratedMetadata, InferenceResult
+    from photo_tagger.sessions import SessionPlan
     from photo_tagger.vocabulary import Vocabulary
 
     OnSuccess = Callable[[Path], None]
@@ -249,6 +251,23 @@ def _is_permanent_failure(exc: BaseException) -> bool:
 
 
 @dataclass(slots=True)
+class _PendingWrite:
+    """
+    One analyzed photo waiting for its session to finish before it is written.
+
+    Holds everything the write still needs: the keywords (which harmonization may rewrite), the two
+    text fields, the existing keywords to merge into, and the scratch pad the deferred
+    :class:`ImageOutcome` is built from.
+    """
+
+    keywords: list[str]
+    title: str
+    description: str
+    existing: KeywordSet
+    scratch: _InferenceScratch
+
+
+@dataclass(slots=True)
 class _BatchContext:
     """
     Shared state threaded through every function in a single run_batch call.
@@ -274,6 +293,14 @@ class _BatchContext:
     # run_batch can route them straight to the final tally instead of a doomed retry pass.
     permanently_failed: dict[Path, str] = field(default_factory=dict)
     permanently_failed_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Set when --session-gap groups the batch into shoots. Photos are then analyzed a session at a
+    # time and written only once the whole session agrees on its keywords.
+    session_plan: SessionPlan | None = None
+    # Non-None while a session is being analyzed: finished analyses land here instead of on disk.
+    # Everything that must wait for the write (success counting, the skip list, the per-photo
+    # outcome) checks this flag rather than firing early.
+    pending: dict[Path, _PendingWrite] | None = None
+    pending_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _run_model(image_path: Path, ctx: _BatchContext, *, contextual_prompt: str) -> InferenceResult:
@@ -425,6 +452,26 @@ def _apply_vocabulary(keywords: list[str], ctx: _BatchContext, *, file_name: str
     return result.keywords
 
 
+def _apply_session_vocabulary(
+    keywords: list[str],
+    ctx: _BatchContext,
+    image_path: Path,
+) -> list[str]:
+    """
+    Snap keywords onto the vocabulary this photo's session settled on, if it has one yet.
+
+    Only the retry pass finds one: while a session is being analyzed there is nothing to agree with
+    yet, and the flush that follows harmonizes the whole session at once. A photo that comes back
+    through the retry pass afterwards still lands on the same terms as the rest of its shoot.
+    """
+    if ctx.session_plan is None:
+        return keywords
+    vocabulary = ctx.session_plan.vocabulary_for(image_path)
+    if not vocabulary:
+        return keywords
+    return vocabulary.snap(keywords).keywords
+
+
 def process_photo(
     image_path: Path,
     ctx: _BatchContext,
@@ -448,7 +495,8 @@ def process_photo(
             caller can wrap them into an ImageOutcome without retracing the work.
 
     Returns:
-        True if every step succeeded, False if metadata writing failed.
+        True if every step succeeded, False if metadata writing failed. In session mode the write
+        is deferred (see :class:`_PendingWrite`), so True there means "analyzed, queued to write".
     """
     logger.info("processing_photo")
     options = ctx.options
@@ -505,32 +553,67 @@ def process_photo(
             )
             keywords = keywords[: options.max_new_keywords]
 
-        base = existing_keywords_full if options.preserve_existing_kw else KeywordSet()
-        # An empty set when keywords are disabled, so write_metadata emits no keyword tags and
-        # leaves whatever is already on the file untouched (e.g. refresh only title/description).
-        merged_keywords = merge_keywords(base, keywords) if options.write_keywords else KeywordSet()
-        _record_scratch(outcome_sink, merged_keywords=merged_keywords)
+        keywords = _apply_session_vocabulary(keywords, ctx, image_path)
 
-        if options.dry_run:
-            logger.info(
-                "dry_run_preview",
-                file=image_path.name,
-                title=title if options.write_title else None,
-                description=description if options.write_description else None,
-                subject_keywords=merged_keywords.subject,
-                hierarchical_keywords=merged_keywords.hierarchical,
-            )
+        pending = _PendingWrite(
+            keywords=keywords,
+            title=title,
+            description=description,
+            existing=existing_keywords_full if options.preserve_existing_kw else KeywordSet(),
+            scratch=outcome_sink if outcome_sink is not None else {},
+        )
+        if ctx.pending is not None:
+            # Session mode: hold the analysis until the whole shoot has one shared vocabulary.
+            with ctx.pending_lock:
+                ctx.pending[image_path] = pending
             return True
 
-        return write_metadata(
-            image_path,
-            merged_keywords,
-            description=description if options.write_description else None,
-            title=title if options.write_title else None,
-            backup=options.backup_xmp,
-            use_sidecar=options.use_sidecar,
-            et=helper,
+        return _write_pending(image_path, pending, ctx, et=helper)
+
+
+def _write_pending(
+    image_path: Path,
+    pending: _PendingWrite,
+    ctx: _BatchContext,
+    *,
+    et: ExifToolHelper | None = None,
+) -> bool:
+    """
+    Merge one analyzed photo's keywords with what is already on it and write the result.
+
+    Split out of :func:`process_photo` so session mode can run it later, after harmonization has had
+    its say over ``pending.keywords``. Returns True on a successful write or a dry run.
+    """
+    options = ctx.options
+    # An empty set when keywords are disabled, so write_metadata emits no keyword tags and
+    # leaves whatever is already on the file untouched (e.g. refresh only title/description).
+    merged_keywords = (
+        merge_keywords(pending.existing, pending.keywords)
+        if options.write_keywords
+        else KeywordSet()
+    )
+    _record_scratch(pending.scratch, merged_keywords=merged_keywords)
+
+    if options.dry_run:
+        logger.info(
+            "dry_run_preview",
+            file=image_path.name,
+            title=pending.title if options.write_title else None,
+            description=pending.description if options.write_description else None,
+            subject_keywords=merged_keywords.subject,
+            hierarchical_keywords=merged_keywords.hierarchical,
         )
+        return True
+
+    return write_metadata(
+        image_path,
+        merged_keywords,
+        description=pending.description if options.write_description else None,
+        title=pending.title if options.write_title else None,
+        backup=options.backup_xmp,
+        use_sidecar=options.use_sidecar,
+        et=et,
+    )
 
 
 def _emit_outcome(
@@ -614,7 +697,10 @@ def execute_process(
         if ok:
             event = "retry_success" if retry else "processing_success"
             logger.info(event, index=index)
-            _emit_outcome(ctx.on_image_result, image_file, scratch, success=True, retry=retry)
+            if ctx.pending is None:
+                # In session mode the photo is only analyzed at this point; the flush emits its
+                # outcome once the write has actually happened and can be reported truthfully.
+                _emit_outcome(ctx.on_image_result, image_file, scratch, success=True, retry=retry)
             return True
 
         if retry:
@@ -658,12 +744,17 @@ class BatchTotals:
     vocabulary_dropped: dict[str, int] = field(default_factory=dict)
 
 
-def _notify_success(on_success: OnSuccess | None, image_file: Path) -> None:
-    """Invoke *on_success* defensively; a callback failure must not abort the batch."""
-    if on_success is None:
+def _notify_success(ctx: _BatchContext, image_file: Path) -> None:
+    """
+    Invoke ``ctx.on_success`` defensively; a callback failure must not abort the batch.
+
+    Silent while a session is being analyzed: nothing has been written yet, and the callback is
+    what appends to the resume skip list. The flush calls this once the write lands.
+    """
+    if ctx.on_success is None or ctx.pending is not None:
         return
     try:
-        on_success(image_file)
+        ctx.on_success(image_file)
     except Exception as exc:  # noqa: BLE001 - any callback error must not break the batch.
         logger.exception("on_success_callback_failed", file=image_file.name, error=str(exc))
 
@@ -700,7 +791,7 @@ def _run_pass_serial(
             return successes, failed, True
         if ok:
             successes += 1
-            _notify_success(ctx.on_success, image_file)
+            _notify_success(ctx, image_file)
         elif retry:
             logger.error("file_failed_after_retry", file=image_file.name)
             failed.append(image_file)
@@ -773,7 +864,7 @@ def _run_pass_concurrent(
 
                 if ok:
                     successes += 1
-                    _notify_success(ctx.on_success, image_file)
+                    _notify_success(ctx, image_file)
                 elif retry:
                     logger.error("file_failed_after_retry", file=image_file.name)
                     failed.append(image_file)
@@ -787,10 +878,7 @@ def _run_pass_concurrent(
             interrupted = True
             pool.shutdown(wait=False, cancel_futures=True)
             remaining = {f: img for f, img in future_to_image.items() if f not in consumed}
-            drained_ok, drained_failed, cancelled = _drain_after_interrupt(
-                remaining,
-                on_success=ctx.on_success,
-            )
+            drained_ok, drained_failed, cancelled = _drain_after_interrupt(remaining, ctx)
             # Images the interrupt caught before submission are pending too.
             submitted = set(future_to_image.values())
             never_submitted = [img for _, img in indexed if img not in submitted]
@@ -810,8 +898,7 @@ def _run_pass_concurrent(
 
 def _drain_after_interrupt(
     remaining: dict[Future[bool], Path],
-    *,
-    on_success: OnSuccess | None,
+    ctx: _BatchContext,
 ) -> tuple[int, list[Path], list[Path]]:
     """
     Settle the futures a KeyboardInterrupt left behind; return (successes, failures, cancelled).
@@ -836,7 +923,7 @@ def _drain_after_interrupt(
         ok = future.result() if error is None else False
         if ok:
             drained_successes += 1
-            _notify_success(on_success, image_file)
+            _notify_success(ctx, image_file)
         else:
             failures.append(image_file)
     return drained_successes, failures, cancelled
@@ -877,6 +964,124 @@ def _run_pass(
         retry=retry,
         workers=workers,
     )
+
+
+@dataclass(slots=True, frozen=True)
+class _SessionOutcome:
+    """
+    What one pass over the session plan produced.
+
+    ``retryable`` are photos that failed during analysis and are worth another model call.
+    ``final_failures`` are photos whose analysis succeeded but whose write did not: the model work
+    is already done and harmonized, and an exiftool write that failed (unwritable folder, full disk)
+    is not the kind of failure a second attempt clears, so they skip the retry pass.
+    """
+
+    successes: int = 0
+    retryable: list[Path] = field(default_factory=list)
+    final_failures: list[Path] = field(default_factory=list)
+    interrupted: bool = False
+
+
+def _flush_session(
+    files: list[Path],
+    ctx: _BatchContext,
+    collected: dict[Path, _PendingWrite],
+    *,
+    index: int,
+    et: ExifToolHelper | None,
+) -> tuple[list[Path], list[Path]]:
+    """
+    Harmonize one session's keywords, then write every photo in it.
+
+    Returns ``(written, write_failures)``. The written list is what the caller settles the pass's
+    bookkeeping against: a photo the pass reported as unfinished (a Ctrl-C caught between its
+    analysis and the end of the pass) is on disk all the same and must not also be queued for a
+    retry. The session's vocabulary is kept on the plan so the retry pass can apply it to any photo
+    that reaches the write later.
+    """
+    if not collected:
+        return [], []
+
+    vocabulary = build_session_vocabulary(pending.keywords for pending in collected.values())
+    if ctx.session_plan is not None:
+        ctx.session_plan.remember(index, vocabulary)
+    logger.info(
+        "session_harmonized",
+        session=index + 1,
+        photos=len(collected),
+        terms=len(vocabulary.terms),
+    )
+
+    written: list[Path] = []
+    failures: list[Path] = []
+    for image_file in files:
+        pending = collected.get(image_file)
+        if pending is None:
+            continue  # Analysis failed; already counted and queued for the retry pass.
+        pending.keywords = vocabulary.snap(pending.keywords).keywords
+        ok = _write_pending(image_file, pending, ctx, et=et)
+        _emit_outcome(ctx.on_image_result, image_file, pending.scratch, success=ok, retry=False)
+        if ok:
+            written.append(image_file)
+            _notify_success(ctx, image_file)
+        else:
+            logger.error("session_write_failed", file=image_file.name)
+            ctx.usage.add_failure(FAILURE_METADATA_WRITE)
+            failures.append(image_file)
+    return written, failures
+
+
+def _run_session_passes(
+    image_files: list[Path],
+    ctx: _BatchContext,
+    *,
+    et: ExifToolHelper | None,
+    workers: int,
+) -> _SessionOutcome:
+    """
+    Analyze, harmonize, and write the batch one session at a time.
+
+    Sessions run in sequence so a shoot is complete (and can agree with itself) before the next one
+    starts; the photos inside a session still run across the thread pool. A Ctrl-C stops after the
+    session in flight has been written, so no analyzed photo is lost.
+    """
+    plan = ctx.session_plan
+    if plan is None:  # pragma: no cover - callers check before getting here
+        return _SessionOutcome()
+
+    wanted = set(image_files)
+    successes = 0
+    retryable: list[Path] = []
+    final_failures: list[Path] = []
+    for index, session in enumerate(plan.sessions):
+        files = [path for path in session if path in wanted]
+        if not files:
+            continue
+        ctx.pending = {}
+        _, failed, interrupted = _run_pass(
+            files,
+            ctx,
+            retry=False,
+            et=et,
+            # A one-photo session has nothing to parallelize, and a pool per photo would cost
+            # more than it saves on a batch of singletons.
+            workers=min(workers, len(files)),
+        )
+        collected = ctx.pending
+        ctx.pending = None
+        written, write_failures = _flush_session(files, ctx, collected, index=index, et=et)
+        successes += len(written)
+        final_failures.extend(write_failures)
+        # A photo the pass called unfinished but the flush wrote anyway (Ctrl-C between the two)
+        # is done; only what never reached disk is worth another model call.
+        settled = set(written) | set(write_failures)
+        retryable.extend(path for path in failed if path not in settled)
+        if interrupted:
+            done = {path for session_files in plan.sessions[: index + 1] for path in session_files}
+            retryable.extend(path for path in image_files if path not in done)
+            return _SessionOutcome(successes, retryable, final_failures, interrupted=True)
+    return _SessionOutcome(successes, retryable, final_failures)
 
 
 def _run_retry_phase(
@@ -937,6 +1142,7 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
     on_complete: OnComplete | None = None,
     cache: InferenceCache | None = None,
     on_image_result: OnImageResult | None = None,
+    session_plan: SessionPlan | None = None,
 ) -> BatchTotals:
     """
     Run the initial pass plus a single retry pass and return summary totals.
@@ -956,6 +1162,11 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
     with it: either on first-pass success, or on retry-pass success or failure. First-pass failures
     are silent because they're still pending retry; this guarantees the bar reaches 100% without
     overshooting on flaky files.
+
+    With a *session_plan*, the batch is processed one shoot at a time: every photo in a session is
+    analyzed first, the session's keywords are harmonized (see :mod:`photo_tagger.sessions`), and
+    only then is anything written. Progress and the *on_success* callback still fire once per photo,
+    the latter after its write rather than after its analysis.
     """
     usage = _UsageAccumulator()
     successful_files: list[Path] = []
@@ -977,16 +1188,27 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
         on_success=_record_success,
         on_image_result=on_image_result,
         progress=progress,
+        session_plan=session_plan,
     )
 
     with managed_helper(None) if workers <= 1 else _no_helper() as et:
-        success, pending, interrupted = _run_pass(
-            image_files,
-            ctx,
-            retry=False,
-            et=et,
-            workers=workers,
-        )
+        if session_plan is not None:
+            outcome = _run_session_passes(image_files, ctx, et=et, workers=workers)
+            success, pending, interrupted = (
+                outcome.successes,
+                outcome.retryable,
+                outcome.interrupted,
+            )
+            unrecoverable = outcome.final_failures
+        else:
+            success, pending, interrupted = _run_pass(
+                image_files,
+                ctx,
+                retry=False,
+                et=et,
+                workers=workers,
+            )
+            unrecoverable = []
         if interrupted:
             # Don't retry after the user asked us to stop. Mark everything that
             # was still pending as failed so the summary file reflects reality.
@@ -1000,10 +1222,12 @@ def run_batch(  # noqa: PLR0913 - public entry point; each kwarg is a distinct c
                 workers=workers,
             )
 
+    # Session-mode write failures never entered the retry pass, so fold them in here.
+    still_failing = still_failing + unrecoverable
     totals = BatchTotals(
         total_files=len(image_files),
         success=success + retry_successes,
-        initial_failures=len(pending),
+        initial_failures=len(pending) + len(unrecoverable),
         retry_successes=retry_successes,
         failed_files=[str(path) for path in still_failing],
         successful_files=[str(path) for path in successful_files],

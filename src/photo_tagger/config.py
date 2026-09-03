@@ -96,13 +96,16 @@ LOCATION_TAGS = (
     "IPTC:City",
 )
 
+# When the shutter fired. Read as prompt context, and on its own when grouping a batch into shoots.
+TAG_EXIF_DATE_TIME_ORIGINAL = "EXIF:DateTimeOriginal"
+
 # Camera/capture tags surfaced to the model as corroborative evidence. The prompt instructs the
 # model to use them only to specify or disambiguate what is visible in the image, never to assert
 # content the image doesn't show.
 CAMERA_TAGS = (
     "EXIF:Model",
     "EXIF:LensModel",
-    "EXIF:DateTimeOriginal",
+    TAG_EXIF_DATE_TIME_ORIGINAL,
 )
 
 # ExifTool tag names referenced from multiple modules. Keeping them centralized avoids the

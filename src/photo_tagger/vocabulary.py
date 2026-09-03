@@ -69,14 +69,14 @@ _NON_ALPHANUMERIC_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
-def _loose_key(term: str) -> str:
+def loose_key(term: str) -> str:
     """
     Return a comparison key that ignores case, punctuation, spacing, and a trailing plural.
 
     Examples:
-        >>> _loose_key("Bird-of-Prey")
+        >>> loose_key("Bird-of-Prey")
         'bird of prey'
-        >>> _loose_key("Ospreys")
+        >>> loose_key("Ospreys")
         'osprey'
     """
     cleaned = _NON_ALPHANUMERIC_RE.sub(" ", term.casefold())
@@ -308,7 +308,7 @@ class Vocabulary:
             if (canonical := exact.get(key)) is not None:
                 return canonical
             exact[key] = term
-            loose.setdefault(_loose_key(term), term)
+            loose.setdefault(loose_key(term), term)
             terms.append(term)
             return term
 
@@ -325,7 +325,7 @@ class Vocabulary:
                 # Synonyms only ever alias an existing term; they are not terms themselves, so a
                 # generated "Sea Hawk" comes back as the catalog's "Osprey".
                 exact.setdefault(synonym.casefold(), canonical_chain[-1])
-                loose.setdefault(_loose_key(synonym), canonical_chain[-1])
+                loose.setdefault(loose_key(synonym), canonical_chain[-1])
 
         return cls(terms=tuple(terms), chains=chains, exact=exact, loose=loose)
 
@@ -349,7 +349,7 @@ class Vocabulary:
             return None
         if (hit := self.exact.get(stripped.casefold())) is not None:
             return hit
-        key = _loose_key(stripped)
+        key = loose_key(stripped)
         if (hit := self.loose.get(key)) is not None:
             return hit
         if not key or len(self.terms) > _FUZZY_MAX_TERMS:

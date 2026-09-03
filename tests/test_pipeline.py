@@ -16,6 +16,7 @@ from photo_tagger.errors import BatchError
 from photo_tagger.metadata import ImageContext
 from photo_tagger.models import InferenceResult, KeywordSet
 from photo_tagger.pipeline import (
+    FAILURE_METADATA_WRITE,
     FAILURE_MODEL_API,
     ImageOutcome,
     ProcessingOptions,
@@ -30,6 +31,7 @@ from photo_tagger.pipeline import (
     process_photo,
     run_batch,
 )
+from photo_tagger.sessions import SessionPlan
 from photo_tagger.vocabulary import Vocabulary
 
 
@@ -1503,7 +1505,22 @@ def test_run_batch_concurrent_records_worker_exception(tmp_path: Path) -> None:
 def test_notify_success_is_a_noop_without_callback(tmp_path: Path) -> None:
     """_notify_success returns immediately when no on_success callback is registered."""
     # Must not raise and must not require a callable.
-    _notify_success(None, tmp_path / "img.cr3")
+    _notify_success(_ctx(), tmp_path / "img.cr3")
+
+
+def test_notify_success_stays_silent_while_a_session_is_pending(tmp_path: Path) -> None:
+    """Nothing is on disk yet during a session's analysis, so the resume list must not grow."""
+    notified: list[Path] = []
+    ctx = _ctx()
+    ctx.on_success = notified.append
+    ctx.pending = {}
+
+    _notify_success(ctx, tmp_path / "img.cr3")
+    assert notified == []
+
+    ctx.pending = None
+    _notify_success(ctx, tmp_path / "img.cr3")
+    assert notified == [tmp_path / "img.cr3"]
 
 
 def test_drain_after_interrupt_counts_completed_work(tmp_path: Path) -> None:
@@ -1518,6 +1535,8 @@ def test_drain_after_interrupt_counts_completed_work(tmp_path: Path) -> None:
     never_started.cancel()
 
     notified: list[Path] = []
+    ctx = _ctx()
+    ctx.on_success = notified.append
     successes, failures, cancelled = _drain_after_interrupt(
         {
             done_ok: tmp_path / "ok.cr3",
@@ -1525,7 +1544,7 @@ def test_drain_after_interrupt_counts_completed_work(tmp_path: Path) -> None:
             exploded: tmp_path / "boom.cr3",
             never_started: tmp_path / "pending.cr3",
         },
-        on_success=notified.append,
+        ctx,
     )
 
     assert successes == 1
@@ -1572,3 +1591,305 @@ def test_run_batch_concurrent_progress_callback_fires_per_image(tmp_path: Path) 
 
 # The keyword-cap behavior is covered by the parametrized
 # test_process_photo_caps_ai_keywords_before_merging above (below/at/above the count, and None).
+
+
+# ---------------------------------------------------------------------------
+# Session mode: analyze a whole shoot, harmonize it, then write
+# ---------------------------------------------------------------------------
+
+
+# The pipeline's own process_photo, kept aside so tests can patch the name while still running
+# the real thing underneath (session tests need the analyze/write split, not a stub).
+_real_process_photo = process_photo
+
+
+def _session_plan(files: list[Path]) -> SessionPlan:
+    """Put every file in one session, as plan_sessions would for a single shoot."""
+    return SessionPlan(sessions=[list(files)], index_of=dict.fromkeys(files, 0))
+
+
+@pytest.fixture
+def two_photo_session(tmp_path: Path, patched_pipeline: dict[str, Any]) -> dict[str, Any]:
+    """Two photos of one subject that the model described inconsistently."""
+    first = tmp_path / "a.cr3"
+    second = tmp_path / "b.cr3"
+    for path in (first, second):
+        path.write_text("x")
+    by_file = {
+        first: InferenceResult(title="T1", description="D1", keywords=["Osprey<Bird<Animal"]),
+        second: InferenceResult(title="T2", description="D2", keywords=["ospreys<Raptor"]),
+    }
+    written: list[tuple[Path, KeywordSet]] = []
+    current: list[Path] = [first]
+
+    def fake_write(image_path: Path, keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
+        written.append((image_path, keywords))
+        return True
+
+    patched_pipeline["write"].side_effect = fake_write
+    # process_photo runs per file; hand each one the inference recorded for it.
+    patched_pipeline["analyze"].side_effect = lambda **_kw: by_file[current[0]]
+
+    def process(path: Path, ctx: _BatchContext, **kwargs: Any) -> bool:  # noqa: ANN401
+        current[0] = path
+        return _real_process_photo(path, ctx, **kwargs)
+
+    return {"files": [first, second], "written": written, "process": process}
+
+
+def test_run_batch_harmonizes_a_session_before_writing(
+    two_photo_session: dict[str, Any],
+) -> None:
+    """Both photos of one shoot are written with the session's majority term and hierarchy."""
+    files = two_photo_session["files"]
+    with patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]):
+        totals = run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan(files),
+        )
+
+    assert totals.success == len(files)
+    written = dict(two_photo_session["written"])
+    for path in files:
+        assert written[path].subject == ["Animal", "Bird", "Osprey"]
+        assert written[path].hierarchical == ["Animal|Bird", "Animal|Bird|Osprey"]
+
+
+def test_run_batch_session_defers_success_until_the_write(
+    two_photo_session: dict[str, Any],
+) -> None:
+    """The resume skip list and the per-photo outcome only fire once the file is on disk."""
+    files = two_photo_session["files"]
+    notified: list[Path] = []
+    outcomes: list[ImageOutcome] = []
+
+    def failing_write(image_path: Path, _keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
+        return image_path != files[1]
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
+        patch("photo_tagger.pipeline.write_metadata", side_effect=failing_write),
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            on_success=notified.append,
+            on_image_result=outcomes.append,
+            session_plan=_session_plan(files),
+        )
+
+    assert notified == [files[0]]
+    assert [(o.file, o.success) for o in outcomes] == [(files[0], True), (files[1], False)]
+    # The outcome carries the merged keywords, which only exist after the deferred write.
+    assert outcomes[0].written_keywords == ["Animal", "Bird", "Osprey"]
+
+
+def test_run_batch_session_write_failure_is_final(
+    two_photo_session: dict[str, Any],
+) -> None:
+    """A failed write is not re-inferred: the model work is done and exiftool is the problem."""
+    files = two_photo_session["files"]
+    calls: list[Path] = []
+
+    def counting_process(path: Path, ctx: _BatchContext, **kwargs: Any) -> bool:  # noqa: ANN401
+        calls.append(path)
+        return bool(two_photo_session["process"](path, ctx, **kwargs))
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=counting_process),
+        patch("photo_tagger.pipeline.write_metadata", return_value=False),
+        pytest.raises(BatchError) as batch_error,
+    ):
+        run_batch(
+            files,
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan(files),
+        )
+
+    totals = batch_error.value.args[0]
+    assert calls == files  # analyzed once each, never retried
+    assert totals.success == 0
+    assert totals.failure_kinds == {FAILURE_METADATA_WRITE: len(files)}
+    assert sorted(totals.failed_files) == sorted(str(f) for f in files)
+
+
+def test_run_batch_session_retry_reuses_the_session_vocabulary(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """A photo that only succeeds on retry still lands on its shoot's agreed terms."""
+    steady = tmp_path / "steady.cr3"
+    flaky = tmp_path / "flaky.cr3"
+    for path in (steady, flaky):
+        path.write_text("x")
+    written: dict[Path, KeywordSet] = {}
+    attempts = {"flaky": 0}
+
+    def fake_write(image_path: Path, keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
+        written[image_path] = keywords
+        return True
+
+    patched_pipeline["write"].side_effect = fake_write
+
+    def process(path: Path, ctx: _BatchContext, **kwargs: Any) -> bool:  # noqa: ANN401
+        if path == flaky:
+            attempts["flaky"] += 1
+            if attempts["flaky"] == 1:
+                msg = "model hiccup"
+                raise RuntimeError(msg)
+            patched_pipeline["analyze"].return_value = InferenceResult(
+                title="T",
+                description="D",
+                keywords=["ospreys<Raptor"],
+            )
+        else:
+            patched_pipeline["analyze"].return_value = InferenceResult(
+                title="T",
+                description="D",
+                keywords=["Osprey<Bird<Animal"],
+            )
+        return _real_process_photo(path, ctx, **kwargs)
+
+    with patch("photo_tagger.pipeline.process_photo", side_effect=process):
+        totals = run_batch(
+            [steady, flaky],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan([steady, flaky]),
+        )
+
+    assert totals.retry_successes == 1
+    assert written[flaky].subject == ["Animal", "Bird", "Osprey"]
+
+
+def test_run_batch_session_skips_empty_and_filtered_sessions(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """A plan that mentions photos outside this batch processes only the batch's own."""
+    kept = tmp_path / "kept.cr3"
+    absent = tmp_path / "absent.cr3"
+    kept.write_text("x")
+    patched_pipeline["write"].return_value = True
+    plan = SessionPlan(sessions=[[absent], [kept]], index_of={absent: 0, kept: 1})
+
+    totals = run_batch(
+        [kept],
+        agent=_FAKE_AGENT,
+        options=ProcessingOptions(),
+        session_plan=plan,
+    )
+
+    assert totals.success == 1
+    assert totals.total_files == 1
+
+
+def test_run_batch_reports_what_the_vocabulary_changed(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """The totals name the rewrites and the rejections, which is what the summary file shows."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["ospreys", "Golden Hour"],
+    )
+
+    totals = run_batch(
+        [image],
+        agent=_FAKE_AGENT,
+        options=ProcessingOptions(
+            vocabulary=Vocabulary.from_entries(["Osprey"]),
+            vocabulary_strict=True,
+        ),
+    )
+
+    assert totals.vocabulary_mapped == 1
+    assert totals.vocabulary_dropped == {"Golden Hour": 1}
+
+
+def test_run_batch_leaves_the_vocabulary_totals_at_zero_when_nothing_changed(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Keywords that already match the catalog are not reported as rewrites."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    patched_pipeline["analyze"].return_value = InferenceResult(
+        title="T",
+        description="D",
+        keywords=["Osprey"],
+    )
+
+    totals = run_batch(
+        [image],
+        agent=_FAKE_AGENT,
+        options=ProcessingOptions(vocabulary=Vocabulary.from_entries(["Osprey"])),
+    )
+
+    assert totals.vocabulary_mapped == 0
+    assert totals.vocabulary_dropped == {}
+
+
+def test_run_batch_session_with_no_usable_analysis_writes_nothing(tmp_path: Path) -> None:
+    """When every photo in a session fails, there is nothing to harmonize and nothing to write."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", return_value=False),
+        patch("photo_tagger.pipeline.write_metadata") as write,
+        pytest.raises(BatchError),
+    ):
+        run_batch(
+            [image],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=_session_plan([image]),
+        )
+
+    write.assert_not_called()
+
+
+def test_run_batch_session_interrupt_stops_after_the_session_in_flight(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Ctrl-C during a session still writes what that session analyzed, and skips the rest."""
+    first = tmp_path / "a.cr3"
+    second = tmp_path / "b.cr3"
+    for path in (first, second):
+        path.write_text("x")
+    patched_pipeline["write"].return_value = True
+    plan = SessionPlan(sessions=[[first], [second]], index_of={first: 0, second: 1})
+
+    def process(path: Path, ctx: _BatchContext, **kwargs: Any) -> bool:  # noqa: ANN401
+        if path == second:  # pragma: no cover - the interrupt lands before this session runs
+            msg = "should not be reached"
+            raise AssertionError(msg)
+        _real_process_photo(path, ctx, **kwargs)
+        raise KeyboardInterrupt
+
+    with (
+        patch("photo_tagger.pipeline.process_photo", side_effect=process),
+        pytest.raises(BatchError) as batch_error,
+    ):
+        run_batch(
+            [first, second],
+            agent=_FAKE_AGENT,
+            options=ProcessingOptions(),
+            session_plan=plan,
+        )
+
+    totals = batch_error.value.args[0]
+    # The interrupted photo had already been analyzed, so the flush wrote it and it counts as a
+    # success; only the session that never started is reported as pending.
+    assert totals.success == 1
+    assert totals.failed_files == [str(second)]

@@ -257,6 +257,19 @@ class OutputConfig:
             ),
         ),
     ] = False
+    session_gap_minutes: Annotated[
+        float,
+        Parameter(
+            name=("--session-gap",),
+            help=(
+                "Group photos into shoots separated by this many idle minutes (by capture time, "
+                "falling back to file mtime) and make each shoot's keywords agree with itself: "
+                "the spelling and the hierarchy most of the session used win for all of it. "
+                "Nothing in a session is written until every photo in it has been analyzed. "
+                "0 (the default) processes each photo on its own, as before"
+            ),
+        ),
+    ] = 0.0
 
 
 @dataclass

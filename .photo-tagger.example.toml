@@ -48,6 +48,7 @@
 # max_keywords = 15           # cap AI keywords kept per photo before merging
 # vocabulary = "keywords.txt" # Lightroom keyword export, or one term/path per line
 # vocabulary_strict = false   # true = drop keywords the vocabulary does not cover
+# session_gap_minutes = 60    # group photos into shoots this far apart and harmonize each
 
 # --- filter -------------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 import contextlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 from photo_tagger.config import (
     CAMERA_TAGS,
     LOCATION_TAGS,
+    TAG_EXIF_DATE_TIME_ORIGINAL,
     TAG_EXIF_IMAGE_DESCRIPTION,
     TAG_IPTC_KEYWORDS,
     TAG_IPTC_OBJECT_NAME,
@@ -559,6 +561,60 @@ def read_image_context(
     )
 
 
+def _parse_exif_datetime(raw: str) -> datetime | None:
+    """
+    Parse EXIF's ``YYYY:MM:DD HH:MM:SS`` into a naive datetime, or None when it is unusable.
+
+    Sub-second and offset suffixes are cut off rather than parsed: grouping photos into shoots only
+    needs whole seconds, and a camera's clock is its own local time either way.
+    """
+    try:
+        return datetime.strptime(raw.strip()[:19], "%Y:%m:%d %H:%M:%S")  # noqa: DTZ007 - camera local time
+    except ValueError:
+        return None
+
+
+def read_capture_times(
+    image_paths: Iterable[Path],
+    *,
+    et: ExifToolHelper | None = None,
+) -> dict[Path, datetime]:
+    """
+    Read ``EXIF:DateTimeOriginal`` for every path in a single exiftool call.
+
+    Returns naive datetimes in the camera's own local time, which is what a capture timestamp means
+    and what makes gaps between frames comparable. Paths whose tag is missing, blank, or malformed
+    are simply absent from the result, leaving the caller free to fall back to the file mtime.
+    """
+    paths = [path for path in image_paths if path.is_file()]
+    if not paths:
+        return {}
+
+    try:
+        blocks = _batched_get_tags(
+            et,
+            files=[str(p) for p in paths],
+            tags=[TAG_EXIF_DATE_TIME_ORIGINAL],
+        )
+    except _EXIFTOOL_ERRORS as exc:
+        logger.exception("failed_to_read_capture_times", error=str(exc))
+        return {}
+
+    by_source = {path: path for path in paths}
+    times: dict[Path, datetime] = {}
+    for block in blocks:
+        source = block.get("SourceFile")
+        raw = block.get(TAG_EXIF_DATE_TIME_ORIGINAL)
+        if not source or not raw:
+            continue
+        image_path = by_source.get(Path(str(source)))
+        parsed = _parse_exif_datetime(str(raw))
+        if image_path is not None and parsed is not None:
+            times[image_path] = parsed
+    logger.debug("capture_times_read", requested=len(paths), found=len(times))
+    return times
+
+
 def _first_present(values: dict[str, str], *tags: str) -> str | None:
     """Return the first non-empty value in *values* lookup-ordered by *tags*."""
     for tag in tags:
@@ -574,7 +630,7 @@ def select_camera_fields(
     return (
         camera_info.get("EXIF:Model"),
         camera_info.get("EXIF:LensModel"),
-        camera_info.get("EXIF:DateTimeOriginal"),
+        camera_info.get(TAG_EXIF_DATE_TIME_ORIGINAL),
     )
 
 
@@ -615,7 +671,7 @@ def _camera_lines(camera_info: dict[str, str]) -> list[str]:
         lines.append(f"- Camera: {model}")
     if lens := camera_info.get("EXIF:LensModel"):
         lines.append(f"- Lens: {lens}")
-    if captured := camera_info.get("EXIF:DateTimeOriginal"):
+    if captured := camera_info.get(TAG_EXIF_DATE_TIME_ORIGINAL):
         lines.append(f"- Captured: {captured}")
     return lines
 
