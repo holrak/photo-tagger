@@ -340,6 +340,23 @@ def test_unchecking_folder_deselects_descendants(window: gui.MainWindow, tmp_pat
     assert all(not item.selected for item in window._items.values())  # noqa: SLF001
 
 
+def test_unchecking_a_subfolder_repaints_its_ancestors(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """A folder toggle has to walk up too: its parents are no longer fully checked."""
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg"), "b": _jpeg(sub / "b.jpg")})
+    top_row = window._folder_rows[str(tmp_path)]  # noqa: SLF001
+    assert top_row.checkState(0) == Qt.CheckState.Checked
+
+    window._folder_rows[str(sub)].setCheckState(0, Qt.CheckState.Unchecked)  # noqa: SLF001
+
+    # "a" is still checked and "b" is not, so the top folder is neither on nor off.
+    assert top_row.checkState(0) == Qt.CheckState.PartiallyChecked
+
+
 def test_remove_selected_folder_drops_its_files(window: gui.MainWindow, tmp_path: Path) -> None:
     """Removing a folder node removes all photos under it (not just deselects)."""
     _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg"), "b": _jpeg(tmp_path / "b.jpg")})

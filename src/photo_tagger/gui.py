@@ -2000,10 +2000,7 @@ class MainWindow(QMainWindow):
                 leaves.append(leaf)
         # Folder tristates re-derive after every leaf is set, walking each chain upward.
         for leaf in leaves:
-            parent = leaf.parent()
-            while parent is not None:
-                self._sync_folder_check(parent)
-                parent = parent.parent()
+            self._sync_ancestors(leaf)
         self._sync_grid_checks()
         self._syncing = False
         self._update_status()
@@ -2033,10 +2030,7 @@ class MainWindow(QMainWindow):
         leaf = self._leaf_for(Path(key))
         if leaf is not None:
             leaf.setCheckState(0, _checked(item.selected))
-            parent = leaf.parent()
-            while parent is not None:
-                self._sync_folder_check(parent)
-                parent = parent.parent()
+            self._sync_ancestors(leaf)
         self._syncing = False
         self._update_status()
 
@@ -2931,10 +2925,8 @@ class MainWindow(QMainWindow):
             path = item.data(0, _PATH_ROLE)
             if path is not None:
                 self._items[path].selected = item.checkState(0) == Qt.CheckState.Checked
-            parent = item.parent()
-            while parent is not None:
-                self._sync_folder_check(parent)
-                parent = parent.parent()
+        # Whichever kind of row was toggled, every folder above it may have gone mixed.
+        self._sync_ancestors(item)
         self._sync_grid_checks()
         self._syncing = False
         self._update_status()
@@ -2949,6 +2941,13 @@ class MainWindow(QMainWindow):
                 path = child.data(0, _PATH_ROLE)
                 if path is not None:
                     self._items[path].selected = state == Qt.CheckState.Checked
+
+    def _sync_ancestors(self, item: QTreeWidgetItem) -> None:
+        """Re-derive the tristate of every folder above *item* (callers hold ``_syncing``)."""
+        parent = item.parent()
+        while parent is not None:
+            self._sync_folder_check(parent)
+            parent = parent.parent()
 
     def _sync_folder_check(self, folder_item: QTreeWidgetItem) -> None:
         states = {folder_item.child(i).checkState(0) for i in range(folder_item.childCount())}
