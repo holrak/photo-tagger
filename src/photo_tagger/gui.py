@@ -2113,6 +2113,10 @@ class MainWindow(QMainWindow):
 
     def _stop_scan(self) -> None:
         if self._scan_worker is not None:
+            # Cut the worker loose before letting go of it. A scan detached by the timeout below
+            # keeps running, and its late finished signal would otherwise reach _on_scan_finished
+            # and tear down whatever scan is current by then, not the one that just ended.
+            self._scan_worker.disconnect(self)
             self._scan_worker.deleteLater()
         if self._scan_thread is not None:
             thread = self._scan_thread

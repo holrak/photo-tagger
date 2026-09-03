@@ -2906,6 +2906,32 @@ def test_stop_scan_detaches_instead_of_blocking_when_still_running(
     assert fake_thread.finished_slots  # cleanup deferred to whenever it actually finishes
 
 
+def test_a_detached_scan_finishing_leaves_a_newer_scan_alone(
+    window: gui.MainWindow,
+) -> None:
+    """
+    A scan the timeout detached must not take the next scan down with it.
+
+    It keeps running after _stop_scan lets go, and _on_scan_finished tears down whatever scan is
+    current when it fires, so a late finish used to quit and discard an unrelated live one.
+    """
+    stale = gui.MetadataScanWorker([])
+    stale.done.connect(window._on_scan_done)  # noqa: SLF001
+    stale.finished.connect(window._on_scan_finished)  # noqa: SLF001
+    window._scan_thread = _FakeScanThread(finishes_in_time=False)  # noqa: SLF001
+    window._scan_worker = stale  # noqa: SLF001
+    window._stop_scan()  # noqa: SLF001 - detaches; `stale` runs on
+
+    live_thread = _FakeScanThread(finishes_in_time=True)
+    window._scan_thread = live_thread  # noqa: SLF001
+    window._scan_worker = gui.MetadataScanWorker([])  # noqa: SLF001
+
+    stale.finished.emit()
+
+    assert window._scan_thread is live_thread  # noqa: SLF001
+    assert not live_thread.quit_called
+
+
 def test_on_scan_finished_does_not_restart_a_scan_once_closing(
     window: gui.MainWindow,
     monkeypatch: pytest.MonkeyPatch,
