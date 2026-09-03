@@ -40,6 +40,8 @@ from photo_tagger.gui_state import (
     FolderNode,
     GuiConfigValues,
     HarmonizeResult,
+    Location,
+    NavigationHistory,
     PhotoItem,
     Proposal,
     SaveOptions,
@@ -73,8 +75,10 @@ from photo_tagger.gui_state import (
     keywords_to_save,
     keywords_to_text,
     load_vocabulary_file,
+    location_crumb,
     login_shell_path,
     merged_config_text,
+    navigation_shortcuts,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -321,6 +325,159 @@ def test_paths_under_filters_by_folder() -> None:
     paths = [Path("/a/1.jpg"), Path("/b/2.jpg"), Path("/a/sub/3.jpg")]
     assert paths_under(paths, Path("/a")) == [Path("/a/1.jpg"), Path("/a/sub/3.jpg")]
     assert paths_under(paths, Path("/b")) == [Path("/b/2.jpg")]
+
+
+# ---------------------------------------------------------------------------
+# Navigation history
+# ---------------------------------------------------------------------------
+
+
+def _photo_at(name: str, folder: str = "/shoot") -> Location:
+    """Build a photo location, the thing the detail pane shows."""
+    return Location(path=Path(folder) / name, is_dir=False)
+
+
+def _folder_at(path: str) -> Location:
+    """Build a folder location, the thing the thumbnail grid shows."""
+    return Location(path=Path(path), is_dir=True)
+
+
+def test_history_starts_empty() -> None:
+    """A fresh history has nowhere to go and nothing open."""
+    history = NavigationHistory()
+    assert history.current is None
+    assert history.peek_back() is None
+    assert history.peek_forward() is None
+    assert history.back() is None
+    assert history.forward() is None
+
+
+def test_history_back_returns_to_the_grid_a_photo_was_opened_from() -> None:
+    """The folder grid -> photo -> Back round trip, which is what the arrows are for."""
+    history = NavigationHistory()
+    grid = _folder_at("/shoot")
+    history.visit(grid)
+    history.visit(_photo_at("a.jpg"))
+
+    assert history.peek_back() == grid
+    assert history.back() == grid
+    assert history.current == grid
+
+
+def test_history_walks_a_trail_of_photos_both_ways() -> None:
+    """Back retraces photo by photo, and Forward replays the steps it undid."""
+    history = NavigationHistory()
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        history.visit(_photo_at(name))
+
+    assert history.back() == _photo_at("b.jpg")
+    assert history.back() == _photo_at("a.jpg")
+    assert history.back() is None  # nothing before the first photo
+    assert history.forward() == _photo_at("b.jpg")
+    assert history.forward() == _photo_at("c.jpg")
+    assert history.forward() is None
+
+
+def test_history_visiting_after_going_back_drops_the_forward_trail() -> None:
+    """Browsing on from a place stepped back to ends the forward trail there."""
+    history = NavigationHistory()
+    history.visit(_photo_at("a.jpg"))
+    history.visit(_photo_at("b.jpg"))
+    history.back()
+
+    history.visit(_photo_at("c.jpg"))
+
+    assert history.peek_forward() is None
+    assert history.back() == _photo_at("a.jpg")
+
+
+def test_history_ignores_revisiting_the_open_place() -> None:
+    """Re-recording the place already shown is a no-op, so Back never lands on it twice."""
+    history = NavigationHistory()
+    history.visit(_photo_at("a.jpg"))
+    history.visit(_photo_at("b.jpg"))
+
+    history.visit(_photo_at("b.jpg"))
+
+    assert history.peek_back() == _photo_at("a.jpg")
+    assert history.back() == _photo_at("a.jpg")
+
+
+def test_history_leave_makes_back_return_to_the_place_just_closed() -> None:
+    """Emptying the pane keeps the place in the trail, so Back reopens it."""
+    history = NavigationHistory()
+    history.visit(_photo_at("a.jpg"))
+
+    history.leave()
+
+    assert history.current is None
+    assert history.back() == _photo_at("a.jpg")
+
+
+def test_history_leave_on_an_empty_pane_changes_nothing() -> None:
+    """Leaving twice must not stack the same place onto the trail."""
+    history = NavigationHistory()
+    history.visit(_photo_at("a.jpg"))
+    history.leave()
+    history.leave()
+
+    assert history.back() == _photo_at("a.jpg")
+    assert history.back() is None
+
+
+def test_history_prune_forgets_places_that_left_the_list() -> None:
+    """A removed photo is dropped from both trails, so Back skips over it."""
+    history = NavigationHistory()
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        history.visit(_photo_at(name))
+    history.back()  # b.jpg open, c.jpg ahead
+
+    history.prune(lambda location: location.path.name != "c.jpg")
+
+    assert history.current == _photo_at("b.jpg")
+    assert history.peek_forward() is None
+    assert history.back() == _photo_at("a.jpg")
+
+
+def test_history_prune_of_the_open_place_leaves_the_pane_empty() -> None:
+    """Removing the open photo empties the pane; Back then lands on the one before it."""
+    history = NavigationHistory()
+    history.visit(_photo_at("a.jpg"))
+    history.visit(_photo_at("b.jpg"))
+
+    history.prune(lambda location: location.path.name != "b.jpg")
+
+    assert history.current is None
+    assert history.back() == _photo_at("a.jpg")
+
+
+def test_history_forgets_the_oldest_place_past_its_limit() -> None:
+    """The trail is capped, so a long session cannot grow it without bound."""
+    history = NavigationHistory(limit=2)
+    for name in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
+        history.visit(_photo_at(name))
+
+    assert history.back() == _photo_at("c.jpg")
+    assert history.back() == _photo_at("b.jpg")
+    assert history.back() is None  # a.jpg fell off the end
+
+
+def test_location_crumb_names_a_photo_with_its_folder() -> None:
+    """A photo's crumb carries the folder, since file names alone repeat across shoots."""
+    assert location_crumb(_photo_at("DSC_0042.NEF", "/pics/Shoot 1")) == "Shoot 1 / DSC_0042.NEF"
+
+
+def test_navigation_shortcuts_follow_the_platform() -> None:
+    """Each platform gets its own idiom: browser keys on macOS, file manager keys elsewhere."""
+    assert navigation_shortcuts("darwin") == ("Ctrl+[", "Ctrl+]", "Ctrl+Up")
+    assert navigation_shortcuts("linux") == ("Alt+Left", "Alt+Right", "Alt+Up")
+    assert navigation_shortcuts("win32") == ("Alt+Left", "Alt+Right", "Alt+Up")
+
+
+def test_location_crumb_names_a_folder_by_itself() -> None:
+    """A folder's crumb is its own name, and the full path when it has none."""
+    assert location_crumb(_folder_at("/pics/Shoot 1")) == "Shoot 1"
+    assert location_crumb(_folder_at("/")) == "/"
 
 
 def test_rank_vision_models_surfaces_likely_first_without_dropping_any() -> None:

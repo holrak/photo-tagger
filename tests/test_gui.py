@@ -1866,6 +1866,221 @@ def test_grid_combos_are_sized_to_their_widest_label(window: gui.MainWindow) -> 
 
 
 # ---------------------------------------------------------------------------
+# Back / Forward / Enclosing Folder
+# ---------------------------------------------------------------------------
+
+
+def _open_grid(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    names: tuple[str, ...] = ("a.jpg", "b.jpg"),
+) -> dict[str, Path]:
+    """Add a folder of photos and open its thumbnail grid, with no background jobs."""
+    files = {name: _jpeg(tmp_path / name) for name in names}
+    _stub_reads(monkeypatch, keywords=[])
+    monkeypatch.setattr(window, "_start_thumbs", lambda _paths: None)
+    _add_dir(window, files)
+    _select(window, window._tree.topLevelItem(0))  # noqa: SLF001 - the folder node
+    return files
+
+
+def test_back_returns_from_a_photo_to_the_grid_it_was_opened_from(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Grid -> thumbnail -> Back lands on the grid again, with the folder row selected."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+
+    window._on_thumb_activated(window._grid_items[str(files["a.jpg"])])  # noqa: SLF001
+    assert window._right.currentIndex() == gui._PAGE_DETAIL  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+    assert window._grid_folder == tmp_path  # noqa: SLF001
+    current = window._tree.currentItem()  # noqa: SLF001
+    assert current is not None
+    assert current.data(0, gui._PATH_ROLE) == str(tmp_path)  # noqa: SLF001
+
+
+def test_back_and_forward_walk_between_two_photos(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Back returns to the photo seen before this one, and Forward comes back to it."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+    _select(window, window._leaf_for(files["b.jpg"]))  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+    assert window._current is window._items[str(files["a.jpg"])]  # noqa: SLF001
+
+    window._go_forward()  # noqa: SLF001
+    assert window._current is window._items[str(files["b.jpg"])]  # noqa: SLF001
+
+
+def test_back_keeps_the_edits_typed_before_leaving(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stepping back commits the open photo's fields, like any other navigation."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+    _select(window, window._leaf_for(files["b.jpg"]))  # noqa: SLF001
+    window._hint.setText("the second frame")  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+
+    assert window._items[str(files["b.jpg"])].hint == "the second frame"  # noqa: SLF001
+
+
+def test_nav_arrows_are_disabled_until_there_is_somewhere_to_go(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both arrows start gray, Back arms on the second place, Forward only after a Back."""
+    assert not window._back_button.isEnabled()  # noqa: SLF001
+    assert not window._forward_button.isEnabled()  # noqa: SLF001
+
+    files = _open_grid(window, tmp_path, monkeypatch)
+    assert not window._back_button.isEnabled()  # noqa: SLF001 - the grid is the first place
+
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+    assert window._back_button.isEnabled()  # noqa: SLF001
+    assert not window._forward_button.isEnabled()  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+    assert window._forward_button.isEnabled()  # noqa: SLF001
+
+
+def test_nav_arrows_name_their_target_and_the_crumb_says_where_you_are(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hints name the place they lead to, so the arrows are not two mystery buttons."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+
+    assert tmp_path.name in window._back_button.toolTip()  # noqa: SLF001
+    assert "a.jpg" in window._crumb.text()  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+
+    assert "a.jpg" in window._forward_button.toolTip()  # noqa: SLF001
+    assert window._crumb.text() == tmp_path.name  # noqa: SLF001
+
+
+def test_back_skips_a_photo_that_left_the_list(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing a photo takes it out of the trail, so Back never opens a dead row."""
+    files = _open_grid(window, tmp_path, monkeypatch, names=("a.jpg", "b.jpg", "c.jpg"))
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        _select(window, window._leaf_for(files[name]))  # noqa: SLF001
+
+    window._remove_items([str(files["b.jpg"])])  # noqa: SLF001
+    window._go_back()  # noqa: SLF001
+
+    assert window._current is window._items[str(files["a.jpg"])]  # noqa: SLF001
+
+
+def test_removing_the_open_photo_leaves_back_pointing_at_it_no_more(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pane empties, and Back returns to the grid rather than the removed photo."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+
+    window._remove_items([str(files["a.jpg"])])  # noqa: SLF001
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+
+    window._go_back()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+
+
+def test_clearing_the_list_empties_the_trail(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clear List leaves nowhere to go back to, so both arrows go gray again."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+
+    window._clear()  # noqa: SLF001
+
+    assert not window._back_button.isEnabled()  # noqa: SLF001
+    assert not window._forward_button.isEnabled()  # noqa: SLF001
+    assert window._crumb.text() == ""  # noqa: SLF001
+
+
+def test_back_on_an_empty_trail_does_nothing(window: gui.MainWindow) -> None:
+    """The keyboard shortcut still fires when there is nothing behind; it must be a no-op."""
+    window._go_back()  # noqa: SLF001
+    window._go_forward()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+
+
+def test_enclosing_folder_opens_the_grid_of_the_open_photo(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photo picked straight from the tree can still jump up to its contact sheet."""
+    files = _open_grid(window, tmp_path, monkeypatch)
+    _select(window, window._leaf_for(files["a.jpg"]))  # noqa: SLF001
+
+    window._go_up()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+    assert window._grid_folder == tmp_path  # noqa: SLF001
+
+
+def test_enclosing_folder_at_the_top_says_so(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The top folder has nothing above it in the list, and the status bar explains that."""
+    _open_grid(window, tmp_path, monkeypatch)
+
+    window._go_up()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001 - stayed put
+    assert window._status.text() != ""  # noqa: SLF001
+
+
+def test_enclosing_folder_with_nothing_open_is_a_no_op(window: gui.MainWindow) -> None:
+    """Nothing is open, so there is no enclosing folder to show."""
+    window._go_up()  # noqa: SLF001
+
+    assert window._right.currentIndex() == gui._PAGE_EMPTY  # noqa: SLF001
+
+
+def test_go_menu_holds_the_navigation_actions(window: gui.MainWindow) -> None:
+    """The three moves are in the menu bar, which is also what arms their shortcuts."""
+    actions = [action for action in window._go_menu.actions() if not action.isSeparator()]  # noqa: SLF001
+    assert actions == [
+        window._back_action,  # noqa: SLF001
+        window._forward_action,  # noqa: SLF001
+        window._up_action,  # noqa: SLF001
+    ]
+    assert all(not action.shortcut().isEmpty() for action in actions)
+
+
+# ---------------------------------------------------------------------------
 # Generation worker
 # ---------------------------------------------------------------------------
 

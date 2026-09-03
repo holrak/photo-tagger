@@ -119,6 +119,16 @@ All notable changes to this project are documented here. The format is based on
   only CLI runs. The vocabulary, the session gap, and the undo-log toggle persist through *Save
   Settings as Defaults*, so a CLI run picks up the same rules.
 
+- GUI: **Back** and **Forward** over the places the right-hand pane has shown, as arrows above the
+  pane and in a new **Go** menu with the platform's browser keys. Opening a photo from a folder's
+  thumbnail grid used to be a one-way trip: getting the contact sheet back meant finding the folder
+  row in the tree again, and there was no way at all to return to the photo you were comparing this
+  one against. Back now retraces the route actually taken, photo to photo and photo to grid, and the
+  label beside the arrows names what is open (`Shoot 1 / DSC_0042.NEF`) for when the tree row is
+  scrolled out of sight. **Go > Enclosing Folder** (`Cmd+Up` / `Alt+Up`) covers the case with no
+  route to retrace: a photo picked straight from the tree still jumps to its grid. Photos removed
+  from the list leave the trail with them, so Back never reopens a row that is gone.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added

@@ -45,7 +45,7 @@ from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
     from photo_tagger.undo import UndoResult
@@ -541,6 +541,108 @@ def paths_under(paths: Iterable[Path], folder: Path) -> list[Path]:
     return [path for path in paths if path.is_relative_to(folder)]
 
 
+@dataclass(frozen=True, slots=True)
+class Location:
+    """One place the right-hand pane can show: a folder's thumbnail grid, or a photo's detail."""
+
+    path: Path
+    is_dir: bool
+
+
+def location_crumb(location: Location) -> str:
+    """
+    Name a place for the Back/Forward hints and the pane's header.
+
+    A photo carries its folder ("Shoot 1 / DSC_0042.NEF") because the file name alone is rarely
+    enough to tell two frames of the same shoot apart.
+    """
+    if location.is_dir:
+        return location.path.name or str(location.path)
+    folder = location.path.parent.name
+    return f"{folder} / {location.path.name}" if folder else location.path.name
+
+
+# How many places back the history remembers. Deep enough that reviewing a shoot never runs out of
+# trail, shallow enough that the whole thing stays a handful of strings.
+HISTORY_LIMIT = 100
+
+
+class NavigationHistory:
+    """
+    Where the user has been in the right-hand pane, so Back and Forward can retrace it.
+
+    Browser semantics: visiting a place pushes the one being left onto the back trail and drops the
+    forward trail, so what Back offers is always the route actually taken. Re-visiting the place
+    already shown is ignored, which is what makes it safe to record every navigation, including the
+    ones Back and Forward cause themselves.
+    """
+
+    def __init__(self, limit: int = HISTORY_LIMIT) -> None:
+        """Start an empty trail, remembering at most *limit* places to go back to."""
+        self._limit = limit
+        self._back: list[Location] = []
+        self._forward: list[Location] = []
+        self._current: Location | None = None
+
+    @property
+    def current(self) -> Location | None:
+        """The place shown now, or None when the pane is showing nothing."""
+        return self._current
+
+    def visit(self, location: Location) -> None:
+        """Record *location* as the place now shown, ending the forward trail."""
+        if location == self._current:
+            return
+        if self._current is not None:
+            self._back.append(self._current)
+            if len(self._back) > self._limit:
+                del self._back[0]  # one place at a time, so dropping the oldest is enough
+        self._current = location
+        self._forward.clear()
+
+    def leave(self) -> None:
+        """Note that the pane went empty, so Back returns to the last place rather than past it."""
+        if self._current is not None:
+            self._back.append(self._current)
+            self._current = None
+
+    def peek_back(self) -> Location | None:
+        """Return where Back would go (for naming it), or None when nothing is behind."""
+        return self._back[-1] if self._back else None
+
+    def peek_forward(self) -> Location | None:
+        """Return where Forward would go, or None until a Back has been taken."""
+        return self._forward[-1] if self._forward else None
+
+    def back(self) -> Location | None:
+        """Step one place back and return it, or None when there is nothing behind."""
+        return self._step(self._back, self._forward)
+
+    def forward(self) -> Location | None:
+        """Step one place forward and return it, or None when there is nothing ahead."""
+        return self._step(self._forward, self._back)
+
+    def _step(self, source: list[Location], sink: list[Location]) -> Location | None:
+        if not source:
+            return None
+        if self._current is not None:
+            sink.append(self._current)
+        self._current = source.pop()
+        return self._current
+
+    def prune(self, keep: Callable[[Location], bool]) -> None:
+        """
+        Forget every place *keep* rejects, e.g. a photo just removed from the list.
+
+        Dropping the place currently shown leaves the pane on nothing, so Back then lands on the
+        last surviving place before it instead of skipping over it.
+        """
+        self._back = [location for location in self._back if keep(location)]
+        self._forward = [location for location in self._forward if keep(location)]
+        if self._current is not None and not keep(self._current):
+            self._current = None
+
+
 def rank_vision_models(model_ids: Iterable[str]) -> list[str]:
     """
     Order model ids with likely vision-capable ones first, keeping all of them.
@@ -1020,6 +1122,20 @@ def progress_timing_text(done: int, total: int, elapsed: float) -> str:
         elapsed=spent,
         remaining=format_duration(remaining),
     )
+
+
+def navigation_shortcuts(platform_name: str) -> tuple[str, str, str]:
+    """
+    Return the Back, Forward, and enclosing-folder keys to use on *platform_name*.
+
+    Each platform gets its own idiom: the browser keys on macOS (Qt reads a portable "Ctrl" as Cmd
+    there) and the file manager keys elsewhere. Qt's own ``StandardKey.Back`` is Alt+Left on every
+    platform, which on macOS is Option+Left, the word-left motion every text field needs, so the
+    keys are chosen here rather than taken from Qt.
+    """
+    if platform_name == "darwin":
+        return ("Ctrl+[", "Ctrl+]", "Ctrl+Up")
+    return ("Alt+Left", "Alt+Right", "Alt+Up")
 
 
 def reveal_label(platform_name: str) -> str:

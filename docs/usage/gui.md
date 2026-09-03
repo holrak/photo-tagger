@@ -114,6 +114,20 @@ top-right one tracks the lifecycle (red ✗ failed, green ✓ saved, indigo dot 
 generated-but-not-saved), and the top-left ones flag a photo that already has metadata (`M`) or an
 XMP sidecar (`S`).
 
+#### Getting back to where you were
+
+The row above the right-hand pane retraces your steps, the way a browser does. **←** returns to the
+place you were before this one, so a photo you opened from a grid goes back to that grid, and
+hopping between photos goes back to the one you were just looking at; **→** replays a step you took
+back. The label beside the arrows names what is open (`Shoot 1 / DSC_0042.NEF`), since the tree row
+may be scrolled out of sight, and each arrow's tooltip names where it leads.
+
+The **Go** menu holds the same two moves with their keyboard shortcuts (++cmd+bracket-left++ /
+++cmd+bracket-right++ on macOS, ++alt+left++ / ++alt+right++ elsewhere), plus **Enclosing Folder**
+(++cmd+up++ / ++alt+up++), which opens the grid of the folder holding the open photo even when you
+picked that photo straight from the tree and so have no grid to go back to. Photos you remove from
+the list leave the trail with them, so ← never reopens a row that is gone.
+
 ### 3. Generate proposals
 
 Pick a **Provider** (Ollama, LM Studio, llama.cpp, or OpenAI) and a **Model** in the header. Press

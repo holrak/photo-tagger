@@ -156,6 +156,8 @@ from photo_tagger.gui_state import (
     FolderNode,
     GuiConfigValues,
     HarmonizeResult,
+    Location,
+    NavigationHistory,
     PhotoItem,
     Proposal,
     SaveJob,
@@ -182,8 +184,10 @@ from photo_tagger.gui_state import (
     keyword_diff,
     keywords_to_text,
     load_vocabulary_file,
+    location_crumb,
     login_shell_path,
     merged_config_text,
+    navigation_shortcuts,
     new_paths,
     parse_keyword_lines,
     paths_matching_fields,
@@ -251,6 +255,8 @@ from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS,
 
 if TYPE_CHECKING:
     # Annotation-only on Python 3.14 (lazy), so no runtime import is needed.
+    from collections.abc import Callable
+
     from exiftool import ExifToolHelper
 
     from photo_tagger.undo import UndoJournal, UndoResult, WriteRecord
@@ -406,6 +412,13 @@ QToolButton#sortdir {
 }
 QToolButton#sortdir:hover { background: rgba(130, 130, 140, 26%); }
 QToolButton#sortdir:checked { background: rgba(99, 102, 241, 22%); border-color: #6366f1; }
+QToolButton#navbtn {
+    border: 1px solid rgba(130, 130, 140, 60%); border-radius: 6px; padding: 2px 10px;
+}
+QToolButton#navbtn:hover { background: rgba(130, 130, 140, 26%); }
+QToolButton#navbtn:disabled {
+    color: rgba(130, 130, 140, 45%); border-color: rgba(130, 130, 140, 25%);
+}
 QToolButton#add, QToolButton#split {
     padding: 6px 26px 6px 12px; border-radius: 6px; font-weight: 400;
     border: 1px solid rgba(130, 130, 140, 60%);
@@ -443,6 +456,7 @@ QProgressBar {
 QProgressBar::chunk { background: #6366f1; border-radius: 4px; }
 QLabel#preview { background: #1f1f24; border-radius: 8px; color: #9a9aa5; }
 QLabel#hint, QLabel#status, QLabel#timing { color: #8a8a8a; }
+QLabel#crumb { color: #8a8a8a; font-weight: 600; }
 QLabel#empty { color: #8a8a8a; font-size: 15px; }
 QLabel#section { font-weight: 600; }
 QLabel#error {
@@ -1145,7 +1159,7 @@ class MainWindow(QMainWindow):
         self._grid_items: dict[str, QListWidgetItem] = {}
         self._init_tree_row_index()
         self._init_grid_view_state()
-        self._current: PhotoItem | None = None
+        self._init_navigation()
         self._init_worker_state()
         self._syncing = False
         self._grid_check_toggled = False
@@ -1272,6 +1286,30 @@ class MainWindow(QMainWindow):
         self._folder_rows: dict[str, QTreeWidgetItem] = {}
         self._leaf_rows: dict[str, QTreeWidgetItem] = {}
 
+    def _init_navigation(self) -> None:
+        """
+        Seed what the right-hand pane is showing and the trail of where it has been.
+
+        The Back/Forward actions are created here, before the panes: the nav row above the pane
+        attaches them, and the Go menu (built last, with the rest of the menu bar) adds them again
+        so they get their keyboard shortcuts and a discoverable home.
+        """
+        self._current: PhotoItem | None = None
+        self._history = NavigationHistory()
+        back_key, forward_key, up_key = navigation_shortcuts(sys.platform)
+        self._back_action = self._nav_action(_("Back"), back_key, self._go_back)
+        self._forward_action = self._nav_action(_("Forward"), forward_key, self._go_forward)
+        # The file manager's move up a level, and the fallback when nothing was visited yet: a
+        # photo opened straight from the tree has no grid to go Back to.
+        self._up_action = self._nav_action(_("Enclosing Folder"), up_key, self._go_up)
+
+    def _nav_action(self, label: str, shortcut: str, handler: Callable[[], None]) -> QAction:
+        """Build one navigation action, shown in the Go menu and driven by its shortcut."""
+        action = QAction(label, self)
+        action.setShortcut(QKeySequence(shortcut))
+        action.triggered.connect(handler)
+        return action
+
     def _init_grid_view_state(self) -> None:
         """
         Seed the folder grid's view state: which folder is shown and how it is filtered and sorted.
@@ -1310,6 +1348,7 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
 
+        self._build_go_menu(menubar)
         self._build_tools_menu(menubar)
         self._build_settings_menu(menubar)
 
@@ -1324,6 +1363,23 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         about_action = help_menu.addAction(_("About Photo Tagger"), self._show_about)
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _build_go_menu(self, menubar: QMenu) -> None:
+        """
+        Build the Go menu: the Back/Forward trail plus the jump up to the enclosing folder.
+
+        The actions themselves were built in ``_init_navigation`` and are already on the nav row
+        above the pane; adding them to a menu is what arms their keyboard shortcuts.
+        """
+        menu = self._go_menu = menubar.addMenu(_("Go"))
+        menu.setToolTipsVisible(True)
+        menu.addAction(self._back_action)
+        menu.addAction(self._forward_action)
+        menu.addSeparator()
+        self._up_action.setToolTip(
+            tooltip("Show the thumbnail grid of the folder holding the open photo."),
+        )
+        menu.addAction(self._up_action)
 
     def _build_settings_menu(self, menubar: QMenu) -> None:
         """Build the Settings menu: the toggles and the two languages, then the config actions."""
@@ -2147,12 +2203,45 @@ class MainWindow(QMainWindow):
         self._scan_worker = None
 
     def _build_right_pane(self) -> QWidget:
-        """Build a stack showing the idle placeholder, one photo's detail, or a folder's grid."""
+        """Build the nav row over a stack: the idle placeholder, a photo's detail, a folder grid."""
         self._right = QStackedWidget()
         self._right.addWidget(self._build_empty_state())  # _PAGE_EMPTY
         self._right.addWidget(self._build_detail_panel())  # _PAGE_DETAIL
         self._right.addWidget(self._build_grid())  # _PAGE_GRID
-        return self._right
+        pane = QWidget()
+        box = QVBoxLayout(pane)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addLayout(self._build_nav_row())
+        box.addWidget(self._right, stretch=1)
+        return pane
+
+    def _build_nav_row(self) -> QHBoxLayout:
+        """
+        Build the row above the pane: Back, Forward, and the name of what is open.
+
+        The arrows are the answer to "how do I get back to the grid I came from": every page of the
+        stack shares them, so they are in the same spot whether a photo or a folder is open. The
+        label to their right says where that is, since the tree row may be scrolled out of sight.
+        """
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        self._back_button = self._nav_button("←", self._go_back)
+        self._forward_button = self._nav_button("→", self._go_forward)
+        row.addWidget(self._back_button)
+        row.addWidget(self._forward_button)
+        row.addSpacing(8)
+        self._crumb = QLabel("")
+        self._crumb.setObjectName("crumb")
+        row.addWidget(self._crumb, stretch=1)
+        return row
+
+    def _nav_button(self, glyph: str, handler: Callable[[], None]) -> QToolButton:
+        """Build one arrow button; its tooltip and enabled state come from ``_refresh_nav``."""
+        button = QToolButton()
+        button.setObjectName("navbtn")
+        button.setText(glyph)
+        button.clicked.connect(handler)
+        return button
 
     def _build_empty_state(self) -> QWidget:
         """Build the idle placeholder shown when no photo is open, so the pane is never empty."""
@@ -2898,6 +2987,10 @@ class MainWindow(QMainWindow):
             self._add_folder_node(self._tree, node)
         self._tree.setSortingEnabled(True)
         self._sync_grid_checks()
+        # Photos that just left the list have to leave the history with them, or Back would try to
+        # open a row that no longer exists. Folders go too when their last photo did.
+        self._history.prune(lambda location: self._row_for(location) is not None)
+        self._refresh_nav()
         # Emptying the tree dropped the selection (_on_current_changed ignores it while _syncing,
         # so the right-hand pane kept whatever was open). Restore the highlight so bulk actions
         # (dragging photos in, Check All, Uncheck Already Tagged) do not kick the user out of
@@ -2988,25 +3081,139 @@ class MainWindow(QMainWindow):
             # A programmatic rebuild (tree.clear() emits currentItemChanged(None)) is not the
             # user navigating; reacting would blank the pane they are working in.
             return
+        path = current.data(0, _PATH_ROLE) if current is not None else None
+        if current is None or path is None:
+            self._commit_current()
+            self._stop_thumbs()
+            self._show_empty()
+            return
+        self._open_location(Location(path=Path(path), is_dir=bool(current.data(0, _IS_DIR_ROLE))))
+
+    def _open_location(self, location: Location) -> None:
+        """
+        Show *location* in the right-hand pane and add it to the history trail.
+
+        Both kinds of navigation land here: picking a row in the tree, and stepping through the
+        trail with Back or Forward. A step has already moved the trail's cursor, so recording it
+        again is a no-op and the two paths cannot fight over the history.
+        """
         # Keep the open photo's in-progress edits (title, description, keywords, hint) when the
         # user browses away; they are restored when it is opened again. Without this, hinting
         # several photos before one Generate Selected would be impossible: every navigation
         # would drop the hint just typed.
         self._commit_current()
-        path = current.data(0, _PATH_ROLE) if current is not None else None
-        if current is not None and bool(current.data(0, _IS_DIR_ROLE)) and path is not None:
+        self._history.visit(location)
+        if location.is_dir:
             # A folder: show its thumbnail grid instead of a single photo's detail.
             self._current = None
             self._show_detail(enabled=False)
-            self._show_grid(Path(path))
+            self._show_grid(location.path)
+        else:
+            self._stop_thumbs()
+            self._right.setCurrentIndex(_PAGE_DETAIL)
+            self._current = self._items[str(location.path)]
+            self._show_item(self._current)
+        self._refresh_nav()
+
+    # --- back, forward, and up -------------------------------------------------------------
+
+    def _go_back(self) -> None:
+        """Return to the place shown before this one."""
+        self._walk_history(self._history.back)
+
+    def _go_forward(self) -> None:
+        """Undo a Back: return to the place it stepped away from."""
+        self._walk_history(self._history.forward)
+
+    def _walk_history(self, step: Callable[[], Location | None]) -> None:
+        """
+        Show the next place *step* offers, skipping any whose tree row has since gone.
+
+        Places leave the history as their rows leave the list (see ``_rebuild_tree``), so the skip
+        is only a safety net, for a folder a rebuild has re-labelled or collapsed away.
+        """
+        while (location := step()) is not None:
+            row = self._row_for(location)
+            if row is not None:
+                # Highlight the row without re-entering _on_current_changed: the trail already
+                # points at this place, and the pane is opened right below.
+                self._syncing = True
+                try:
+                    self._tree.setCurrentItem(row)
+                finally:
+                    self._syncing = False
+                self._open_location(location)
+                return
+        self._refresh_nav()
+
+    def _go_up(self) -> None:
+        """Show the grid of the folder holding what is open, the way Finder goes up a level."""
+        location = self._history.current
+        row = self._enclosing_row(location) if location is not None else None
+        if row is None:
+            self._status.setText(_("Nothing above this in the list."))
             return
-        self._stop_thumbs()
-        if path is None:
-            self._show_empty()
-            return
-        self._right.setCurrentIndex(_PAGE_DETAIL)
-        self._current = self._items[path]
-        self._show_item(self._items[path])
+        # A fresh navigation, so it goes through the tree and is recorded like any other.
+        self._tree.setCurrentItem(row)
+
+    def _row_for(self, location: Location) -> QTreeWidgetItem | None:
+        """Return the tree row *location* stands for, or None once it has left the list."""
+        rows = self._folder_rows if location.is_dir else self._leaf_rows
+        return rows.get(str(location.path))
+
+    def _enclosing_row(self, location: Location) -> QTreeWidgetItem | None:
+        """
+        Return the nearest folder row above *location*, or None when it is already a top row.
+
+        Walking up is needed because the tree collapses single-child folder chains, so a photo's own
+        folder is always a row but a folder's parent may not be.
+        """
+        folder = location.path.parent
+        while True:
+            row = self._folder_rows.get(str(folder))
+            if row is not None or folder.parent == folder:
+                return row
+            folder = folder.parent
+
+    def _refresh_nav(self) -> None:
+        """Enable Back and Forward, name where each one leads, and say what is open now."""
+        behind = self._history.peek_back()
+        ahead = self._history.peek_forward()
+        self._apply_nav_state(
+            self._back_button,
+            self._back_action,
+            target=behind,
+            hint=(
+                tooltip("Back to {place}.", place=location_crumb(behind))
+                if behind is not None
+                else tooltip("Nothing to go back to yet.")
+            ),
+        )
+        self._apply_nav_state(
+            self._forward_button,
+            self._forward_action,
+            target=ahead,
+            hint=(
+                tooltip("Forward to {place}.", place=location_crumb(ahead))
+                if ahead is not None
+                else tooltip("Nothing to go forward to. Go back first.")
+            ),
+        )
+        here = self._history.current
+        self._crumb.setText(location_crumb(here) if here is not None else "")
+
+    @staticmethod
+    def _apply_nav_state(
+        button: QToolButton,
+        action: QAction,
+        *,
+        target: Location | None,
+        hint: str,
+    ) -> None:
+        """Point one arrow (button and menu entry alike) at *target*, or gray it out."""
+        for control in (button, action):
+            control.setEnabled(target is not None)
+            control.setToolTip(hint)
 
     # --- folder thumbnail grid -------------------------------------------------------------
 
@@ -3286,6 +3493,9 @@ class MainWindow(QMainWindow):
         self._show_detail(enabled=False)
         self._empty_message.setText(_(_EMPTY_PICK) if self._items else _(_EMPTY_START))
         self._right.setCurrentIndex(_PAGE_EMPTY)
+        # Nothing is open, so Back should return to the last place rather than step past it.
+        self._history.leave()
+        self._refresh_nav()
 
     def _commit_current(self) -> None:
         """Copy the visible editable fields back onto the selected item."""

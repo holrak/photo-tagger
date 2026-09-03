@@ -124,6 +124,7 @@ msgids
 mtimes
 mypy
 München
+navbtn
 nixpkgs
 noconfirm
 noheader
