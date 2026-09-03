@@ -140,7 +140,8 @@ def resolve_image_batch(
 def load_skip_list(skip_file: Path) -> set[str]:
     """Read a newline-delimited list of names or paths to skip."""
     try:
-        content = skip_file.read_text(encoding="utf-8")
+        # utf-8-sig: a BOM would be read as part of the first name, which would then match no photo.
+        content = skip_file.read_text(encoding="utf-8-sig")
     except OSError as exc:
         logger.error("skip_file_read_failed", file=str(skip_file), error=str(exc))
         raise DiscoveryError(str(exc)) from exc
@@ -320,7 +321,7 @@ def _read_skip_entries(skip_file: Path) -> set[str]:
     if not skip_file.exists():
         return set()
     try:
-        content = skip_file.read_text(encoding="utf-8")
+        content = skip_file.read_text(encoding="utf-8-sig")
     except OSError as exc:
         logger.warning(
             "append_skip_file_unreadable_starting_fresh",

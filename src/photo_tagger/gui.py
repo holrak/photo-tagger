@@ -964,7 +964,11 @@ class VocabularyBuildWorker(QObject):
         sources: list[str] = []
         if self._export_file is not None:
             self.progress.emit(_("Reading {file}...").format(file=self._export_file.name))
-            census.merge(census_from_export(self._export_file.read_text(encoding="utf-8")))
+            census.merge(
+                # utf-8-sig for the same reason load_vocabulary uses it: a BOM would be read as
+                # part of the first keyword.
+                census_from_export(self._export_file.read_text(encoding="utf-8-sig")),
+            )
             sources.append(f"keyword export {self._export_file.name} (counts are tree occurrences)")
         if self._paths:
             self.progress.emit(

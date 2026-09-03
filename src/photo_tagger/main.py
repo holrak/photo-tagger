@@ -220,7 +220,9 @@ def _build_census(
     census = KeywordCensus()
     sources: list[str] = []
     if from_export is not None:
-        census.merge(census_from_export(from_export.read_text(encoding="utf-8")))
+        # utf-8-sig: a keyword export saved by a Windows editor starts with a BOM, which would
+        # otherwise be counted as part of the first keyword.
+        census.merge(census_from_export(from_export.read_text(encoding="utf-8-sig")))
         sources.append(f"keyword export {from_export.name} (counts are tree occurrences)")
     if inputs:
         image_files = resolve_image_batch(inputs, image_extensions, recursive=recursive)
@@ -465,7 +467,7 @@ def _read_prompt_file(prompt_file: Path | None) -> str:
     if prompt_file is None:
         return DEFAULT_USER_PROMPT
     try:
-        text = prompt_file.read_text(encoding="utf-8").strip()
+        text = prompt_file.read_text(encoding="utf-8-sig").strip()
     except OSError as exc:
         logger.error("prompt_file_read_failed", file=str(prompt_file), error=str(exc))
         raise SystemExit(1) from exc

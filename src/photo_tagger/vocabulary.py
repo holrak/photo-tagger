@@ -559,7 +559,11 @@ def load_vocabulary(path: Path, *, output_language: str = DEFAULT_OUTPUT_LANGUAG
     match an English catalog whatever the matcher does.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        # utf-8-sig, not utf-8: Notepad and Excel write a BOM, and read as plain UTF-8 it becomes
+        # part of the first keyword. That term then matches loosely and is written back to the
+        # photos with an invisible character in front of it, which is a near-duplicate of the very
+        # keyword the file exists to pin down.
+        text = path.read_text(encoding="utf-8-sig")
     except OSError as exc:
         logger.error("vocabulary_read_failed", file=str(path), error=str(exc))
         msg = f"Could not read vocabulary file {path}: {exc}"

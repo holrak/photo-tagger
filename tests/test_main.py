@@ -1454,6 +1454,17 @@ def test_vocabulary_command_reads_a_keyword_export(tmp_path: Path) -> None:
     assert "keyword export keywords.txt" in written
 
 
+def test_vocabulary_command_reads_an_export_saved_with_a_bom(tmp_path: Path) -> None:
+    """A keyword export from a Windows editor starts with a BOM; the first keyword survives it."""
+    export = tmp_path / "keywords.txt"
+    export.write_bytes(b"\xef\xbb\xbfAnimal\n\tBird\nAnimal\n\tBird\n")
+    output = tmp_path / "vocabulary.txt"
+
+    _run_app(["vocabulary", "--from-export", str(export), "--output", str(output)])
+
+    assert output.read_text(encoding="utf-8").splitlines()[-2:] == ["Animal", "Animal|Bird"]
+
+
 def test_vocabulary_command_exits_1_without_a_source(tmp_path: Path) -> None:
     """Neither photos nor an export means there is nothing to count."""
     with pytest.raises(SystemExit) as exit_info:

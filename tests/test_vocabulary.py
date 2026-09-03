@@ -469,3 +469,15 @@ def test_fuzzy_match_measures_the_pair_not_the_query() -> None:
     assert fuzzy_key_match("alle", ["alles"]) is None
     # A different first letter is out regardless of length.
     assert fuzzy_key_match("beagle", ["eagle"]) is None
+
+
+def test_load_vocabulary_strips_a_byte_order_mark(tmp_path: Path) -> None:
+    """A file saved by a Windows editor starts with a BOM; it is not part of the first keyword."""
+    listing = tmp_path / "keywords.txt"
+    listing.write_bytes(b"\xef\xbb\xbfOsprey\nBird\n")
+
+    vocabulary = load_vocabulary(listing)
+
+    assert vocabulary.terms == ("Osprey", "Bird")
+    # Without the strip the match still succeeded but handed back an invisible near-duplicate.
+    assert vocabulary.match("ospreys") == "Osprey"
