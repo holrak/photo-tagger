@@ -15,13 +15,14 @@ precedence rules and TOML layout.
 
 ## Commands
 
-Running `photo-tagger` with image inputs tags them (the default command). Four subcommands exist:
+Running `photo-tagger` with image inputs tags them (the default command). Five subcommands exist:
 
 | Command                   | Description                                                                                               |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `photo-tagger`            | Tag the given images (default). Documented by the option groups below.                                    |
 | `photo-tagger doctor`     | Pre-flight check: verifies ExifTool is on `PATH` and the provider serves the model, then exits 0/1.       |
 | `photo-tagger vocabulary` | Build a keyword file from a library's own keywords (see [Building a vocabulary](#building-a-vocabulary)). |
+| `photo-tagger watch`      | Watch folders and tag photos as they arrive (see [Watching a folder](#watching-a-folder)).                |
 | `photo-tagger undo`       | Put back what the last run wrote (see [Undoing a run](#undoing-a-run)).                                   |
 | `photo-tagger gui`        | Launch the optional desktop GUI. Requires the `gui` extra; see [Desktop GUI](gui.md).                     |
 
@@ -423,6 +424,34 @@ without re-tagging the photos that already succeeded.
     slip back in unchanged.
 
 See [Recipes](recipes.md) for runnable resume and skip examples.
+
+## Watching a folder
+
+`photo-tagger watch` is the import-time workflow: point it at the folder your card reader, tethered
+capture, or sync client fills, and leave it running.
+
+```bash
+photo-tagger watch -i ~/Pictures/Inbox --recursive --skip-tagged
+```
+
+Photos already in the folder are tagged first, then each new one as it lands. Every flag the tagging
+command takes works here too and applies to each batch, with a single agent, cache, CSV/NDJSON file,
+and undo journal shared by the whole session. Stop it with Ctrl-C.
+
+| Flag             | Default | Description                                            |
+| ---------------- | ------- | ------------------------------------------------------ |
+| `--interval` SEC | `5.0`   | Seconds between folder scans.                          |
+| `--settle` SEC   | `2.0`   | Seconds a file must sit unchanged before it is tagged. |
+
+Two behaviors worth knowing:
+
+- **A file is only tagged once it stops changing.** It must be unchanged across two scans *and* its
+    last modification must be at least `--settle` seconds old, so a photo still being copied is left
+    alone until the copy finishes. This also means the first batch appears one `--interval` after
+    the watch starts, not instantly.
+- **A failing batch does not stop the watch.** The failure is logged and the next photo to land gets
+    its turn. Scanning is a plain directory listing rather than a filesystem-event API, so it
+    behaves the same on every platform and over network shares.
 
 ## Undoing a run
 

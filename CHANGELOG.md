@@ -82,6 +82,15 @@ All notable changes to this project are documented here. The format is based on
   since the run alone. Recording is on by default (`--no-undo-log` disables it) and journals are
   pruned to the 50 most recent runs and 90 days.
 
+- `photo-tagger watch`: watch folders and tag photos as they arrive, which is the import-time
+  workflow the tool was missing. Photos already present are tagged first, then each new one as it
+  lands. A file is only tagged once it has stopped changing (unchanged across two scans and at least
+  `--settle` seconds old), so a photo still being copied is left alone. Scanning is a plain
+  directory listing every `--interval` seconds, so it behaves the same on every platform and over
+  network shares, with no new dependency. Every tagging flag applies to each batch, and one agent,
+  cache, report file, and undo journal are shared by the whole session; a batch with failures is
+  logged and the watch continues.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added

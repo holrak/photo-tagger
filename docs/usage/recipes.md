@@ -181,6 +181,22 @@ entries. Because the hash ignores metadata, a rerun still hits the cache even wh
 embedded tags into the photo with `--embed-in-photo`. The file is created if missing and safe to
 delete.
 
+## Tag photos as they are imported
+
+Leave a watcher on the folder your card reader or sync client fills.
+
+```bash
+photo-tagger watch \
+  -i ~/Pictures/Inbox \
+  --recursive \
+  --skip-tagged \
+  --cache-file ~/.cache/photo-tagger/cache.sqlite
+```
+
+Photos already in the folder are tagged first, then each new one as it lands. A file is left alone
+until it stops changing, so a photo still being copied is never tagged half-written. Tune the scan
+frequency with `--interval` and the stability window with `--settle`. Ctrl-C stops the watch.
+
 ## Undo a run that went wrong
 
 Revert everything the last run wrote: sidecars it created are deleted, files it overwrote are

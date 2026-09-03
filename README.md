@@ -36,6 +36,7 @@ directly into each photo with `--embed-in-photo`.
 - Works with Ollama, LM Studio, llama.cpp, and any hosted OpenAI-compatible API
 - Ships a `doctor` command that pre-flights ExifTool and your model provider
 - Records what each run writes, so `photo-tagger undo` puts a bad batch back
+- Watches a folder and tags photos as they arrive (`photo-tagger watch`)
 - Optional desktop GUI (`photo-tagger gui`) for a point-and-click workflow
 - Converts images to compact JPEG bytes to minimize token usage
 - Generates detailed log files for easy debugging and auditing

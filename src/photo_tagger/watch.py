@@ -1,0 +1,134 @@
+"""
+Watch folders for new photos and hand each settled batch to the caller.
+
+Tagging on import is the natural place for this tool in a photographer's workflow: point it at the
+folder the card reader (or the tethered capture, or the sync client) fills, and let it work as the
+files land. Everything the batch runner needs already exists; what was missing is the loop.
+
+Polling, not filesystem events: a poll is a directory listing every few seconds, it behaves the same
+on every platform and over network shares, and it needs no extra dependency. A file must also *hold
+still* before it is tagged, since a photo half-copied onto the disk is not a photo yet.
+"""
+
+import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from loguru import logger
+
+from photo_tagger.discovery import parse_extensions, resolve_image_files
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+
+# How often to list the watched folders, and how long a file must be unchanged before it counts as
+# finished. Two polls plus the age check is a cheap, portable stand-in for "the writer closed it".
+DEFAULT_INTERVAL_SECONDS = 5.0
+DEFAULT_SETTLE_SECONDS = 2.0
+
+
+@dataclass(slots=True, frozen=True)
+class _Fingerprint:
+    """The size and mtime of a candidate, as seen at one poll."""
+
+    size: int
+    mtime: float
+
+
+@dataclass(slots=True)
+class _PollState:
+    """What the watcher remembers between polls."""
+
+    seen: set[Path] = field(default_factory=set)
+    fingerprints: dict[Path, _Fingerprint] = field(default_factory=dict)
+
+
+def _fingerprint(path: Path) -> _Fingerprint | None:
+    """Return the current size and mtime of *path*, or None when it cannot be read."""
+    try:
+        stat = path.stat()
+    except OSError:
+        # Deleted or still appearing between the listing and the stat; the next poll sorts it out.
+        return None
+    return _Fingerprint(stat.st_size, stat.st_mtime)
+
+
+def _settled_files(
+    candidates: list[Path],
+    state: _PollState,
+    *,
+    settle_seconds: float,
+    now: float,
+) -> list[Path]:
+    """
+    Return the candidates that have finished being written, updating *state*.
+
+    A file qualifies when this poll sees exactly what the previous poll saw and its last change is
+    at least *settle_seconds* old. Both conditions matter: the comparison catches a slow copy that
+    is still growing, and the age catches a fast one that finished between two polls of a folder
+    whose files all arrive at once.
+    """
+    ready: list[Path] = []
+    current: dict[Path, _Fingerprint] = {}
+    for path in candidates:
+        fingerprint = _fingerprint(path)
+        if fingerprint is None:
+            continue
+        current[path] = fingerprint
+        previous = state.fingerprints.get(path)
+        if previous == fingerprint and now - fingerprint.mtime >= settle_seconds:
+            ready.append(path)
+    # Keep only what is still pending: anything yielded is now the caller's problem, and anything
+    # that vanished between polls should not be remembered either.
+    yielded = set(ready)
+    state.fingerprints = {
+        path: fingerprint for path, fingerprint in current.items() if path not in yielded
+    }
+    state.seen.update(ready)
+    return ready
+
+
+def watch_batches(  # noqa: PLR0913 - each kwarg is a distinct, independent knob.
+    inputs: list[Path],
+    image_extensions: str,
+    *,
+    recursive: bool = False,
+    interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+    settle_seconds: float = DEFAULT_SETTLE_SECONDS,
+    max_polls: int | None = None,
+) -> Iterator[list[Path]]:
+    """
+    Yield each batch of new, finished photos found under *inputs*, forever.
+
+    Files already present when the watch starts count as new: pointing at a folder that has waited
+    all afternoon should tag it, not ignore it. Every file is yielded at most once per watcher, so
+    the caller's own skip list and cache are only a backstop.
+
+    Polls with nothing to report yield nothing at all, so the caller's loop body runs only when
+    there is work. *max_polls* bounds the loop for tests; production passes None and stops on
+    Ctrl-C.
+    """
+    extensions = parse_extensions(image_extensions)
+    state = _PollState()
+    polls = 0
+    while max_polls is None or polls < max_polls:
+        if polls:
+            time.sleep(interval_seconds)
+        polls += 1
+        candidates = [
+            path
+            for path in resolve_image_files(inputs, extensions, recursive=recursive)
+            if path not in state.seen
+        ]
+        ready = _settled_files(
+            candidates,
+            state,
+            settle_seconds=settle_seconds,
+            now=time.time(),
+        )
+        if ready:
+            logger.info("watch_batch_ready", files=len(ready), waiting=len(state.fingerprints))
+            yield sorted(ready)

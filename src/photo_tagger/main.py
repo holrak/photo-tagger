@@ -22,7 +22,7 @@ import sys
 import tempfile
 import threading
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Protocol
@@ -62,7 +62,7 @@ from photo_tagger.discovery import (
     make_skip_list_appender,
     resolve_image_batch,
 )
-from photo_tagger.errors import DiscoveryError, PhotoTaggerError
+from photo_tagger.errors import BatchError, DiscoveryError, PhotoTaggerError
 from photo_tagger.locking import FileLock, LockHeldError
 from photo_tagger.logging_setup import setup_logging
 from photo_tagger.metadata import prompt_with_hint, select_camera_fields, select_location
@@ -95,10 +95,21 @@ from photo_tagger.vocabulary_build import (
     trim,
 )
 from photo_tagger.vocabulary_organize import OrganizeStats, organize
+from photo_tagger.watch import (
+    DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_SETTLE_SECONDS,
+    watch_batches,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from pydantic_ai import Agent
+
+    from photo_tagger.cache import InferenceCache
+    from photo_tagger.models import GeneratedMetadata
+    from photo_tagger.undo import UndoJournal
 
 
 # Any TOML config is layered onto flags the user does not pass by the ConfigFileSource hook at
@@ -973,6 +984,193 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
             raise SystemExit(1) from exc
 
 
+@dataclass(slots=True)
+class _RunSetup:
+    """
+    The collaborators a tagging run builds once and reuses for every batch it processes.
+
+    ``tag`` processes exactly one batch, ``watch`` processes a new one whenever photos land, and
+    both want the same agent, cache, report writers, and undo journal for the whole invocation:
+    reopening them per batch would repeat the CSV header, re-prune the cache, and scatter one
+    session's writes across several journals.
+    """
+
+    options: ProcessingOptions
+    agent: Agent[None, GeneratedMetadata]
+    user_prompt: str
+    workers: int
+    provider: ProviderConfig
+    inference: InferenceConfig
+    artifacts: ArtifactConfig
+    display: DisplayConfig
+    session_gap_minutes: float
+    telemetry_enabled: bool
+    cache: InferenceCache | None = None
+    csv_writer: CsvReportWriter | None = None
+    on_image_result: Callable[[ImageOutcome], None] | None = None
+    on_success: Callable[[Path], None] | None = None
+    journal: UndoJournal | None = None
+
+    def close(self) -> None:
+        """Release everything the run opened, in the order it was opened."""
+        if self.cache is not None:
+            self.cache.close()
+        if self.csv_writer is not None:
+            self.csv_writer.close()
+        if self.journal is not None and self.journal.entries:
+            logger.info(
+                "undo_journal_written",
+                file=str(self.journal.path),
+                entries=self.journal.entries,
+            )
+
+
+def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one.
+    *,
+    workers: int,
+    display: DisplayConfig,
+    artifacts: ArtifactConfig,
+    provider: ProviderConfig,
+    output: OutputConfig,
+    inference: InferenceConfig,
+    telemetry_enabled: bool,
+) -> _RunSetup:
+    """Build the agent, cache, report sinks, and undo journal shared by every batch."""
+    # Raises VocabularyError (a PhotoTaggerError) on an unusable file, which the commands turn into
+    # a clean exit 1. Loading it up front means a typo in the path fails before any model call.
+    vocabulary = (
+        load_vocabulary(output.vocabulary, output_language=inference.output_language)
+        if output.vocabulary is not None
+        else None
+    )
+    # A --hint and the --vocabulary listing ride inside the user prompt, so the cache namespace
+    # below picks them up too: a hinted run never replays results generated without the hint (and
+    # vice versa), and the same holds for a vocabulary.
+    user_prompt = prompt_with_vocabulary(
+        prompt_with_hint(_read_prompt_file(artifacts.prompt_file), inference.hint),
+        vocabulary,
+    )
+    # Fold the prompt + language + sampling/JPEG settings into the cache namespace so a
+    # different configuration writes to a fresh slice instead of replaying
+    # stale entries generated under earlier settings.
+    cache_namespace = build_cache_namespace(
+        provider.model_name,
+        user_prompt=user_prompt,
+        temperature=inference.temperature,
+        max_tokens=inference.max_tokens,
+        frequency_penalty=inference.frequency_penalty,
+        jpeg_dimensions=inference.jpeg_dimensions,
+        jpeg_quality=inference.jpeg_quality,
+        output_language=inference.output_language,
+    )
+    csv_writer = _open_csv_report(artifacts.csv_file)
+    ndjson_emitter = _NDJSONEmitter(sys.stdout) if display.json_output else None
+    csv_sink = _CsvImageResultSink(csv_writer) if csv_writer is not None else None
+    return _RunSetup(
+        options=to_processing_options(output, inference, vocabulary=vocabulary),
+        agent=create_agent(
+            provider.provider_name,
+            provider.model_name,
+            api_base_url=provider.api_base_url,
+            api_key=provider.api_key,
+            retries=provider.retries,
+            output_language=inference.output_language,
+        ),
+        user_prompt=user_prompt,
+        workers=max(1, workers),
+        provider=provider,
+        inference=inference,
+        artifacts=artifacts,
+        display=display,
+        session_gap_minutes=output.session_gap_minutes,
+        telemetry_enabled=telemetry_enabled,
+        cache=open_cache(artifacts.cache_file, namespace=cache_namespace),
+        csv_writer=csv_writer,
+        on_image_result=_combine_image_result_callbacks(ndjson_emitter, csv_sink),
+        on_success=make_skip_list_appender(artifacts.append_to_skip_file),
+        # A dry run writes nothing, so there is nothing for undo to put back.
+        journal=open_journal(
+            datetime.now(tz=UTC),
+            enabled=artifacts.undo_log and not output.dry_run,
+        ),
+    )
+
+
+def _process_batch(image_files: list[Path], setup: _RunSetup) -> None:
+    """
+    Tag one resolved batch, writing the summary file and firing the telemetry beacon.
+
+    Raises :class:`~photo_tagger.errors.BatchError` when any photo fails, which ``tag`` turns into
+    exit 1 and ``watch`` logs before waiting for the next batch.
+    """
+    started_at = datetime.now(tz=UTC)
+
+    def _on_complete(totals: BatchTotals) -> None:
+        # Runs once before run_batch raises, so the summary file is written and the telemetry
+        # beacon fired whether the batch succeeded fully or only partially.
+        _write_summary_file(
+            setup.artifacts.summary_file,
+            totals,
+            started_at=started_at,
+            model_name=setup.provider.model_name,
+            provider_name=setup.provider.provider_name,
+            user_prompt_chars=len(setup.user_prompt),
+        )
+        telemetry.emit(
+            telemetry.RunInfo(
+                interface="cli",
+                provider=setup.provider.provider_name,
+                model=setup.provider.model_name,
+                batch_size=totals.total_files,
+                duration_seconds=(datetime.now(tz=UTC) - started_at).total_seconds(),
+                output_language=setup.inference.output_language,
+                ui_language=i18n.current_language(),
+                file_types=telemetry.file_types_summary(image_files),
+                success_count=totals.success,
+                failure_count=len(totals.failed_files),
+                cache_hits=totals.cache_hits,
+                retry_successes=totals.retry_successes,
+                workers=totals.workers,
+                total_tokens=totals.total_tokens,
+                inference_seconds=totals.inference_seconds,
+                dry_run=totals.dry_run,
+                failure_kinds=telemetry.failure_kinds_summary(totals.failure_kinds),
+            ),
+            enabled=setup.telemetry_enabled,
+            block=True,
+        )
+
+    with batch_progress(len(image_files), enabled=setup.display.progress_bar) as progress:
+        run_batch(
+            image_files,
+            setup.agent,
+            setup.options,
+            on_success=setup.on_success,
+            on_complete=_on_complete,
+            user_prompt=setup.user_prompt,
+            workers=setup.workers,
+            progress=progress,
+            cache=setup.cache,
+            on_image_result=setup.on_image_result,
+            session_plan=plan_sessions(image_files, gap_minutes=setup.session_gap_minutes),
+            journal=setup.journal,
+        )
+
+
+def _filter_batch(
+    image_files: list[Path],
+    *,
+    artifacts: ArtifactConfig,
+    filter_: FilterConfig,
+    newer_than: datetime | None,
+    older_than: datetime | None,
+) -> list[Path]:
+    """Apply the skip list, the date window, and --skip-tagged to a resolved batch."""
+    image_files = apply_skip_file(image_files, artifacts.skip_from)
+    image_files = apply_date_filter(image_files, newer_than=newer_than, older_than=older_than)
+    return apply_skip_tagged(image_files, skip_tagged=filter_.skip_tagged)
+
+
 def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one.
     *,
     inputs: list[Path] | None,
@@ -990,16 +1188,17 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
 ) -> None:
     """Body of ``tag`` that runs once the optional file lock has been acquired."""
     _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
-    # Raises VocabularyError (a PhotoTaggerError) on an unusable file, which `tag` turns into a
-    # clean exit 1. Loading it up front means a typo in the path fails before any model call.
-    vocabulary = (
-        load_vocabulary(output.vocabulary, output_language=inference.output_language)
-        if output.vocabulary is not None
-        else None
-    )
-    options = to_processing_options(output, inference, vocabulary=vocabulary)
     newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
     older_than = _parse_filter_date(filter_.older_than, flag="--older-than")
+    setup = _build_run_setup(
+        workers=workers,
+        display=display,
+        artifacts=artifacts,
+        provider=provider,
+        output=output,
+        inference=inference,
+        telemetry_enabled=telemetry_config.enabled,
+    )
     _log_startup(
         inputs=inputs,
         image_extensions=image_extensions,
@@ -1009,7 +1208,7 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         display=display,
         artifacts=artifacts,
         provider=provider,
-        options=options,
+        options=setup.options,
         output_language=inference.output_language,
         hint=inference.hint,
         log=log,
@@ -1017,118 +1216,192 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
         session_gap_minutes=output.session_gap_minutes,
     )
 
-    image_files = apply_skip_file(
-        resolve_image_batch(inputs, image_extensions, recursive=recursive),
-        artifacts.skip_from,
-    )
-    image_files = apply_date_filter(
-        image_files,
-        newer_than=newer_than,
-        older_than=older_than,
-    )
-    image_files = apply_skip_tagged(image_files, skip_tagged=filter_.skip_tagged)
-    if not image_files:
-        logger.info("no_files_to_process_after_skipping")
-        return
-
-    # A --hint and the --vocabulary listing ride inside the user prompt, so the cache namespace
-    # below picks them up too: a hinted run never replays results generated without the hint (and
-    # vice versa), and the same holds for a vocabulary.
-    user_prompt = prompt_with_vocabulary(
-        prompt_with_hint(_read_prompt_file(artifacts.prompt_file), inference.hint),
-        vocabulary,
-    )
-    agent = create_agent(
-        provider.provider_name,
-        provider.model_name,
-        api_base_url=provider.api_base_url,
-        api_key=provider.api_key,
-        retries=provider.retries,
-        output_language=inference.output_language,
-    )
-    # Fold the prompt + language + sampling/JPEG settings into the cache namespace so a
-    # different configuration writes to a fresh slice instead of replaying
-    # stale entries generated under earlier settings.
-    cache_namespace = build_cache_namespace(
-        provider.model_name,
-        user_prompt=user_prompt,
-        temperature=inference.temperature,
-        max_tokens=inference.max_tokens,
-        frequency_penalty=inference.frequency_penalty,
-        jpeg_dimensions=inference.jpeg_dimensions,
-        jpeg_quality=inference.jpeg_quality,
-        output_language=inference.output_language,
-    )
-    cache = open_cache(artifacts.cache_file, namespace=cache_namespace)
-    started_at = datetime.now(tz=UTC)
-
-    def _on_complete(totals: BatchTotals) -> None:
-        # Runs once before run_batch raises SystemExit, so the summary file is written and the
-        # telemetry beacon fired whether the batch succeeded fully or only partially.
-        _write_summary_file(
-            artifacts.summary_file,
-            totals,
-            started_at=started_at,
-            model_name=provider.model_name,
-            provider_name=provider.provider_name,
-            user_prompt_chars=len(user_prompt),
-        )
-        telemetry.emit(
-            telemetry.RunInfo(
-                interface="cli",
-                provider=provider.provider_name,
-                model=provider.model_name,
-                batch_size=totals.total_files,
-                duration_seconds=(datetime.now(tz=UTC) - started_at).total_seconds(),
-                output_language=inference.output_language,
-                ui_language=i18n.current_language(),
-                file_types=telemetry.file_types_summary(image_files),
-                success_count=totals.success,
-                failure_count=len(totals.failed_files),
-                cache_hits=totals.cache_hits,
-                retry_successes=totals.retry_successes,
-                workers=totals.workers,
-                total_tokens=totals.total_tokens,
-                inference_seconds=totals.inference_seconds,
-                dry_run=totals.dry_run,
-                failure_kinds=telemetry.failure_kinds_summary(totals.failure_kinds),
-            ),
-            enabled=telemetry_config.enabled,
-            block=True,
-        )
-
-    csv_writer = _open_csv_report(artifacts.csv_file)
-    ndjson_emitter = _NDJSONEmitter(sys.stdout) if display.json_output else None
-    csv_sink = _CsvImageResultSink(csv_writer) if csv_writer is not None else None
-    on_image_result = _combine_image_result_callbacks(ndjson_emitter, csv_sink)
-    # A dry run writes nothing, so there is nothing for undo to put back.
-    journal = open_journal(started_at, enabled=artifacts.undo_log and not output.dry_run)
     try:
-        with batch_progress(len(image_files), enabled=display.progress_bar) as progress:
-            run_batch(
-                image_files,
-                agent,
-                options,
-                on_success=make_skip_list_appender(artifacts.append_to_skip_file),
-                on_complete=_on_complete,
-                user_prompt=user_prompt,
-                workers=max(1, workers),
-                progress=progress,
-                cache=cache,
-                on_image_result=on_image_result,
-                session_plan=plan_sessions(
-                    image_files,
-                    gap_minutes=output.session_gap_minutes,
-                ),
-                journal=journal,
-            )
+        image_files = _filter_batch(
+            resolve_image_batch(inputs, image_extensions, recursive=recursive),
+            artifacts=artifacts,
+            filter_=filter_,
+            newer_than=newer_than,
+            older_than=older_than,
+        )
+        if not image_files:
+            logger.info("no_files_to_process_after_skipping")
+            return
+        _process_batch(image_files, setup)
     finally:
-        if cache is not None:
-            cache.close()
-        if csv_writer is not None:
-            csv_writer.close()
-        if journal is not None and journal.entries:
-            logger.info("undo_journal_written", file=str(journal.path), entries=journal.entries)
+        setup.close()
+
+
+@app.command
+def watch(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
+    inputs: Annotated[
+        list[Path] | None,
+        Parameter(
+            name=("--input", "-i"),
+            validator=validators.Path(exists=True),
+            help="One or more folders (or files) to watch (repeat this option)",
+        ),
+    ] = None,
+    *,
+    image_extensions: Annotated[
+        str,
+        Parameter(
+            name=("--ext", "--extensions"),
+            help="Comma-separated image file extensions to process (case insensitive)",
+        ),
+    ] = DEFAULT_EXTENSIONS,
+    recursive: Annotated[
+        bool,
+        Parameter(name=("--recursive", "-r"), help="Watch subdirectories too"),
+    ] = DEFAULT_RECURSIVE,
+    workers: Annotated[
+        int,
+        Parameter(name=("--workers", "-w"), help="Photos to process concurrently per batch"),
+    ] = DEFAULT_WORKERS,
+    interval: Annotated[
+        float,
+        Parameter(name=("--interval",), help="Seconds between folder scans"),
+    ] = DEFAULT_INTERVAL_SECONDS,
+    settle: Annotated[
+        float,
+        Parameter(
+            name=("--settle",),
+            help=(
+                "Seconds a file must sit unchanged before it is tagged, so a photo still being "
+                "copied is left alone until the copy finishes"
+            ),
+        ),
+    ] = DEFAULT_SETTLE_SECONDS,
+    filter_: Annotated[FilterConfig, Parameter(name="*")] = _DEFAULT_FILTER,
+    display: Annotated[DisplayConfig, Parameter(name="*")] = _DEFAULT_DISPLAY,
+    artifacts: Annotated[ArtifactConfig, Parameter(name="*")] = _DEFAULT_ARTIFACTS,
+    provider: Annotated[ProviderConfig, Parameter(name="*")] = _DEFAULT_PROVIDER,
+    output: Annotated[OutputConfig, Parameter(name="*")] = _DEFAULT_OUTPUT,
+    inference: Annotated[InferenceConfig, Parameter(name="*")] = _DEFAULT_INFERENCE,
+    log: Annotated[LogConfig, Parameter(name="*")] = _DEFAULT_LOG,
+    telemetry_config: Annotated[TelemetryConfig, Parameter(name="*")] = _DEFAULT_TELEMETRY,
+) -> None:
+    """
+    Watch folders and tag photos as they arrive, until you stop it with Ctrl-C.
+
+    This is the import-time workflow: point it at the folder your card reader, tethered capture, or
+    sync client fills, and leave it running. Photos already in the folder are tagged first, then
+    each new one as it lands.
+
+    A file is only tagged once it has stopped changing (see ``--settle``), so a photo still being
+    copied is left alone until the copy finishes. Scanning is a plain directory listing every
+    ``--interval`` seconds, which behaves the same on every platform and over network shares.
+
+    Every flag ``photo-tagger`` itself takes works here too and applies to each batch, with one
+    agent, cache, report file, and undo journal shared by the whole session. A batch where some
+    photo fails is logged and the watch continues; the failure does not stop the loop.
+
+    Examples:
+        photo-tagger watch -i ~/Pictures/Inbox
+
+        photo-tagger watch -i ~/Pictures/Inbox -r --interval 10 --skip-tagged
+    """
+    try:
+        setup_logging(
+            file_log_level=log.file_log_level,
+            console_log_level=log.console_log_level,
+            log_folder=log.log_folder,
+        )
+    except OSError as exc:
+        sys.stderr.write(f"Could not set up logging at {log.log_folder}: {exc}\n")
+        raise SystemExit(1) from exc
+    _apply_exiftool_path(configured_exiftool_path())
+    if not inputs:
+        logger.error("no_inputs_provided", hint="Pass one or more --input/-i paths to watch")
+        raise SystemExit(1)
+
+    try:
+        _watch_forever(
+            inputs=inputs,
+            image_extensions=image_extensions,
+            recursive=recursive,
+            workers=workers,
+            interval=interval,
+            settle=settle,
+            filter_=filter_,
+            display=display,
+            artifacts=artifacts,
+            provider=provider,
+            output=output,
+            inference=inference,
+            telemetry_config=telemetry_config,
+        )
+    except PhotoTaggerError as exc:
+        raise SystemExit(1) from exc
+
+
+def _watch_forever(  # noqa: PLR0913 - mirrors watch()'s flag groups one-for-one.
+    *,
+    inputs: list[Path],
+    image_extensions: str,
+    recursive: bool,
+    workers: int,
+    interval: float,
+    settle: float,
+    filter_: FilterConfig,
+    display: DisplayConfig,
+    artifacts: ArtifactConfig,
+    provider: ProviderConfig,
+    output: OutputConfig,
+    inference: InferenceConfig,
+    telemetry_config: TelemetryConfig,
+) -> None:
+    """Poll for new photos and tag each settled batch until interrupted."""
+    _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
+    newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
+    older_than = _parse_filter_date(filter_.older_than, flag="--older-than")
+    setup = _build_run_setup(
+        workers=workers,
+        display=display,
+        artifacts=artifacts,
+        provider=provider,
+        output=output,
+        inference=inference,
+        telemetry_enabled=telemetry_config.enabled,
+    )
+    logger.info(
+        "watching_for_new_photos",
+        inputs=[str(path) for path in inputs],
+        extensions=image_extensions,
+        recursive=recursive,
+        interval=interval,
+        settle=settle,
+    )
+    batches = 0
+    tagged = 0
+    try:
+        for batch in watch_batches(
+            inputs,
+            image_extensions,
+            recursive=recursive,
+            interval_seconds=interval,
+            settle_seconds=settle,
+        ):
+            image_files = _filter_batch(
+                batch,
+                artifacts=artifacts,
+                filter_=filter_,
+                newer_than=newer_than,
+                older_than=older_than,
+            )
+            if not image_files:
+                continue
+            batches += 1
+            tagged += len(image_files)
+            try:
+                _process_batch(image_files, setup)
+            except BatchError as exc:
+                # One bad batch must not end the watch: the next photo to land deserves its turn.
+                logger.error("watch_batch_had_failures", error=str(exc))
+    except KeyboardInterrupt:
+        logger.info("watch_stopped_by_user", batches=batches, photos=tagged)
+    finally:
+        setup.close()
 
 
 def _crash_telemetry_enabled(tokens: list[str]) -> bool:

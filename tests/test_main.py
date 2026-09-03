@@ -10,6 +10,7 @@ tests.
 import contextlib
 import io
 import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
@@ -22,7 +23,7 @@ from photo_tagger import (
     telemetry,
 )
 from photo_tagger.cli_options import load_defaults
-from photo_tagger.errors import ProviderError
+from photo_tagger.errors import BatchError, ProviderError
 from photo_tagger.pipeline import BatchTotals, ImageOutcome
 from photo_tagger.undo import UndoError
 from photo_tagger.vocabulary_build import KeywordCensus, TrimResult
@@ -1668,3 +1669,166 @@ def test_cli_reports_the_journal_it_wrote(
 
     assert captured["journal"].entries == 1
     assert captured["journal"].path.exists()
+
+
+# ---------------------------------------------------------------------------
+# watch command
+# ---------------------------------------------------------------------------
+
+
+def _settled_photo(path: Path) -> Path:
+    """Create a photo old enough for the watcher to consider it finished."""
+    _make_jpeg(path)
+    stamp = time.time() - 60
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_watch_tags_each_batch_with_one_shared_setup(tmp_path: Path) -> None:
+    """Every batch reuses the same agent, cache, and journal instead of rebuilding them."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    first = _settled_photo(inbox / "a.cr3")
+    calls: list[list[Path]] = []
+    setups: list[object] = []
+
+    def fake_process(image_files: list[Path], setup: object) -> None:
+        calls.append(list(image_files))
+        setups.append(setup)
+        if len(calls) == 1:
+            _settled_photo(inbox / "b.cr3")
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "_process_batch", side_effect=fake_process),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox)])
+
+    assert calls == [[first], [inbox / "b.cr3"]]
+    assert setups[0] is setups[1]
+
+
+def _bounded_watch(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 - passthrough shim
+    """
+    Run the real watcher, bounded so the test terminates.
+
+    Four polls: every file needs two (one to record it, one to confirm it has not changed), and a
+    photo that lands while the first batch is being tagged only starts that clock on poll three.
+    """
+    from photo_tagger.watch import watch_batches as real_watch  # noqa: PLC0415
+
+    kwargs["interval_seconds"] = 0
+    return real_watch(*args, max_polls=4, **kwargs)
+
+
+def test_watch_keeps_going_after_a_batch_with_failures(tmp_path: Path) -> None:
+    """One bad batch is logged; the watch does not end because a photo failed."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _settled_photo(inbox / "a.cr3")
+    calls: list[list[Path]] = []
+
+    def failing_process(image_files: list[Path], _setup: object) -> None:
+        calls.append(list(image_files))
+        if len(calls) == 1:
+            _settled_photo(inbox / "b.cr3")
+            raise BatchError(BatchTotals(total_files=1))
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "_process_batch", side_effect=failing_process),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox)])
+
+    expected_batches = 2
+    assert len(calls) == expected_batches
+
+
+def test_watch_applies_the_batch_filters(tmp_path: Path) -> None:
+    """--skip-tagged and friends filter each batch, and an empty one is not processed."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    photo = _settled_photo(inbox / "a.cr3")
+    calls: list[list[Path]] = []
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(
+            main_module,
+            "_process_batch",
+            side_effect=lambda files, _s: calls.append(
+                list(files),
+            ),
+        ),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+        patch("photo_tagger.discovery.find_tagged_images", return_value={photo}),
+    ):
+        _run_app(["watch", "--input", str(inbox), "--skip-tagged"])
+
+    assert calls == []
+
+
+def test_watch_stops_cleanly_on_ctrl_c(tmp_path: Path) -> None:
+    """Ctrl-C ends the watch without a traceback and closes what the run opened."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _settled_photo(inbox / "a.cr3")
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
+        raise KeyboardInterrupt
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "_process_batch", side_effect=interrupt),
+        patch.object(main_module, "watch_batches", side_effect=_bounded_watch),
+    ):
+        _run_app(["watch", "--input", str(inbox)])
+
+
+def test_watch_requires_an_input(tmp_path: Path) -> None:
+    """Watching nothing is a clean exit 1, not an infinite loop over an empty list."""
+    with (
+        patch.object(main_module, "setup_logging"),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(["watch"])
+
+    assert exit_info.value.code == 1
+    assert not (tmp_path / "unused").exists()
+
+
+def test_watch_exits_when_logging_cannot_be_set_up(tmp_path: Path) -> None:
+    """The same clean failure as `tag` when the log folder is unusable."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+
+    with (
+        patch.object(main_module, "setup_logging", side_effect=OSError("read-only")),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(["watch", "--input", str(inbox)])
+
+    assert exit_info.value.code == 1
+
+
+def test_watch_exits_1_when_the_vocabulary_is_unusable(tmp_path: Path) -> None:
+    """A bad --vocabulary stops the watch before it starts, like it stops a tagging run."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    vocabulary = tmp_path / "keywords.txt"
+    vocabulary.write_text("# nothing\n", encoding="utf-8")
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        main_module.app(["watch", "--input", str(inbox), "--vocabulary", str(vocabulary)])
+
+    assert exit_info.value.code == 1
