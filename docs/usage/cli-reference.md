@@ -407,8 +407,6 @@ once. Sampling is fixed at temperature 0 and chunks are reassembled by position,
 organizes the same way whatever order the replies arrive in, but a model is not a pure function:
 treat the output as a proposal to read, which is what the whole file is anyway.
 
-## Watching a folder
-
 ## Skipping and resuming
 
 Three flags cooperate to skip work you have already done and to resume a run that stopped partway
