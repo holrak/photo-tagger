@@ -690,6 +690,38 @@ def test_cli_csv_writer_is_closed_after_the_batch(tmp_path: Path) -> None:
     spies[0].close.assert_called_once()
 
 
+def test_an_empty_batch_leaves_the_previous_report_and_the_provider_alone(tmp_path: Path) -> None:
+    """
+    Nothing to tag must cost nothing: no truncated report, no model validation.
+
+    Building the run opens the CSV report with mode "w", so doing it before discovery replaced the
+    last run's report with a bare header for a run that then processed no photos.
+    """
+    image = _make_jpeg(tmp_path / "img.cr3")
+    skip_file = tmp_path / "skip.txt"
+    skip_file.write_text("img.cr3\n", encoding="utf-8")
+    csv_path = tmp_path / "report.csv"
+    csv_path.write_text("previous run's report\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    setup, create_agent, run_batch = _patches(captured)
+    with setup, create_agent as agent_mock, run_batch as batch_mock:
+        _run_app(
+            [
+                "--input",
+                str(image),
+                "--csv-file",
+                str(csv_path),
+                "--skip-from",
+                str(skip_file),
+            ],
+        )
+
+    assert csv_path.read_text(encoding="utf-8") == "previous run's report\n"
+    agent_mock.assert_not_called()
+    batch_mock.assert_not_called()
+
+
 def test_cli_no_progress_disables_the_bar(tmp_path: Path) -> None:
     """--no-progress reaches run_batch as progress=None (batch_progress yields no callback)."""
     image = _make_jpeg(tmp_path / "img.cr3")

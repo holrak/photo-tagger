@@ -1049,35 +1049,43 @@ def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     csv_writer = _open_csv_report(artifacts.csv_file)
     ndjson_emitter = _NDJSONEmitter(sys.stdout) if display.json_output else None
     csv_sink = _CsvImageResultSink(csv_writer) if csv_writer is not None else None
-    return _RunSetup(
-        options=to_processing_options(output, inference, vocabulary=vocabulary),
-        agent=create_agent(
-            provider.provider_name,
-            provider.model_name,
-            api_base_url=provider.api_base_url,
-            api_key=provider.api_key,
-            retries=provider.retries,
-            output_language=inference.output_language,
-        ),
-        user_prompt=user_prompt,
-        workers=max(1, workers),
-        provider=provider,
-        inference=inference,
-        artifacts=artifacts,
-        display=display,
-        session_gap_minutes=output.session_gap_minutes,
-        telemetry_enabled=telemetry_enabled,
-        cache=open_cache(artifacts.cache_file, namespace=cache_namespace),
-        csv_writer=csv_writer,
-        on_image_result=_combine_image_result_callbacks(ndjson_emitter, csv_sink),
-        on_success=make_skip_list_appender(artifacts.append_to_skip_file),
-        # A dry run writes nothing, so there is nothing for undo to put back.
-        journal=open_journal(
-            datetime.now(tz=UTC),
-            enabled=artifacts.undo_log and not output.dry_run,
-        ),
-        journal_enabled=artifacts.undo_log and not output.dry_run,
-    )
+    # Anything below can raise before a _RunSetup exists, and then the caller has nothing to
+    # close: the report file would stay open until the interpreter got round to it. create_agent
+    # validates the model over HTTP, which is the failure that actually happens here.
+    try:
+        return _RunSetup(
+            options=to_processing_options(output, inference, vocabulary=vocabulary),
+            agent=create_agent(
+                provider.provider_name,
+                provider.model_name,
+                api_base_url=provider.api_base_url,
+                api_key=provider.api_key,
+                retries=provider.retries,
+                output_language=inference.output_language,
+            ),
+            user_prompt=user_prompt,
+            workers=max(1, workers),
+            provider=provider,
+            inference=inference,
+            artifacts=artifacts,
+            display=display,
+            session_gap_minutes=output.session_gap_minutes,
+            telemetry_enabled=telemetry_enabled,
+            cache=open_cache(artifacts.cache_file, namespace=cache_namespace),
+            csv_writer=csv_writer,
+            on_image_result=_combine_image_result_callbacks(ndjson_emitter, csv_sink),
+            on_success=make_skip_list_appender(artifacts.append_to_skip_file),
+            # A dry run writes nothing, so there is nothing for undo to put back.
+            journal=open_journal(
+                datetime.now(tz=UTC),
+                enabled=artifacts.undo_log and not output.dry_run,
+            ),
+            journal_enabled=artifacts.undo_log and not output.dry_run,
+        )
+    except Exception:
+        if csv_writer is not None:
+            csv_writer.close()
+        raise
 
 
 def _process_batch(image_files: list[Path], setup: _RunSetup) -> None:
@@ -1174,6 +1182,19 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     _maybe_show_telemetry_notice(enabled=telemetry_config.enabled)
     newer_than = _parse_filter_date(filter_.newer_than, flag="--newer-than")
     older_than = _parse_filter_date(filter_.older_than, flag="--older-than")
+    # Discovery first: building the run truncates the CSV report, opens the cache and validates the
+    # model against the server. A batch that turns out to be empty should cost none of that, and
+    # least of all last run's report.
+    image_files = _filter_batch(
+        resolve_image_batch(inputs, image_extensions, recursive=recursive),
+        artifacts=artifacts,
+        filter_=filter_,
+        newer_than=newer_than,
+        older_than=older_than,
+    )
+    if not image_files:
+        logger.info("no_files_to_process_after_skipping")
+        return
     setup = _build_run_setup(
         workers=workers,
         display=display,
@@ -1200,16 +1221,6 @@ def _tag_inside_lock(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     )
 
     try:
-        image_files = _filter_batch(
-            resolve_image_batch(inputs, image_extensions, recursive=recursive),
-            artifacts=artifacts,
-            filter_=filter_,
-            newer_than=newer_than,
-            older_than=older_than,
-        )
-        if not image_files:
-            logger.info("no_files_to_process_after_skipping")
-            return
         _process_batch(image_files, setup)
     finally:
         setup.close()
