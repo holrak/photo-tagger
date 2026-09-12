@@ -90,7 +90,7 @@ photo-tagger-gui = "photo_tagger.gui:launch"
 exclude-newer = "1 day"
 
 [build-system]
-requires = ["uv_build>=0.12.9,<1.0.0"]
+requires = ["uv_build>=0.12.13,<1.0.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
