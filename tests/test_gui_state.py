@@ -1,12 +1,14 @@
 """Tests for the Qt-free GUI helpers (no PySide6, no display required)."""
 
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from photo_tagger.errors import ConfigFileError
 from photo_tagger.gui_state import (
     _MAX_LISTED_DROPPED,
     ADDED,
@@ -754,6 +756,48 @@ def test_merged_config_text_drops_blank_url() -> None:
     existing = '[provider]\napi_base_url = "http://old:1234/v1"\n'
     merged = merged_config_text(existing, _config_values(api_base_url=None))
     assert "api_base_url" not in merged
+
+
+@pytest.mark.parametrize(
+    "writer",
+    [
+        lambda text: merged_config_text(text, _config_values()),
+        lambda text: config_text_with_language(text, "pt_BR"),
+        lambda text: config_text_with_output_language(text, "German"),
+    ],
+    ids=["settings", "ui-language", "metadata-language"],
+)
+def test_config_writers_refuse_a_file_that_is_not_toml(writer: Callable[[str], str]) -> None:
+    """
+    A hand-edited config with a syntax error is reported, not rewritten from scratch.
+
+    tomlkit raises a ParseError, which used to escape the Qt slot that saves settings and take the
+    window down with it. The window catches ConfigFileError and shows it in the usual warning.
+    """
+    with pytest.raises(ConfigFileError, match="not valid TOML"):
+        writer("this is not toml = = =")
+
+
+@pytest.mark.parametrize(
+    ("existing", "writer"),
+    [
+        ('provider = "lmstudio"\n', lambda text: merged_config_text(text, _config_values())),
+        ("inference = 5\n", lambda text: config_text_with_output_language(text, "English")),
+    ],
+    ids=["provider", "inference"],
+)
+def test_config_writers_refuse_a_key_that_is_not_a_table(
+    existing: str,
+    writer: Callable[[str], str],
+) -> None:
+    """
+    A GUI-managed key that holds a scalar is left alone rather than overwritten.
+
+    Assigning into it raised a bare TypeError (or AttributeError) out of the save slot. Refusing
+    says what is wrong and keeps whatever the user meant by the key.
+    """
+    with pytest.raises(ConfigFileError, match="not a"):
+        writer(existing)
 
 
 def test_apply_proposal_carries_the_cache_flag() -> None:

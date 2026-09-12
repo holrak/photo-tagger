@@ -11,15 +11,20 @@ Qt.
 import os
 import subprocess  # nosec B404 - only used to read the user's own login-shell PATH (see below)
 import textwrap
+
+# Imported at runtime, not under TYPE_CHECKING: _config_table isinstance-checks against it.
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import tomlkit
+from tomlkit.exceptions import TOMLKitError
 
 from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
+from photo_tagger.errors import ConfigFileError
 from photo_tagger.i18n import AUTO, _, gettext_noop, ngettext, pgettext
 from photo_tagger.keywords import dedupe_keywords, merge_keywords
 from photo_tagger.metadata import (
@@ -47,6 +52,8 @@ from photo_tagger.watch import DEFAULT_INTERVAL_SECONDS, DEFAULT_SETTLE_SECONDS
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
+
+    from tomlkit import TOMLDocument
 
     from photo_tagger.undo import UndoResult
     from photo_tagger.vocabulary import Vocabulary
@@ -1487,6 +1494,41 @@ def config_toml_text(values: GuiConfigValues) -> str:
     return "\n".join(lines)
 
 
+def _parse_config(existing_text: str) -> TOMLDocument:
+    """
+    Parse a config file the GUI is about to update, or refuse the update.
+
+    Loading a config for *reading* tolerates a broken file (it is logged and ignored), but rewriting
+    one cannot: preserving the keys, comments, and ordering the GUI does not manage means starting
+    from a document, and a file with a syntax error yields none. Without this the tomlkit ParseError
+    escaped a Qt slot and crashed the window on a save meant to be forgiving.
+    """
+    try:
+        return tomlkit.parse(existing_text)
+    except TOMLKitError as exc:
+        msg = f"The config file is not valid TOML, so it was left unchanged: {exc}"
+        raise ConfigFileError(msg) from exc
+
+
+def _config_table(document: TOMLDocument, name: str) -> MutableMapping[str, object]:
+    """
+    Return *document*'s ``[name]`` table, creating it when absent.
+
+    A file where the key exists but is not a table (``provider = "lmstudio"``) is refused rather
+    than overwritten: assigning into it raised a bare TypeError out of the save slot, and silently
+    replacing it would throw away whatever the user meant by it.
+    """
+    existing = document.get(name)
+    if existing is None:
+        table = tomlkit.table()
+        document[name] = table
+        return table
+    if not isinstance(existing, MutableMapping):
+        msg = f"The config file's '{name}' entry is not a [{name}] table, so it was left unchanged."
+        raise ConfigFileError(msg)
+    return existing
+
+
 def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     """
     Update *existing_text* (a TOML config file) with *values*, preserving everything else.
@@ -1494,12 +1536,14 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     tomlkit keeps comments, ordering, and keys the GUI does not manage, so saving from the GUI never
     destroys a hand-written config. Only the GUI-managed keys are set; a blank base URL removes the
     key so the provider default applies again.
+
+    Raises :class:`~photo_tagger.errors.ConfigFileError` when the file cannot be updated in place.
     """
-    document = tomlkit.parse(existing_text)
+    document = _parse_config(existing_text)
     document["extensions"] = values.extensions
     document["recursive"] = values.recursive
 
-    provider = document.setdefault("provider", tomlkit.table())
+    provider = _config_table(document, "provider")
     provider["provider_name"] = values.provider_name
     provider["model_name"] = values.model_name
     if values.api_base_url:
@@ -1507,7 +1551,7 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     else:
         provider.pop("api_base_url", None)
 
-    output = document.setdefault("output", tomlkit.table())
+    output = _config_table(document, "output")
     output["write_title"] = values.write_title
     output["write_description"] = values.write_description
     output["write_keywords"] = values.write_keywords
@@ -1523,10 +1567,10 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
         # fail to open on its next run.
         output.pop("vocabulary", None)
 
-    artifacts = document.setdefault("artifacts", tomlkit.table())
+    artifacts = _config_table(document, "artifacts")
     artifacts["undo_log"] = values.undo_log
 
-    telemetry = document.setdefault("telemetry", tomlkit.table())
+    telemetry = _config_table(document, "telemetry")
     telemetry["enabled"] = values.telemetry_enabled
     return tomlkit.dumps(document)
 
@@ -1538,8 +1582,10 @@ def config_text_with_language(existing_text: str, language: str) -> str:
     Choosing :data:`~photo_tagger.i18n.AUTO` (follow the OS locale, the built-in default) removes
     the key instead of writing it, so a config never pins a language the user did not pick. tomlkit
     keeps comments and ordering intact, like :func:`merged_config_text`.
+
+    Raises :class:`~photo_tagger.errors.ConfigFileError` when the file cannot be updated in place.
     """
-    document = tomlkit.parse(existing_text)
+    document = _parse_config(existing_text)
     if language == AUTO:
         document.pop("language", None)
     else:
@@ -1555,16 +1601,18 @@ def config_text_with_output_language(existing_text: str, language: str) -> str:
     over to CLI runs too. Choosing the built-in default (English) removes the key instead of pinning
     it, mirroring :func:`config_text_with_language`; an ``[inference]`` table left empty by that
     removal is dropped as well.
+
+    Raises :class:`~photo_tagger.errors.ConfigFileError` when the file cannot be updated in place.
     """
-    document = tomlkit.parse(existing_text)
+    document = _parse_config(existing_text)
     if language.strip().casefold() == DEFAULT_OUTPUT_LANGUAGE.casefold():
-        inference = document.get("inference")
-        if inference is not None:
+        if "inference" in document:
+            inference = _config_table(document, "inference")
             inference.pop("output_language", None)
             if not inference:
                 document.pop("inference", None)
     else:
-        document.setdefault("inference", tomlkit.table())["output_language"] = language.strip()
+        _config_table(document, "inference")["output_language"] = language.strip()
     return tomlkit.dumps(document)
 
 

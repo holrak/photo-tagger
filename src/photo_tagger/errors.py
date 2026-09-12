@@ -21,3 +21,14 @@ class DiscoveryError(PhotoTaggerError):
 
 class BatchError(PhotoTaggerError):
     """One or more photos in a batch failed to process."""
+
+
+class ConfigFileError(PhotoTaggerError):
+    """
+    The config file on disk cannot be updated in place.
+
+    Reading a config is always best-effort (a broken file is logged and ignored, see
+    :func:`photo_tagger.config_file.load_config`), but *writing* one back is not: the GUI's Save
+    Settings has to preserve everything it does not manage, and it cannot do that with a file it
+    could not parse. Raised so the window reports the problem and leaves the file alone.
+    """

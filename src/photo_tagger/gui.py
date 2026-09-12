@@ -125,7 +125,12 @@ from photo_tagger.config_file import find_config_file, load_config, user_config_
 from photo_tagger.csv_report import write_report
 from photo_tagger.diagnostics import CheckResult, run_checks
 from photo_tagger.discovery import load_skip_list, skip_list_matches
-from photo_tagger.errors import DiscoveryError, PhotoTaggerError, ProviderError
+from photo_tagger.errors import (
+    ConfigFileError,
+    DiscoveryError,
+    PhotoTaggerError,
+    ProviderError,
+)
 from photo_tagger.gui_state import (
     ADDED,
     BADGE_FAILED,
@@ -1521,7 +1526,9 @@ class MainWindow(QMainWindow):
             existing = target.read_text(encoding="utf-8") if target.exists() else ""
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(config_text_with_language(existing, code), encoding="utf-8")
-        except OSError as exc:
+        except (OSError, ConfigFileError) as exc:
+            # ConfigFileError: the file on disk is not TOML we can rewrite in place. Reporting it
+            # is the whole point of the dialog; letting it out of a Qt slot crashed the window.
             QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         self._status.setText(_("Language saved. Restart Photo Tagger to apply it."))
@@ -1611,7 +1618,9 @@ class MainWindow(QMainWindow):
                 config_text_with_output_language(existing, normalized),
                 encoding="utf-8",
             )
-        except OSError as exc:
+        except (OSError, ConfigFileError) as exc:
+            # ConfigFileError: the file on disk is not TOML we can rewrite in place. Reporting it
+            # is the whole point of the dialog; letting it out of a Qt slot crashed the window.
             QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         if self._vocabulary_path is not None:
@@ -1679,7 +1688,9 @@ class MainWindow(QMainWindow):
                 note = _("Saved defaults to {target}.")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
-        except OSError as exc:
+        except (OSError, ConfigFileError) as exc:
+            # ConfigFileError: the file on disk is not TOML we can rewrite in place. Reporting it
+            # is the whole point of the dialog; letting it out of a Qt slot crashed the window.
             QMessageBox.warning(self, _(_CONFIG_SAVE_ERROR_TITLE), str(exc))
             return
         self._status.setText(note.format(target=target))
