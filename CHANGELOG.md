@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format is based on
 - GUI: saving settings, the UI language, or the metadata language into a config file with a syntax
   error now reports the problem and leaves the file alone, instead of crashing the window. Same for
   a file where `[provider]`, `[output]`, or `[inference]` holds something other than a table.
+- A run that fails while starting up closes the `--cache-file` it had already opened, instead of
+  holding its SQLite handle until the process exits.
 
 ## [0.8.0] - 2026-09-03
 

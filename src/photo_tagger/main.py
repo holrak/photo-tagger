@@ -1049,20 +1049,26 @@ def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
     csv_writer = _open_csv_report(artifacts.csv_file)
     ndjson_emitter = _NDJSONEmitter(sys.stdout) if display.json_output else None
     csv_sink = _CsvImageResultSink(csv_writer) if csv_writer is not None else None
+    # A dry run writes nothing, so there is nothing for undo to put back.
+    journal_enabled = artifacts.undo_log and not output.dry_run
     # Anything below can raise before a _RunSetup exists, and then the caller has nothing to
-    # close: the report file would stay open until the interpreter got round to it. create_agent
-    # validates the model over HTTP, which is the failure that actually happens here.
+    # close: the report file and the cache's SQLite handle would stay open until the interpreter
+    # got round to them. create_agent validates the model over HTTP, which is the failure that
+    # actually happens here; it runs first, so a wrong model name never opens the cache at all.
+    cache: InferenceCache | None = None
     try:
+        agent = create_agent(
+            provider.provider_name,
+            provider.model_name,
+            api_base_url=provider.api_base_url,
+            api_key=provider.api_key,
+            retries=provider.retries,
+            output_language=inference.output_language,
+        )
+        cache = open_cache(artifacts.cache_file, namespace=cache_namespace)
         return _RunSetup(
             options=to_processing_options(output, inference, vocabulary=vocabulary),
-            agent=create_agent(
-                provider.provider_name,
-                provider.model_name,
-                api_base_url=provider.api_base_url,
-                api_key=provider.api_key,
-                retries=provider.retries,
-                output_language=inference.output_language,
-            ),
+            agent=agent,
             user_prompt=user_prompt,
             workers=max(1, workers),
             provider=provider,
@@ -1071,18 +1077,16 @@ def _build_run_setup(  # noqa: PLR0913 - mirrors tag()'s flag groups one-for-one
             display=display,
             session_gap_minutes=output.session_gap_minutes,
             telemetry_enabled=telemetry_enabled,
-            cache=open_cache(artifacts.cache_file, namespace=cache_namespace),
+            cache=cache,
             csv_writer=csv_writer,
             on_image_result=_combine_image_result_callbacks(ndjson_emitter, csv_sink),
             on_success=make_skip_list_appender(artifacts.append_to_skip_file),
-            # A dry run writes nothing, so there is nothing for undo to put back.
-            journal=open_journal(
-                datetime.now(tz=UTC),
-                enabled=artifacts.undo_log and not output.dry_run,
-            ),
-            journal_enabled=artifacts.undo_log and not output.dry_run,
+            journal=open_journal(datetime.now(tz=UTC), enabled=journal_enabled),
+            journal_enabled=journal_enabled,
         )
     except Exception:
+        if cache is not None:
+            cache.close()
         if csv_writer is not None:
             csv_writer.close()
         raise

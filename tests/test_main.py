@@ -690,6 +690,28 @@ def test_cli_csv_writer_is_closed_after_the_batch(tmp_path: Path) -> None:
     spies[0].close.assert_called_once()
 
 
+def test_cli_closes_the_cache_when_building_the_run_fails(tmp_path: Path) -> None:
+    """
+    A failure after the cache is opened still closes it, so its SQLite handle cannot leak.
+
+    Only the CSV writer used to be closed here. The cache is opened in the same step and the run
+    that would have closed it never starts, so its handle stayed open for the life of the process.
+    """
+    image = _make_jpeg(tmp_path / "img.cr3")
+    cache = MagicMock()
+
+    with (
+        patch.object(main_module, "setup_logging"),
+        patch.object(main_module, "create_agent", return_value=object()),
+        patch.object(main_module, "open_cache", return_value=cache),
+        patch.object(main_module, "open_journal", side_effect=OSError("no state dir")),
+        pytest.raises(OSError, match="no state dir"),
+    ):
+        main_module.app(["--input", str(image), "--cache-file", str(tmp_path / "c.sqlite")])
+
+    cache.close.assert_called_once()
+
+
 def test_an_empty_batch_leaves_the_previous_report_and_the_provider_alone(tmp_path: Path) -> None:
     """
     Nothing to tag must cost nothing: no truncated report, no model validation.
