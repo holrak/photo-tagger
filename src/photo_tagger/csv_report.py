@@ -36,8 +36,20 @@ _LIST_SEP = "; "
 _FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
 
 
-def _neutralize_formula(value: str) -> str:
-    """Prefix *value* with a single quote if a spreadsheet would read it as a formula."""
+def neutralize_formula(value: str) -> str:
+    """
+    Prefix *value* with a single quote if a spreadsheet would read it as a formula.
+
+    Public because every CSV this project writes owes the reader the same protection, and the
+    keyword cells all carry content read off photos or typed by a model. The vocabulary builder's
+    drop report uses it too.
+
+    Examples:
+        >>> neutralize_formula("=1+1")
+        "'=1+1"
+        >>> neutralize_formula("Osprey")
+        'Osprey'
+    """
     if value.startswith(_FORMULA_TRIGGER_CHARS):
         return f"'{value}"
     return value
@@ -88,31 +100,31 @@ class ReportRow:
     def as_dict(self) -> dict[str, str]:
         """Render this row as a ``column -> cell`` mapping ready for :class:`csv.DictWriter`."""
         return {
-            "filename": _neutralize_formula(self.filename),
-            "file": _neutralize_formula(self.file),
+            "filename": neutralize_formula(self.filename),
+            "file": neutralize_formula(self.file),
             "status": self.status,
-            "title": _neutralize_formula(self.title),
-            "description": _neutralize_formula(self.description),
-            "keywords": _neutralize_formula(_LIST_SEP.join(self.keywords)),
-            "hierarchical_keywords": _neutralize_formula(
+            "title": neutralize_formula(self.title),
+            "description": neutralize_formula(self.description),
+            "keywords": neutralize_formula(_LIST_SEP.join(self.keywords)),
+            "hierarchical_keywords": neutralize_formula(
                 _LIST_SEP.join(self.hierarchical_keywords),
             ),
-            "existing_keywords": _neutralize_formula(_LIST_SEP.join(self.existing_keywords)),
-            "existing_title": _neutralize_formula(self.existing_title),
-            "existing_description": _neutralize_formula(self.existing_description),
-            "camera_model": _neutralize_formula(self.camera_model),
-            "lens_model": _neutralize_formula(self.lens_model),
-            "capture_date": _neutralize_formula(self.capture_date),
-            "gps_position": _neutralize_formula(self.gps_position),
-            "city": _neutralize_formula(self.city),
-            "country": _neutralize_formula(self.country),
+            "existing_keywords": neutralize_formula(_LIST_SEP.join(self.existing_keywords)),
+            "existing_title": neutralize_formula(self.existing_title),
+            "existing_description": neutralize_formula(self.existing_description),
+            "camera_model": neutralize_formula(self.camera_model),
+            "lens_model": neutralize_formula(self.lens_model),
+            "capture_date": neutralize_formula(self.capture_date),
+            "gps_position": neutralize_formula(self.gps_position),
+            "city": neutralize_formula(self.city),
+            "country": neutralize_formula(self.country),
             "input_tokens": str(self.input_tokens),
             "output_tokens": str(self.output_tokens),
             "total_tokens": str(self.total_tokens),
             "seconds": f"{self.seconds:.3f}",
             "from_cache": _format_bool(value=self.from_cache),
             "retry": _format_bool(value=self.retry),
-            "error": _neutralize_formula(self.error),
+            "error": neutralize_formula(self.error),
         }
 
 

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from photo_tagger.csv_report import neutralize_formula
 from photo_tagger.errors import DiscoveryError
 from photo_tagger.keywords import parse_hierarchical_keyword
 from photo_tagger.metadata import read_keyword_sets
@@ -432,10 +433,16 @@ def render_drop_report(result: TrimResult) -> str:
 
     This is the half that makes the thresholds tunable. A run that drops a term you care about says
     so here, with the count that would have kept it.
+
+    The keyword cell goes through :func:`~photo_tagger.csv_report.neutralize_formula` like every
+    other CSV this project writes: a keyword arrives from whatever wrote it onto the photo, and a
+    catalog can carry one starting with ``=`` or ``@``, which a spreadsheet would run as a formula
+    instead of showing as text (CWE-1236). The other three cells are written here and always open
+    with a digit or a fixed word.
     """
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["keyword", "uses", "reason", "detail"])
     for entry in sorted(result.dropped, key=lambda item: (-item.uses, item.term.casefold())):
-        writer.writerow([entry.term, entry.uses, entry.reason, entry.detail])
+        writer.writerow([neutralize_formula(entry.term), entry.uses, entry.reason, entry.detail])
     return buffer.getvalue()

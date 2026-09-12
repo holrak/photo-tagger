@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format is based on
   the tag photo-tagger falls back to. A photo whose `XMP-dc:Title` is empty now reports its
   `IPTC:ObjectName` instead of an empty title, and a blank camera or location tag no longer hides
   the value on the XMP sidecar behind it, nor leaves a dangling line in the prompt.
+- `photo-tagger vocabulary --report` quotes a keyword a spreadsheet would otherwise run as a
+  formula, the same way `--csv-file` always has. Keywords come off the photos, so the report can
+  carry whatever the tool that tagged them wrote there.
 
 ## [0.8.0] - 2026-09-03
 

@@ -220,6 +220,19 @@ def test_render_drop_report_lists_every_drop_with_its_reason() -> None:
     assert lines[1] == "Fluke,1,rare,used 1x"
 
 
+def test_render_drop_report_neutralizes_a_formula_shaped_keyword() -> None:
+    """
+    A keyword a spreadsheet would run as a formula is written as text (CWE-1236).
+
+    Keywords come off the photos, so this report can carry whatever the previous tagging tool (or a
+    hostile file) wrote there. The per-photo CSV report has always quoted them; this one did not.
+    """
+    census = KeywordCensus()
+    census.add(['=HYPERLINK("http://example.invalid")'])
+    report = render_drop_report(trim(census, TrimRules(min_uses=2)))
+    assert report.splitlines()[1].startswith("\"'=HYPERLINK")
+
+
 def test_census_merge_adds_up_two_sources() -> None:
     """An export and the photos themselves are two counts of one library, so they add up."""
     photos = KeywordCensus()
