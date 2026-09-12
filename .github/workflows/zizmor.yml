@@ -51,7 +51,7 @@ jobs:
         # A fork PR gets a read-only token, so the upload would fail there; the gate below still
         # runs. The expression is also true for push and workflow_dispatch, where the field is null.
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: results.sarif
           category: zizmor
