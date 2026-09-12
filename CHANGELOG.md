@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format is based on
 - GUI: saving settings, the UI language, or the metadata language into a config file with a syntax
   error now reports the problem and leaves the file alone, instead of crashing the window. Same for
   a file where `[provider]`, `[output]`, or `[inference]` holds something other than a table.
+- Merging keywords no longer writes a literal duplicate to `XMP-lr:WeightedFlatSubject`. A photo
+  carrying a weighted keyword that its `XMP-dc:Subject` list does not (the two are read from
+  different tags) got that keyword a second time when the model proposed it again.
 - A run that fails while starting up closes the `--cache-file` it had already opened, instead of
   holding its SQLite handle until the process exits.
 - The telemetry hardware probes and the GUI's **Reveal in Finder** resolve their helper program on

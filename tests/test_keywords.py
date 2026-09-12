@@ -3,6 +3,7 @@
 from photo_tagger.keywords import (
     _capitalize_segment,
     _collect_cumulative_entries,
+    _FlatKeywords,
     _normalize_chain_parts,
     _process_new_keywords,
     _register_chain,
@@ -82,12 +83,11 @@ def test_register_chain_keeps_existing_chain_of_equal_length() -> None:
 
 def test_process_new_keywords_skips_empty_and_duplicate_subjects() -> None:
     """Keywords that normalize to nothing are dropped; case-duplicate subjects are not re-added."""
-    subjects = ["Bird"]
-    weighted = ["Bird"]
-    seen = {"bird"}
-    added = _process_new_keywords(["<", "bird"], seen, subjects, weighted, {})
+    flat = _FlatKeywords(subject=["Bird"], weighted=["Bird"])
+    added = _process_new_keywords(["<", "bird"], flat, {})
     assert added == []
-    assert subjects == ["Bird"]
+    assert flat.subject == ["Bird"]
+    assert flat.weighted == ["Bird"]
 
 
 def test_normalize_chain_parts_title_cases_and_omits_blanks() -> None:
@@ -109,22 +109,14 @@ def test_normalize_chain_parts_preserves_deliberate_casing() -> None:
 
 def test_process_new_keywords_updates_subjects_and_registry() -> None:
     """New keywords extend subjects/weighted lists and record the longest hierarchy per leaf."""
-    subjects = ["Beach"]
-    weighted = ["Beach"]
-    seen = {"beach"}
+    flat = _FlatKeywords(subject=["Beach"], weighted=["Beach"])
     registry: dict[str, list[str]] = {"eagle": ["Animal", "Bird", "Eagle"]}
 
-    added = _process_new_keywords(
-        ["Duck<Bird<Animal", "cloud"],
-        seen,
-        subjects,
-        weighted,
-        registry,
-    )
+    added = _process_new_keywords(["Duck<Bird<Animal", "cloud"], flat, registry)
 
     assert added == ["Animal", "Bird", "Duck", "Cloud"]
-    assert subjects == ["Beach", "Animal", "Bird", "Duck", "Cloud"]
-    assert weighted == ["Beach", "Animal", "Bird", "Duck", "Cloud"]
+    assert flat.subject == ["Beach", "Animal", "Bird", "Duck", "Cloud"]
+    assert flat.weighted == ["Beach", "Animal", "Bird", "Duck", "Cloud"]
     assert registry["duck"] == ["Animal", "Bird", "Duck"]
 
 
@@ -206,6 +198,22 @@ def test_merge_keywords_does_not_mutate_input() -> None:
     original_subject = list(existing.subject)
     merge_keywords(existing, ["B"])
     assert existing.subject == original_subject
+
+
+def test_merge_keywords_does_not_duplicate_a_weighted_only_keyword() -> None:
+    """
+    A term on WeightedFlatSubject but not on Subject is not appended to it a second time.
+
+    The two lists come from different tags (XMP-dc:Subject plus IPTC:Keywords for one, XMP-
+    lr:WeightedFlatSubject for the other), so they can legitimately differ. Both were de-duplicated
+    against the subject list alone, and the writer replayed the duplicate to disk.
+    """
+    merged = merge_keywords(
+        KeywordSet(subject=["Beach"], weighted=["Beach", "Sunset"]),
+        ["Sunset"],
+    )
+    assert merged.subject == ["Beach", "Sunset"]
+    assert merged.weighted == ["Beach", "Sunset"]
 
 
 def test_merge_keywords_keeps_a_vocabulary_spelling_verbatim() -> None:

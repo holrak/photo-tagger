@@ -6,6 +6,7 @@ emits the inverse, leaf-first form ("Duck<Bird<Animal"). This module converts be
 merges fresh AI keywords with whatever already lives on the photo.
 """
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -160,11 +161,44 @@ def _seed_longest_from_existing(hierarchical_keywords: Iterable[str]) -> dict[st
     return registry
 
 
-def _process_new_keywords(  # noqa: PLR0913 - the caller owns each accumulator and passes it in.
+@dataclass(slots=True)
+class _FlatKeywords:
+    """
+    The two flat keyword views a merge grows, each de-duplicated against its own contents.
+
+    ``subject`` feeds XMP-dc:Subject (mirrored to IPTC:Keywords) and ``weighted`` feeds
+    XMP-lr:WeightedFlatSubject. They usually hold the same terms, but they are read from different
+    tags and a photo can carry a weighted entry that its Subject list does not, so each needs its
+    own seen-set: de-duplicating both against ``subject`` alone let such a term be appended to
+    ``weighted`` a second time and written back to the photo as a literal duplicate.
+    """
+
+    subject: list[str]
+    weighted: list[str]
+    _subject_seen: set[str] = field(init=False)
+    _weighted_seen: set[str] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Index what the photo already carries, so an existing term is never re-appended."""
+        self._subject_seen = {keyword.casefold() for keyword in self.subject}
+        self._weighted_seen = {keyword.casefold() for keyword in self.weighted}
+
+    def add(self, keyword: str) -> bool:
+        """Append *keyword* to whichever view lacks it; report whether it is new to ``subject``."""
+        key = keyword.casefold()
+        if key not in self._weighted_seen:
+            self._weighted_seen.add(key)
+            self.weighted.append(keyword)
+        if key in self._subject_seen:
+            return False
+        self._subject_seen.add(key)
+        self.subject.append(keyword)
+        return True
+
+
+def _process_new_keywords(
     new_keywords: list[str],
-    subject_seen: set[str],
-    subject_acc: list[str],
-    weighted_acc: list[str],
+    flat: _FlatKeywords,
     chain_registry: dict[str, list[str]],
     *,
     verbatim: Mapping[str, str] | None = None,
@@ -172,13 +206,11 @@ def _process_new_keywords(  # noqa: PLR0913 - the caller owns each accumulator a
     """
     Append new flat keywords and update the longest-chain registry.
 
-    Mutates: subject_seen, subject_acc, weighted_acc, chain_registry.
+    Mutates: flat, chain_registry.
 
     Args:
         new_keywords: Flat subjects (e.g., "bird") or chains (e.g., "Duck<Bird<Animal").
-        subject_seen: Casefolded set for de-duplication.
-        subject_acc: Accumulates unique subjects (root-to-leaf order).
-        weighted_acc: Parallel accumulator kept in sync with subject_acc.
+        flat: The subject/weighted accumulators, each de-duplicated against its own contents.
         chain_registry: Maps casefolded leaf to longest observed chain (root-to-leaf list).
         verbatim: Exact spellings a controlled vocabulary declared, keyed by casefolded term.
 
@@ -191,14 +223,7 @@ def _process_new_keywords(  # noqa: PLR0913 - the caller owns each accumulator a
         normalized = _normalize_chain_parts(parts, verbatim)
         if not normalized:
             continue
-        for flat_kw in normalized:
-            key = flat_kw.casefold()
-            if key in subject_seen:
-                continue
-            subject_acc.append(flat_kw)
-            weighted_acc.append(flat_kw)
-            added_subjects.append(flat_kw)
-            subject_seen.add(key)
+        added_subjects.extend(flat_kw for flat_kw in normalized if flat.add(flat_kw))
         _register_chain(chain_registry, normalized)
     return added_subjects
 
@@ -276,28 +301,23 @@ def merge_keywords(
         ['Animal|Bird', 'Animal|Bird|Seagull']
     """
     # Copy caller-owned lists so this stays a pure function from the caller's perspective.
-    existing_subject = list(existing_kw.subject)
-    existing_weighted = list(existing_kw.weighted)
+    flat = _FlatKeywords(subject=list(existing_kw.subject), weighted=list(existing_kw.weighted))
     existing_hierarchical = [kw for kw in existing_kw.hierarchical if "|" in kw]
-
-    subject_seen = {kw.casefold() for kw in existing_subject}
     hierarchical_seen = {kw.casefold() for kw in existing_hierarchical}
 
     chain_registry = _seed_longest_from_existing(existing_hierarchical)
     new_subjects = _process_new_keywords(
         new_keywords,
-        subject_seen,
-        existing_subject,
-        existing_weighted,
+        flat,
         chain_registry,
         verbatim=verbatim,
     )
     new_hierarchical = _collect_cumulative_entries(chain_registry, hierarchical_seen)
 
     merged = KeywordSet(
-        subject=existing_subject,
+        subject=flat.subject,
         hierarchical=existing_hierarchical + new_hierarchical,
-        weighted=existing_weighted,
+        weighted=flat.weighted,
     )
 
     logger.debug(
