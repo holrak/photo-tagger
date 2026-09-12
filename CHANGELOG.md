@@ -28,6 +28,8 @@ All notable changes to this project are documented here. The format is based on
   the current working directory first, so a `nvidia-smi.exe` or `explorer.exe` sitting in a photo
   folder could run in place of the real one. The GUI also falls back to opening the folder when the
   file browser is missing or will not start, rather than crashing.
+- GUI: a generate run that dies while starting up (opening the result cache) no longer leaves the
+  window disabled with its photos stuck at "working..." for the rest of the session.
 
 ## [0.8.0] - 2026-09-03
 
