@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- A metadata tag that is present but empty (an empty `rdf:Bag`, a blank string) no longer shadows
+  the tag photo-tagger falls back to. A photo whose `XMP-dc:Title` is empty now reports its
+  `IPTC:ObjectName` instead of an empty title, and a blank camera or location tag no longer hides
+  the value on the XMP sidecar behind it, nor leaves a dangling line in the prompt.
+
 ## [0.8.0] - 2026-09-03
 
 ### Added

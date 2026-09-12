@@ -529,6 +529,36 @@ def test_read_image_context_batches_keywords_location_camera_and_gps(tmp_path: P
     assert fake_helper.get_tags.call_count == 1
 
 
+def test_read_image_context_skips_blank_camera_location_and_gps_tags(tmp_path: Path) -> None:
+    """
+    A tag that is present but blank is treated as absent, so a later block can still fill it in.
+
+    Collecting the blank value instead put an empty string in camera_info, which the prompt then
+    rendered as a dangling "- Camera:" line, and blocked the sidecar's real value behind it.
+    """
+    img = tmp_path / "img.cr3"
+    img.write_text("x")
+
+    fake_helper = MagicMock()
+    fake_helper.__enter__.return_value = fake_helper
+    fake_helper.__exit__.return_value = False
+    fake_helper.get_tags.return_value = [
+        {"EXIF:Model": "  ", "XMP-photoshop:City": [], "Composite:GPSPosition": [" "]},
+        {"EXIF:Model": "Canon EOS R5", "XMP-photoshop:City": "Lisbon"},
+        {"Composite:GPSPosition": "38.7 N, 9.1 W"},
+    ]
+
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=fake_helper),
+    ):
+        context = read_image_context(img)
+
+    assert context.camera_info == {"EXIF:Model": "Canon EOS R5"}
+    assert context.location_tags == {"XMP-photoshop:City": "Lisbon"}
+    assert context.gps_position == "38.7 N, 9.1 W"
+
+
 def test_read_image_context_includes_content_hash_when_requested(tmp_path: Path) -> None:
     """include_content_hash adds ImageDataHash to the one read and surfaces it on the context."""
     img = tmp_path / "img.cr3"
@@ -800,6 +830,33 @@ def test_read_caption_prefers_xmp_over_the_fallback_tags(tmp_path: Path) -> None
         patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
     ):
         assert read_caption(img) == ("Preferred Title", "Preferred caption.")
+
+
+def test_read_caption_ignores_an_empty_preferred_tag(tmp_path: Path) -> None:
+    """
+    An empty or blank preferred tag falls through to the fall-back rather than shadowing it.
+
+    exiftool renders an empty ``rdf:Bag`` as ``[]`` and a blank one as ``[" "]``. Comparing the
+    value against ``""`` counts both as content, so the photo's real IPTC/EXIF title came back as an
+    empty string.
+    """
+    img = tmp_path / "img.cr3"
+    img.write_text("x")
+    helper = _fake_helper(
+        [
+            {
+                "XMP:Title": [],
+                "XMP:Description": [" "],
+                "IPTC:ObjectName": "Fallback Title",
+                "EXIF:ImageDescription": "Fallback caption.",
+            },
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        assert read_caption(img) == ("Fallback Title", "Fallback caption.")
 
 
 def test_write_metadata_returns_false_on_exiftool_error(tmp_path: Path) -> None:

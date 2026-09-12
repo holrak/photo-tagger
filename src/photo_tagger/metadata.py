@@ -411,11 +411,17 @@ def read_keyword_sets(
 
 
 def _first_tag_value(blocks: list[dict[str, Any]], tags: tuple[str, ...]) -> str | None:
-    """Return the first non-blank value across *blocks* for the first matching *tags* entry."""
+    """
+    Return the first non-blank value across *blocks* for the first matching *tags* entry.
+
+    Emptiness is judged by :func:`_value_is_present`, not by comparing against ``""``: an empty
+    ``rdf:Bag`` comes back from exiftool as ``[]`` and a blank one as ``[" "]``, and either would
+    otherwise count as content and shadow the fall-back tag that holds the real value.
+    """
     for tag in tags:
         for block in blocks:
             value = block.get(tag)
-            if value not in (None, ""):
+            if _value_is_present(value):
                 return format_metadata_value(value)
     return None
 
@@ -510,7 +516,7 @@ def _extract_gps(blocks: list[dict[str, Any]]) -> str | None:
     """Return the first non-empty GPS position string from *blocks*, else None."""
     for block in blocks:
         value = block.get(_GPS_TAG)
-        if value not in (None, ""):
+        if _value_is_present(value):
             return format_metadata_value(value)
     return None
 
@@ -519,12 +525,18 @@ def _extract_named_tags(
     blocks: list[dict[str, Any]],
     tags: tuple[str, ...],
 ) -> dict[str, str]:
-    """Collect non-blank string values for *tags* across all *blocks*."""
+    """
+    Collect non-blank string values for *tags* across all *blocks*.
+
+    A tag present but blank (``""``, ``[]``, ``[" "]``) is skipped rather than collected as an empty
+    string, so the image block and its sidecar can fill in for each other and the prompt never grows
+    a dangling ``- Camera:`` line.
+    """
     collected: dict[str, str] = {}
     for block in blocks:
         for tag in tags:
             value = block.get(tag)
-            if value not in (None, "") and tag not in collected:
+            if _value_is_present(value) and tag not in collected:
                 collected[tag] = format_metadata_value(value)
     return collected
 
