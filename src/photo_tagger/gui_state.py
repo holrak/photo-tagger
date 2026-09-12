@@ -9,6 +9,7 @@ Qt.
 """
 
 import os
+import shutil
 import subprocess  # nosec B404 - only used to read the user's own login-shell PATH (see below)
 import textwrap
 
@@ -1158,15 +1159,20 @@ def reveal_command(path: Path, platform_name: str) -> list[str] | None:
     """
     Return the argv that reveals *path* selected in the OS file browser, or None.
 
-    None means the platform has no standard "reveal" command (Linux file managers vary), so the
-    caller should fall back to opening the containing folder instead.
+    None means the caller should fall back to opening the containing folder instead: the platform
+    has no standard "reveal" command (Linux file managers vary), or the one it does have is not on
+    PATH. The program is resolved here rather than left to the OS, which on Windows searches the
+    current working directory (whichever folder the user last opened photos from) before PATH.
     """
     if platform_name == "darwin":
-        return ["open", "-R", str(path)]
-    if platform_name.startswith("win"):
+        argv = ["open", "-R", str(path)]
+    elif platform_name.startswith("win"):
         # Explorer's /select switch takes the path in the same argument, comma-separated.
-        return ["explorer", f"/select,{path}"]
-    return None
+        argv = ["explorer", f"/select,{path}"]
+    else:
+        return None
+    program = shutil.which(argv[0])
+    return [program, *argv[1:]] if program is not None else None
 
 
 def file_type_label(path: Path) -> str:

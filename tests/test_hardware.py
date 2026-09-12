@@ -10,6 +10,7 @@ from photo_tagger.hardware import (
     _gpu_model,
     _parse_cpuinfo,
     _parse_meminfo,
+    _run,
     hardware_info,
     probe_hardware,
 )
@@ -83,6 +84,33 @@ def test_gpu_model_apple_silicon_reports_the_soc() -> None:
     with patch("photo_tagger.hardware._run", return_value="") as run:
         assert _gpu_model("Darwin", cpu="Apple M3 Pro") == "Apple M3 Pro"
     assert all(call.args[0][0] == "nvidia-smi" for call in run.call_args_list)
+
+
+def test_run_executes_the_resolved_absolute_path() -> None:
+    """
+    The probe runs the binary shutil.which found, not the bare name it was asked for.
+
+    Handing subprocess a bare name lets the OS search for it, and on Windows that search reaches the
+    current working directory before PATH.
+    """
+    with (
+        patch("photo_tagger.hardware.shutil.which", return_value="/usr/bin/lspci"),
+        patch("photo_tagger.hardware.subprocess.run") as run,
+    ):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "  output  "
+        assert _run(["lspci", "-v"]) == "output"
+    assert run.call_args.args[0] == ["/usr/bin/lspci", "-v"]
+
+
+def test_run_skips_the_spawn_when_the_tool_is_absent() -> None:
+    """A tool that is not on PATH costs a lookup, not a failed process spawn."""
+    with (
+        patch("photo_tagger.hardware.shutil.which", return_value=None),
+        patch("photo_tagger.hardware.subprocess.run") as run,
+    ):
+        assert _run(["nvidia-smi"]) == ""
+    run.assert_not_called()
 
 
 def test_probe_hardware_survives_total_probe_failure() -> None:

@@ -2146,11 +2146,18 @@ class MainWindow(QMainWindow):
     def _reveal(self, path: Path) -> None:
         """Show *path* selected in the OS file browser, or open its folder where unsupported."""
         argv = reveal_command(path, sys.platform)
-        if argv is None:
-            folder = path if path.is_dir() else path.parent
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
-            return
-        subprocess.Popen(argv)  # noqa: S603  # nosec B603 - fixed reveal argv, path from our list
+        if argv is not None:
+            try:
+                subprocess.Popen(argv)  # noqa: S603  # nosec B603 - resolved argv, path from our list
+            except OSError as exc:
+                # The browser is there (reveal_command resolved it) but would not start. Fall
+                # through to the folder rather than letting it out of a slot and taking the
+                # window down over a context-menu action.
+                logger.warning("reveal_failed", file=path.name, error=str(exc))
+            else:
+                return
+        folder = path if path.is_dir() else path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     # --- background metadata scan (the Tagged column) ----------------------------------------
 

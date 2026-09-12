@@ -20,6 +20,11 @@ All notable changes to this project are documented here. The format is based on
   a file where `[provider]`, `[output]`, or `[inference]` holds something other than a table.
 - A run that fails while starting up closes the `--cache-file` it had already opened, instead of
   holding its SQLite handle until the process exits.
+- The telemetry hardware probes and the GUI's **Reveal in Finder** resolve their helper program on
+  `PATH` themselves and run the absolute path. Leaving the search to the OS means Windows looks in
+  the current working directory first, so a `nvidia-smi.exe` or `explorer.exe` sitting in a photo
+  folder could run in place of the real one. The GUI also falls back to opening the folder when the
+  file browser is missing or will not start, rather than crashing.
 
 ## [0.8.0] - 2026-09-03
 

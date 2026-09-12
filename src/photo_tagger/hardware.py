@@ -18,6 +18,7 @@ import contextlib
 import json
 import os
 import platform
+import shutil
 import subprocess  # nosec B404 - only used to query fixed, well-known hardware probe tools
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -51,10 +52,22 @@ class HardwareInfo:
 
 
 def _run(args: list[str]) -> str:
-    """Run *args* and return stripped stdout, or "" on any failure or non-zero exit."""
+    """
+    Run *args* and return stripped stdout, or "" on any failure or non-zero exit.
+
+    The program is resolved with ``shutil.which`` and the absolute path is what gets executed.
+    Handing a bare name to ``subprocess`` lets the OS do the search, and on Windows that search
+    covers the current working directory before PATH: a ``nvidia-smi.exe`` sitting in the photo
+    folder the GUI was launched from would run instead of the real one. It is also cheaper, since
+    the common case (no ``nvidia-smi`` on a Mac, no ``lspci`` on a container) now costs a PATH
+    lookup rather than a failed process spawn.
+    """
+    program = shutil.which(args[0])
+    if program is None:
+        return ""
     try:
         completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed argv from constants below
-            args,
+            [program, *args[1:]],
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_SECONDS,

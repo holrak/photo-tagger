@@ -1584,6 +1584,37 @@ def test_open_logs_creates_the_folder_and_reveals_it(
     assert opened == [str(folder)]
 
 
+def _raise_oserror(*_args: object, **_kwargs: object) -> None:
+    """Stand in for a Popen that cannot start the program it was given."""
+    message = "Exec format error"
+    raise OSError(message)
+
+
+def test_reveal_falls_back_to_the_folder_when_the_browser_will_not_start(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A file browser that fails to spawn opens the folder instead of crashing the window."""
+    photo = _jpeg(tmp_path / "a.jpg")
+    opened: list[str] = []
+    monkeypatch.setattr(
+        gui,
+        "QDesktopServices",
+        SimpleNamespace(openUrl=lambda url: opened.append(url.toLocalFile()) or True),
+    )
+    monkeypatch.setattr(gui, "reveal_command", lambda _path, _platform: ["/bin/nope"])
+    monkeypatch.setattr(
+        gui.subprocess,
+        "Popen",
+        _raise_oserror,
+    )
+
+    window._reveal(photo)  # noqa: SLF001
+
+    assert opened == [str(tmp_path)]
+
+
 # ---------------------------------------------------------------------------
 # Folder thumbnail grid
 # ---------------------------------------------------------------------------
