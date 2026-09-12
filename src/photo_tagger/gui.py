@@ -599,9 +599,10 @@ class GenerateWorker(QObject):
             self.finished.emit()
             return
 
-        cache = self._open_cache()
-        self.started.emit(len(self._paths))
+        cache: InferenceCache | None = None
         try:
+            cache = self._open_cache()
+            self.started.emit(len(self._paths))
             for path in self._paths:
                 if self._stop:
                     break
@@ -616,7 +617,11 @@ class GenerateWorker(QObject):
         finally:
             if cache is not None:
                 cache.close()
-        self.finished.emit()
+            # Unconditional, for the reason given above: whatever went wrong, the window has to
+            # hear that the run is over, or it stays in the "running" state (buttons disabled,
+            # photos stuck at "working...") for the rest of the session. Opening the cache and
+            # emitting `started` used to sit outside this, so a failure in either left it stuck.
+            self.finished.emit()
 
     def _open_cache(self) -> InferenceCache | None:
         """Open the result cache for this run, degrading to no cache on any failure."""

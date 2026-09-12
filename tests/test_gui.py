@@ -2176,6 +2176,34 @@ def test_worker_marks_all_failed_when_agent_cannot_build(
     assert failed == ["/a.jpg", "/b.jpg"]
 
 
+def test_worker_reports_finished_even_when_opening_the_cache_raises(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Whatever goes wrong, the window hears the run is over.
+
+    `finished` is what re-enables the buttons and clears the "working..." rows, so a worker that
+    dies without emitting it leaves the window unusable for the rest of the session. Opening the
+    cache sat outside the block that guarantees the signal.
+    """
+    _stub_generation(monkeypatch)
+
+    def boom(_self: object) -> object:
+        msg = "namespace blew up"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(gui.GenerateWorker, "_open_cache", boom)
+    done: list[bool] = []
+    worker = gui.GenerateWorker("lmstudio", "m", None, [Path("/a.jpg")])
+    worker.finished.connect(lambda: done.append(True))
+
+    with pytest.raises(RuntimeError, match="namespace blew up"):
+        worker.run()
+
+    assert done == [True]
+
+
 def test_worker_reports_a_single_file_failure(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
