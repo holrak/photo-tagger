@@ -156,6 +156,26 @@ def test_open_cache_closes_connection_when_setup_fails(tmp_path: Path) -> None:
     opened[0].close.assert_called_once()
 
 
+def test_cache_is_fully_built_before_the_first_statement_runs(tmp_path: Path) -> None:
+    """
+    Every attribute exists by the time the prune (or any other DB work) can touch it.
+
+    The prune used to run before ``_lock`` was assigned, and worked only because it happened not to
+    take the lock: the class uses ``__slots__``, so reaching for it there raised AttributeError.
+    Assert the invariant rather than the ordering, so the next statement added to __init__ is
+    covered too.
+    """
+    seen: list[str] = []
+
+    def record(self: InferenceCache) -> None:
+        seen.extend(name for name in InferenceCache.__slots__ if hasattr(self, name))
+
+    with patch.object(InferenceCache, "_prune_stale_rows", record):
+        InferenceCache(tmp_path / "cache.sqlite3", model_name="m#x").close()
+
+    assert sorted(seen) == sorted(InferenceCache.__slots__)
+
+
 def test_safe_cache_get_treats_errors_as_misses() -> None:
     """A read error inside sqlite is swallowed and reported as a miss."""
     broken = MagicMock()
