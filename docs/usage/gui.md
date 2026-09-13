@@ -182,7 +182,12 @@ button also cancels a save in progress.
 Click a photo to open it on the right. The detail pane is **side-by-side** for easy comparison: an
 **Existing** column (read-only) next to a **New (editable)** column.
 
-- a **preview** (RAW files are decoded just like a real run),
+- a **preview** (RAW files are decoded just like a real run). Click it to open the photo in a window
+    of its own, large enough to judge what the model saw: it starts fitted to the window, then
+    **Zoom in** / **Zoom out** (or `+`/`-`, or Ctrl+scroll and the trackpad pinch) magnify up to
+    8:1, **Fit** (Ctrl+0) and **100%** (Ctrl+1) jump between the two useful scales, a double-click
+    toggles between them, drag the photo to pan it, and **Full screen** (`F`) fills the display.
+    `Esc` closes the viewer,
 - **Existing** vs **New** Title, Description, and Keywords lined up row by row, with the New side
     editable and seeded from the proposal. The Existing header notes where that metadata was read
     from (the image file, an XMP sidecar, or both). The description boxes grow with their content

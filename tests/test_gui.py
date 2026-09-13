@@ -35,6 +35,7 @@ from photo_tagger import gui, telemetry
 from photo_tagger.errors import ProviderError
 from photo_tagger.gui_state import (
     FAILED,
+    MAX_ZOOM,
     PENDING,
     READY,
     SAVED,
@@ -4436,3 +4437,148 @@ def test_a_batch_save_gets_its_own_journal(
     _drain_save(window)
 
     assert len(list_journals()) == 2  # noqa: PLR2004 - the session's single saves, and the batch
+
+
+def _viewer(qapp: QApplication, size: tuple[int, int] = (400, 300)) -> gui.ImageViewerDialog:
+    """Build a viewer over a solid-color pixmap of *size*, laid out but never shown modally."""
+    from PySide6.QtGui import QColor, QPixmap  # noqa: PLC0415
+
+    pixmap = QPixmap(*size)
+    pixmap.fill(QColor("red"))
+    dialog = gui.ImageViewerDialog(None, Path("/photos/a.jpg"), pixmap)
+    dialog.resize(200, 200)
+    dialog.show()
+    QApplication.processEvents()
+    return dialog
+
+
+def test_viewer_opens_fitted_to_the_window(qapp: QApplication) -> None:
+    """A photo larger than the window starts scaled down so all of it is visible."""
+    dialog = _viewer(qapp)
+    try:
+        assert dialog._fit_to_window  # noqa: SLF001
+        assert dialog._zoom < 1.0  # noqa: SLF001 - 400x300 does not fit a 200x200 window
+        assert dialog.windowTitle() == "a.jpg"
+    finally:
+        dialog.close()
+
+
+def test_viewer_zoom_leaves_fit_mode_and_scales_the_canvas(qapp: QApplication) -> None:
+    """Zooming in enlarges the drawn pixmap and stops the window resize from refitting."""
+    dialog = _viewer(qapp)
+    try:
+        dialog._set_zoom(1.0)  # noqa: SLF001
+        assert not dialog._fit_to_window  # noqa: SLF001
+        assert dialog._canvas.pixmap().width() == 400  # noqa: SLF001, PLR2004 - 1:1 with the source
+        assert dialog._zoom_label.text() == "100%"  # noqa: SLF001
+
+        dialog._zoom_by(1)  # noqa: SLF001
+        assert dialog._canvas.pixmap().width() > 400  # noqa: SLF001, PLR2004 - a notch larger
+    finally:
+        dialog.close()
+
+
+def test_viewer_double_click_toggles_between_fit_and_actual_size(qapp: QApplication) -> None:
+    """The double-click shortcut swings to 1:1 and back to fit."""
+    dialog = _viewer(qapp)
+    try:
+        dialog._toggle_fit()  # noqa: SLF001
+        assert dialog._zoom == 1.0  # noqa: SLF001
+        dialog._toggle_fit()  # noqa: SLF001
+        assert dialog._fit_to_window  # noqa: SLF001
+        assert dialog._zoom < 1.0  # noqa: SLF001
+    finally:
+        dialog.close()
+
+
+def test_viewer_zoom_stops_at_the_ceiling(qapp: QApplication) -> None:
+    """Holding zoom in cannot grow the pixmap without bound."""
+    dialog = _viewer(qapp)
+    try:
+        for _ in range(30):
+            dialog._zoom_by(1)  # noqa: SLF001
+        assert dialog._zoom == MAX_ZOOM  # noqa: SLF001
+    finally:
+        dialog.close()
+
+
+def test_preview_click_opens_the_viewer(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clicking the detail pane's preview opens the full-size viewer on the open photo."""
+    a = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": a})
+    _select(window, window._leaf_for(a))  # noqa: SLF001
+
+    opened: list[Path] = []
+    monkeypatch.setattr(
+        gui.ImageViewerDialog,
+        "exec",
+        lambda self: opened.append(self.windowTitle()),
+    )
+    window._preview.clicked.emit()  # noqa: SLF001
+
+    assert opened == ["a.jpg"]
+
+
+def test_preview_click_without_an_open_photo_does_nothing(
+    window: gui.MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The placeholder preview is clickable but has nothing to open."""
+    opened: list[str] = []
+    monkeypatch.setattr(gui.ImageViewerDialog, "exec", lambda _self: opened.append("opened"))
+    window._preview.clicked.emit()  # noqa: SLF001
+    assert opened == []
+
+
+def test_viewer_falls_back_to_the_preview_when_the_full_decode_fails(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photo that will not decode at viewer size still opens, on the small preview."""
+    a = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": a})
+    item = window._items[str(a)]  # noqa: SLF001
+
+    def _fail_big(path: Path, max_size: int = 0, **_kwargs: object) -> object:
+        if max_size == gui._VIEWER_MAX:  # noqa: SLF001
+            msg = "no decoder"
+            raise OSError(msg)
+        return _real_prepare(path, max_size=max_size)
+
+    _real_prepare = gui.prepare_image_for_agent
+    monkeypatch.setattr(gui, "prepare_image_for_agent", _fail_big)
+
+    pixmap = window._viewer_pixmap(item)  # noqa: SLF001
+
+    assert pixmap is not None
+    assert not pixmap.isNull()
+    assert window._viewer_cache is None  # noqa: SLF001 - a fallback is not cached as the full size
+
+
+def test_viewer_cache_holds_one_photo_at_a_time(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The viewer's decode is kept for the last photo only, so long sessions do not grow."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _stub_reads(monkeypatch, keywords=[])
+    _add_dir(window, {"a": a, "b": b})
+
+    window._viewer_pixmap(window._items[str(a)])  # noqa: SLF001
+    assert window._viewer_cache[0] == str(a)  # noqa: SLF001
+
+    window._viewer_pixmap(window._items[str(b)])  # noqa: SLF001
+    assert window._viewer_cache[0] == str(b)  # noqa: SLF001
+
+    # Removing the cached photo drops its pixmap with it.
+    window._remove_items([str(b)])  # noqa: SLF001
+    assert window._viewer_cache is None  # noqa: SLF001

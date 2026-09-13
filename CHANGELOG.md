@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- GUI: clicking the detail pane's preview opens the photo in a full window that zooms and pans, so a
+  keyword can be checked against the frame rather than against a thumbnail. Fit to window up to 8:1,
+  with the standard zoom keys, Ctrl+scroll (and the trackpad pinch), drag to pan, a double-click to
+  toggle between fit and 1:1, and `F` for full screen.
+
 ### Fixed
 
 - A metadata tag that is present but empty (an empty `rdf:Bag`, a blank string) no longer shadows

@@ -33,9 +33,11 @@ from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 from PySide6.QtCore import (
+    QEvent,
     QLibraryInfo,
     QLocale,
     QObject,
+    QPoint,
     QRect,
     QSize,
     Qt,
@@ -48,7 +50,8 @@ from PySide6.QtCore import (
 
 # QCloseEvent, QDragEnterEvent and QDropEvent are used only in annotations, but they are imported
 # here at runtime on purpose: see the note above closeEvent. Moving them into the TYPE_CHECKING
-# block below reopens a PySide crash.
+# block below reopens a PySide crash. The viewer's QKeyEvent and QMouseEvent are here for the same
+# reason: they annotate Qt overrides Qt itself calls.
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -59,7 +62,9 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QIcon,
+    QKeyEvent,
     QKeySequence,
+    QMouseEvent,
     QPainter,
     QPixmap,
     QShortcut,
@@ -168,10 +173,12 @@ from photo_tagger.gui_state import (
     SaveJob,
     SaveOptions,
     WatchSettings,
+    anchored_scroll,
     apply_proposal,
     apply_vocabulary,
     build_save_job,
     build_tree,
+    clamp_zoom,
     config_text_with_language,
     config_text_with_output_language,
     config_toml_text,
@@ -181,6 +188,7 @@ from photo_tagger.gui_state import (
     file_dialog_name_filters,
     file_type_label,
     filter_photos,
+    fit_zoom,
     format_existing_keywords,
     harmonize_sessions,
     harmonize_summary,
@@ -206,6 +214,7 @@ from photo_tagger.gui_state import (
     sort_photos,
     status_sort_rank,
     status_summary,
+    step_zoom,
     tagged_legend,
     tagged_summary,
     tagged_tooltip,
@@ -217,6 +226,7 @@ from photo_tagger.gui_state import (
     vocabulary_summary,
     watch_status_text,
     wrap_tooltip,
+    zoom_label,
 )
 from photo_tagger.i18n import _, gettext_noop, ngettext
 from photo_tagger.image_io import prepare_image_for_agent
@@ -279,6 +289,9 @@ _APP_DIR = Path.home() / ".photo-tagger"
 # logs live under the user's home where the "Open logs" button can always find them.
 _LOG_FOLDER = _APP_DIR / "logs"
 _PREVIEW_MAX = 640
+# What the full-size viewer decodes to. Large enough that zooming in shows real detail (more than
+# a 5K display can put up at once), small enough that a RAW file still opens in about a second.
+_VIEWER_MAX = 3200
 _THUMB_MAX = 200  # pixels for the grid thumbnails the model never sees
 _THUMB_SIZE = 160  # icon box in the grid
 _GENERATE_RETRIES = 2
@@ -460,6 +473,9 @@ QProgressBar {
 }
 QProgressBar::chunk { background: #6366f1; border-radius: 4px; }
 QLabel#preview { background: #1f1f24; border-radius: 8px; color: #9a9aa5; }
+/* The full-size viewer: a dark, frameless canvas, so nothing competes with the photo. */
+QScrollArea#viewer { background: #1f1f24; border: none; }
+QScrollArea#viewer > QWidget > QWidget { background: #1f1f24; }
 QLabel#hint, QLabel#status, QLabel#timing { color: #8a8a8a; }
 QLabel#crumb { color: #8a8a8a; font-weight: 600; }
 QLabel#empty { color: #8a8a8a; font-size: 15px; }
@@ -1147,6 +1163,238 @@ class _SortableTreeItem(QTreeWidgetItem):  # NOSONAR S8500 - Qt sorts items via 
         return self.text(_COL_NAME).casefold() < other.text(_COL_NAME).casefold()
 
 
+class _ClickableLabel(QLabel):
+    """A label that reports left clicks, so the detail pane's preview can open the full viewer."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override.
+        """Treat a left click as a request to open whatever the label is showing."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class ImageViewerDialog(QDialog):
+    """
+    One photo at full window size, with zoom and pan.
+
+    The detail pane's preview shares its panel with the metadata fields, so it is necessarily
+    small: too small to check whether a generated keyword is really in the frame. Clicking it
+    opens this window, which starts at fit-to-window and zooms up to 8:1.
+
+    Zoom is kept as a factor of the decoded image's own pixel size, and every zoom rescales the
+    original pixmap rather than the last scaled one, so repeated zooming in and out does not
+    accumulate resampling blur.
+    """
+
+    def __init__(self, parent: QWidget, path: Path, pixmap: QPixmap) -> None:
+        """Build the viewer around an already-decoded *pixmap* of *path*."""
+        super().__init__(parent)
+        self.setWindowTitle(path.name)
+        self._source = pixmap
+        self._zoom = 1.0
+        # While true, a window resize refits the photo. Any explicit zoom turns it off, so the
+        # user's chosen magnification survives resizing (and entering full screen).
+        self._fit_to_window = True
+        self._pan_from: QPoint | None = None
+
+        box = QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+        self._canvas = QLabel()
+        self._canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("viewer")
+        # Not widgetResizable: the canvas is resized to the scaled pixmap so the scrollbars
+        # describe the image. The alignment centers it while it is smaller than the viewport.
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._scroll.setWidget(self._canvas)
+        self._scroll.viewport().installEventFilter(self)
+        self._scroll.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+        box.addWidget(self._scroll, stretch=1)
+        box.addWidget(self._build_toolbar())
+        self._install_shortcuts()
+
+    def _build_toolbar(self) -> QWidget:
+        """Build the bottom strip: zoom controls, the current percentage, and Close."""
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 6, 10, 6)
+        out = QPushButton(_("Zoom out"))
+        out.clicked.connect(lambda: self._zoom_by(-1))
+        row.addWidget(out)
+        self._zoom_label = QLabel()
+        self._zoom_label.setMinimumWidth(56)
+        self._zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row.addWidget(self._zoom_label)
+        in_ = QPushButton(_("Zoom in"))
+        in_.clicked.connect(lambda: self._zoom_by(1))
+        row.addWidget(in_)
+        fit = QPushButton(_("Fit"))
+        fit.setToolTip(tooltip("Scale the photo to the window (Ctrl+0)."))
+        fit.clicked.connect(self._fit)
+        row.addWidget(fit)
+        actual = QPushButton(_("100%"))
+        actual.setToolTip(tooltip("Show the photo at one screen pixel per image pixel (Ctrl+1)."))
+        actual.clicked.connect(lambda: self._set_zoom(1.0))
+        row.addWidget(actual)
+        row.addStretch(1)
+        hint = QLabel(_("Scroll to pan · Ctrl+scroll or +/- to zoom · double-click to toggle fit"))
+        hint.setObjectName("hint")
+        row.addWidget(hint)
+        row.addStretch(1)
+        full = QPushButton(_("Full screen"))
+        full.setToolTip(tooltip("Fill the whole screen, hiding the window frame (F)."))
+        full.clicked.connect(self._toggle_full_screen)
+        row.addWidget(full)
+        close = QPushButton(_(_CLOSE))
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        return bar
+
+    def _install_shortcuts(self) -> None:
+        """
+        Wire the keyboard: the standard zoom keys, plus fit, 1:1, and full screen.
+
+        Ctrl+= and a bare +/- join Qt's standard zoom keys because the standard ones are Ctrl++ and
+        Ctrl+-, which need a shifted key on many layouts.
+        """
+        # Every QShortcut is parented to the dialog, which owns it for as long as it is open.
+        for key in (QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+="), QKeySequence("+")):
+            QShortcut(key, self, lambda: self._zoom_by(1))
+        for key in (QKeySequence.StandardKey.ZoomOut, QKeySequence("-")):
+            QShortcut(key, self, lambda: self._zoom_by(-1))
+        QShortcut(QKeySequence("Ctrl+0"), self, self._fit)
+        QShortcut(QKeySequence("Ctrl+1"), self, lambda: self._set_zoom(1.0))
+        for key in (QKeySequence("F"), QKeySequence("F11")):
+            QShortcut(key, self, self._toggle_full_screen)
+
+    # --- zoom ----------------------------------------------------------------------------------
+
+    def showEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override.
+        """Fit the photo the first time the window has a real size to fit it to."""
+        super().showEvent(event)
+        if self._fit_to_window:
+            self._fit()
+
+    def resizeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override.
+        """Refit on resize, but only while the user has not picked a zoom of their own."""
+        super().resizeEvent(event)
+        if self._fit_to_window:
+            self._fit()
+
+    def _fit(self) -> None:
+        """
+        Scale the photo down to the viewport (never up: a small photo stays its own size).
+
+        Measured against maximumViewportSize, not the viewport itself: while zoomed in there are
+        scrollbars, and fitting to the space they leave would scale the photo to slightly less than
+        the window it is about to have all of.
+        """
+        viewport = self._scroll.maximumViewportSize()
+        zoom = fit_zoom(
+            (self._source.width(), self._source.height()),
+            (viewport.width(), viewport.height()),
+        )
+        self._apply_zoom(zoom)
+        self._fit_to_window = True
+
+    def _set_zoom(self, zoom: float) -> None:
+        """Jump to an exact zoom factor, leaving fit-to-window behind."""
+        self._fit_to_window = False
+        self._apply_zoom(clamp_zoom(zoom))
+
+    def _zoom_by(self, notches: int) -> None:
+        """Zoom one or more notches in (positive) or out (negative) about the viewport center."""
+        self._set_zoom(step_zoom(self._zoom, notches))
+
+    def _apply_zoom(self, zoom: float) -> None:
+        """Rescale the original pixmap to *zoom* and keep the viewport centered where it was."""
+        if self._source.isNull():
+            return
+        factor = zoom / self._zoom if self._zoom else 1.0
+        self._zoom = zoom
+        scaled = self._source.scaled(
+            max(1, round(self._source.width() * zoom)),
+            max(1, round(self._source.height() * zoom)),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._canvas.setPixmap(scaled)
+        self._canvas.resize(scaled.size())
+        self._zoom_label.setText(zoom_label(zoom))
+        for scrollbar in (self._scroll.horizontalScrollBar(), self._scroll.verticalScrollBar()):
+            scrollbar.setValue(
+                anchored_scroll(scrollbar.value(), scrollbar.pageStep(), factor),
+            )
+
+    # --- mouse and keys ------------------------------------------------------------------------
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override.
+        """Let the viewport's own handler run only for what the viewer does not claim."""
+        if watched is not self._scroll.viewport() or not self._handle_viewport(event):
+            return super().eventFilter(watched, event)
+        return True
+
+    def _handle_viewport(self, event: QEvent) -> bool:
+        """
+        Turn drags on the image into panning and Ctrl+wheel (or a trackpad pinch) into zooming.
+
+        Returns whether the event was consumed. A plain wheel is left alone so it still scrolls a
+        zoomed-in photo, which is what a scroll area is for.
+        """
+        match event.type():
+            case QEvent.Type.Wheel if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._zoom_by(1 if event.angleDelta().y() > 0 else -1)
+            case QEvent.Type.MouseButtonPress if event.button() == Qt.MouseButton.LeftButton:
+                self._pan_from = event.position().toPoint()
+                self._scroll.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            case QEvent.Type.MouseMove if self._pan_from is not None:
+                self._pan(event.position().toPoint())
+            case QEvent.Type.MouseButtonRelease if self._pan_from is not None:
+                self._pan_from = None
+                self._scroll.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+            case QEvent.Type.MouseButtonDblClick:
+                self._toggle_fit()
+            case _:
+                return False
+        return True
+
+    def _pan(self, position: QPoint) -> None:
+        """Drag the image under the cursor: scroll by however far the pointer moved."""
+        if self._pan_from is None:
+            return
+        delta = position - self._pan_from
+        self._pan_from = position
+        horizontal = self._scroll.horizontalScrollBar()
+        vertical = self._scroll.verticalScrollBar()
+        horizontal.setValue(horizontal.value() - delta.x())
+        vertical.setValue(vertical.value() - delta.y())
+
+    def _toggle_fit(self) -> None:
+        """Double-click shortcut between fit-to-window and 1:1, whichever the view is not on."""
+        if self._fit_to_window:
+            self._set_zoom(1.0)
+        else:
+            self._fit()
+
+    def _toggle_full_screen(self) -> None:
+        """Swap between a normal window and a borderless one filling the screen."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override.
+        """Let Escape leave full screen first, so it takes two presses to lose the viewer."""
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            self.showNormal()
+            return
+        super().keyPressEvent(event)
+
+
 class MainWindow(QMainWindow):
     """
     The main window, laid out along the add -> generate -> review -> save workflow.
@@ -1164,9 +1412,8 @@ class MainWindow(QMainWindow):
         self._raw_config = load_config()
         self._defaults = load_defaults(self._raw_config)
         self._items: dict[str, PhotoItem] = {}
-        self._preview_cache: dict[str, QPixmap] = {}
-        self._thumb_cache: dict[str, QPixmap] = {}
         self._grid_items: dict[str, QListWidgetItem] = {}
+        self._init_pixmap_caches()
         self._init_tree_row_index()
         self._init_grid_view_state()
         self._init_navigation()
@@ -1279,6 +1526,19 @@ class MainWindow(QMainWindow):
         # What the vocabulary did over the run in flight, for its closing summary line.
         self._vocabulary_mapped = 0
         self._vocabulary_dropped: dict[str, int] = {}
+
+    def _init_pixmap_caches(self) -> None:
+        """
+        Seed the decoded-image caches, one per size the window draws photos at.
+
+        The preview and thumbnail caches are keyed by path and live for the session: both hold
+        small pixmaps, and a folder of them is cheap. The viewer's is deliberately a single entry,
+        because at ``_VIEWER_MAX`` one pixmap is tens of megabytes; keeping the last one is enough
+        to reopen the photo just looked at instantly, without growing over a long session.
+        """
+        self._preview_cache: dict[str, QPixmap] = {}
+        self._thumb_cache: dict[str, QPixmap] = {}
+        self._viewer_cache: tuple[str, QPixmap] | None = None
 
     def _init_tree_row_index(self) -> None:
         """
@@ -2403,10 +2663,15 @@ class MainWindow(QMainWindow):
         self._error_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._error_banner.hide()
         box.addWidget(self._error_banner)
-        self._preview = QLabel(_("Select a photo to preview it."))
+        self._preview = _ClickableLabel(_("Select a photo to preview it."))
         self._preview.setObjectName("preview")
         self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview.setMinimumHeight(240)
+        self._preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._preview.setToolTip(
+            tooltip("Click the photo to open it full size, where it can be zoomed and panned."),
+        )
+        self._preview.clicked.connect(self._open_viewer)
         box.addWidget(self._preview)
         box.addLayout(self._build_compare_grid())
         box.addLayout(self._build_details_section())
@@ -2840,6 +3105,8 @@ class MainWindow(QMainWindow):
             self._items.pop(key, None)
             self._preview_cache.pop(key, None)
             self._thumb_cache.pop(key, None)
+            if self._viewer_cache is not None and self._viewer_cache[0] == key:
+                self._viewer_cache = None
             if self._current is not None and str(self._current.path) == key:
                 self._show_empty()
         self._rebuild_tree()
@@ -2865,6 +3132,7 @@ class MainWindow(QMainWindow):
         self._items.clear()
         self._preview_cache.clear()
         self._thumb_cache.clear()
+        self._viewer_cache = None
         self._grid.clear()
         self._grid_items = {}
         self._grid_folder = None
@@ -3466,6 +3734,45 @@ class MainWindow(QMainWindow):
         pixmap = QPixmap()
         pixmap.loadFromData(content.data)
         self._preview_cache[key] = pixmap
+        return pixmap
+
+    def _open_viewer(self) -> None:
+        """Open the photo on show in a window of its own, big enough to zoom into."""
+        item = self._current
+        if item is None:
+            return
+        # Decoding a RAW file at _VIEWER_MAX takes about a second, which is short enough to just
+        # wait through and long enough that the window must say it is working.
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            pixmap = self._viewer_pixmap(item)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if pixmap is None or pixmap.isNull():
+            self._status.setText(_("That photo cannot be opened for viewing."))
+            return
+        viewer = ImageViewerDialog(self, item.path, pixmap)
+        viewer.resize(self.size())
+        viewer.exec()
+
+    def _viewer_pixmap(self, item: PhotoItem) -> QPixmap | None:
+        """
+        Decode *item* at viewer resolution, reusing the last one and falling back to the preview.
+
+        A failure here is not worth an error dialog: the small preview is already on screen and
+        good enough to look at, so the viewer opens on that rather than on nothing.
+        """
+        key = str(item.path)
+        if self._viewer_cache is not None and self._viewer_cache[0] == key:
+            return self._viewer_cache[1]
+        try:
+            content = prepare_image_for_agent(item.path, max_size=_VIEWER_MAX)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("gui_viewer_decode_failed", file=item.path.name, error=str(exc))
+            return self._preview_pixmap(item)
+        pixmap = QPixmap()
+        pixmap.loadFromData(content.data)
+        self._viewer_cache = (key, pixmap)
         return pixmap
 
     def _on_write_keywords_toggled(self) -> None:

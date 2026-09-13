@@ -27,6 +27,8 @@ from photo_tagger.gui_state import (
     FILTER_SAVED,
     FILTER_SELECTED,
     FILTER_UNTAGGED,
+    MAX_ZOOM,
+    MIN_ZOOM,
     OUTPUT_LANGUAGE_SUGGESTIONS,
     PENDING,
     READY,
@@ -40,6 +42,7 @@ from photo_tagger.gui_state import (
     TOOLTIP_WIDTH,
     UNCHANGED,
     WORKING,
+    ZOOM_STEP,
     FolderNode,
     GuiConfigValues,
     HarmonizeResult,
@@ -49,11 +52,13 @@ from photo_tagger.gui_state import (
     Proposal,
     SaveOptions,
     WatchSettings,
+    anchored_scroll,
     apply_proposal,
     apply_vocabulary,
     build_save_job,
     build_tree,
     chain_to_display,
+    clamp_zoom,
     config_text_with_language,
     config_text_with_output_language,
     config_toml_text,
@@ -65,6 +70,7 @@ from photo_tagger.gui_state import (
     file_dialog_name_filters,
     file_type_label,
     filter_photos,
+    fit_zoom,
     format_duration,
     format_existing_keywords,
     group_by_parent,
@@ -97,6 +103,7 @@ from photo_tagger.gui_state import (
     sort_photos,
     status_sort_rank,
     status_summary,
+    step_zoom,
     tagged_legend,
     tagged_summary,
     tagged_tooltip,
@@ -108,6 +115,7 @@ from photo_tagger.gui_state import (
     vocabulary_summary,
     watch_status_text,
     wrap_tooltip,
+    zoom_label,
 )
 from photo_tagger.i18n import activate
 from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE
@@ -1581,3 +1589,60 @@ def test_record_dropped_terms_counts_and_stops_at_the_cap() -> None:
     # A term already counted still counts, cap or no cap.
     record_dropped_terms(tally, ["Tractor"])
     assert tally["Tractor"] == 3  # noqa: PLR2004 - two, then one more
+
+
+def test_fit_zoom_scales_a_large_photo_down_to_the_viewport() -> None:
+    """The tighter of the two axes decides, so the whole photo lands inside the window."""
+    half = 0.5
+    assert fit_zoom((4000, 3000), (2000, 2000)) == half
+    assert fit_zoom((3000, 4000), (2000, 2000)) == half
+
+
+def test_fit_zoom_never_upscales_a_small_photo() -> None:
+    """A photo smaller than the window shows at its own size rather than blurred up to fill it."""
+    assert fit_zoom((320, 240), (2000, 2000)) == 1.0
+
+
+def test_fit_zoom_falls_back_on_a_degenerate_size() -> None:
+    """A failed decode or a window without a layout yet reads as 1:1, not a division by zero."""
+    assert fit_zoom((0, 0), (800, 600)) == 1.0
+    assert fit_zoom((800, 600), (0, 0)) == 1.0
+
+
+def test_step_zoom_moves_one_notch_each_way() -> None:
+    """A notch in and a notch out are inverses, so the zoom returns to where it started."""
+    assert step_zoom(1.0, 1) == ZOOM_STEP
+    assert step_zoom(1.0, -1) == pytest.approx(1 / ZOOM_STEP)
+    assert step_zoom(step_zoom(1.0, 1), -1) == pytest.approx(1.0)
+
+
+def test_step_zoom_stops_at_the_limits() -> None:
+    """Holding the zoom keys cannot push past the range the viewer can actually draw."""
+    assert step_zoom(MAX_ZOOM, 5) == MAX_ZOOM
+    assert step_zoom(MIN_ZOOM, -5) == MIN_ZOOM
+
+
+def test_clamp_zoom_holds_the_range() -> None:
+    """Any caller-supplied factor lands inside the limits."""
+    assert clamp_zoom(0.0) == MIN_ZOOM
+    assert clamp_zoom(1000.0) == MAX_ZOOM
+    assert clamp_zoom(1.0) == 1.0
+
+
+def test_zoom_label_reads_as_a_percentage() -> None:
+    """The toolbar shows whole percent, rounded."""
+    assert zoom_label(1.0) == "100%"
+    assert zoom_label(0.336) == "34%"
+    assert zoom_label(8.0) == "800%"
+
+
+def test_anchored_scroll_keeps_the_viewport_centered() -> None:
+    """Zooming in doubles the offset of what was centered, plus half a viewport of new image."""
+    assert anchored_scroll(100, 400, 2.0) == 400  # noqa: PLR2004 - 2*100 + 1*400/2
+    # Unchanged zoom must not move the view at all.
+    assert anchored_scroll(137, 400, 1.0) == 137  # noqa: PLR2004 - the same scroll position
+
+
+def test_anchored_scroll_clamps_below_zero() -> None:
+    """Zooming out far enough asks for a negative offset; a scrollbar has no such position."""
+    assert anchored_scroll(0, 400, 0.25) == 0
