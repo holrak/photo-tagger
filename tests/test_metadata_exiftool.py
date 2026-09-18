@@ -17,6 +17,7 @@ from photo_tagger.metadata import (
     read_caption,
     read_image_context,
     write_metadata,
+    write_metadata_everywhere,
 )
 from photo_tagger.models import KeywordSet
 
@@ -100,6 +101,37 @@ def test_sidecar_write_and_read_round_trip(tmp_path: Path) -> None:
     assert "Beach" in keywords.subject
     assert "Animal|Bird" in keywords.hierarchical
     assert read_caption(img) == ("Sidecar Title", "Sidecar description.")
+
+
+def test_both_mode_writes_the_photo_and_a_sidecar(tmp_path: Path) -> None:
+    """Mode "both" leaves the metadata in two places, each readable on its own."""
+    from exiftool import ExifToolHelper  # type: ignore[attr-defined]  # noqa: PLC0415
+
+    img = _write_jpeg(tmp_path / "img.jpg")
+    sidecar = tmp_path / "img.xmp"
+
+    ok, targets = write_metadata_everywhere(
+        img,
+        KeywordSet(subject=["Beach"], hierarchical=["Animal|Bird"]),
+        title="A title",
+        description="A description.",
+        backup=False,
+        sidecar_mode="both",
+    )
+
+    assert ok is True
+    assert [t.path for t in targets] == [img, sidecar]
+    assert sidecar.is_file()
+    # Each file carries the metadata by itself, so neither depends on the other.
+    with ExifToolHelper() as et:  # type: ignore[no-untyped-call]
+        for target in (img, sidecar):
+            block = et.get_tags(files=[str(target)], tags=["XMP:Subject", "XMP:Description"])[0]
+            assert block.get("XMP:Description") == "A description."
+            assert "Beach" in block.get("XMP:Subject", [])
+    # Only the photo gets the EXIF tag; a sidecar holds XMP.
+    with ExifToolHelper() as et:  # type: ignore[no-untyped-call]
+        embedded = et.get_tags(files=[str(img)], tags=["EXIF:ImageDescription"])[0]
+    assert embedded.get("EXIF:ImageDescription") == "A description."
 
 
 def test_unicode_metadata_round_trips_unmangled(tmp_path: Path) -> None:

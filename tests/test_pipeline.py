@@ -106,7 +106,7 @@ def patched_pipeline(stub_image_bytes: BinaryContent) -> Any:  # noqa: ANN401
                 seconds=0.1,
             ),
         ) as analyze,
-        patch("photo_tagger.pipeline.write_metadata", return_value=True) as write,
+        patch("photo_tagger.metadata.write_metadata", return_value=True) as write,
     ):
         yield {"analyze": analyze, "write": write}
 
@@ -149,6 +149,20 @@ def test_process_photo_raw_mode_picks_the_target_per_photo(
     assert process_photo(image, _ctx(options=ProcessingOptions(sidecar_mode="raw"))) is True
 
     assert patched_pipeline["write"].call_args.kwargs["use_sidecar"] is sidecar
+
+
+def test_process_photo_both_mode_writes_the_photo_and_the_sidecar(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Mode "both" writes each photo twice, with the payload a sidecar can hold in the .xmp."""
+    image = tmp_path / "img.dng"
+    image.write_text("x")
+
+    assert process_photo(image, _ctx(options=ProcessingOptions(sidecar_mode="both"))) is True
+
+    calls = patched_pipeline["write"].call_args_list
+    assert [call.kwargs["use_sidecar"] for call in calls] == [False, True]
 
 
 def test_process_photo_skips_optional_fields_when_disabled(
@@ -1771,7 +1785,7 @@ def test_run_batch_session_defers_success_until_the_write(
 
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
-        patch("photo_tagger.pipeline.write_metadata", side_effect=failing_write),
+        patch("photo_tagger.metadata.write_metadata", side_effect=failing_write),
         pytest.raises(BatchError),
     ):
         run_batch(
@@ -1805,7 +1819,7 @@ def test_run_batch_session_write_failure_is_final(
 
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=counting_process),
-        patch("photo_tagger.pipeline.write_metadata", return_value=False),
+        patch("photo_tagger.metadata.write_metadata", return_value=False),
         pytest.raises(BatchError) as batch_error,
     ):
         run_batch(
@@ -1839,7 +1853,7 @@ def test_run_batch_session_progress_reports_the_write_not_the_analysis(
 
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
-        patch("photo_tagger.pipeline.write_metadata", return_value=False),
+        patch("photo_tagger.metadata.write_metadata", return_value=False),
         pytest.raises(BatchError),
     ):
         run_batch(
@@ -1863,7 +1877,7 @@ def test_run_batch_session_progress_ticks_once_per_written_photo(
 
     with (
         patch("photo_tagger.pipeline.process_photo", side_effect=two_photo_session["process"]),
-        patch("photo_tagger.pipeline.write_metadata", return_value=True),
+        patch("photo_tagger.metadata.write_metadata", return_value=True),
     ):
         run_batch(
             files,
@@ -2006,7 +2020,7 @@ def test_run_batch_session_with_no_usable_analysis_writes_nothing(tmp_path: Path
 
     with (
         patch("photo_tagger.pipeline.process_photo", return_value=False),
-        patch("photo_tagger.pipeline.write_metadata") as write,
+        patch("photo_tagger.metadata.write_metadata") as write,
         pytest.raises(BatchError),
     ):
         run_batch(
@@ -2141,6 +2155,30 @@ def test_process_photo_records_the_write_in_the_undo_journal(
     lines = [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
     assert [entry["created"] for entry in lines] == [True, False]
     assert lines[0]["target"] == str(fresh.with_suffix(".xmp"))
+
+
+def test_process_photo_journals_both_targets(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Undo has to know about each file a "both" save wrote, the photo included."""
+    image = tmp_path / "img.dng"
+    image.write_text("x")
+    journal = UndoJournal(tmp_path / "run.jsonl")
+    ctx = _ctx(options=ProcessingOptions(sidecar_mode="both"))
+    ctx.journal = journal
+
+    def fake_write(image_path: Path, _keywords: KeywordSet, **_kwargs: Any) -> bool:  # noqa: ANN401
+        image_path.with_suffix(".xmp").write_text("written")
+        return True
+
+    patched_pipeline["write"].side_effect = fake_write
+    assert process_photo(image, ctx) is True
+
+    lines = [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
+    assert [entry["target"] for entry in lines] == [str(image), str(image.with_suffix(".xmp"))]
+    # The photo was there before the run; the sidecar is this run's, so undo deletes it.
+    assert [entry["created"] for entry in lines] == [False, True]
 
 
 def test_process_photo_journals_nothing_when_the_write_fails(

@@ -8,9 +8,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
-- `--sidecar-mode {all,none,raw}` picks the write target; `raw` does both, a sidecar for RAW files
-  and embedded for the rest, for a folder of RAW+JPEG pairs. `--write-sidecar` / `--embed-in-photo`
-  are now shorthand. In the GUI: the save menu's **Write To** submenu.
+- `--sidecar-mode {all,none,raw,both}` picks the write target: a sidecar per photo, inside each
+  photo, `raw` to split by file type (sidecar for RAW, embedded for the rest), or `both` to write
+  each photo and a sidecar beside it. `--write-sidecar` / `--embed-in-photo` are now shorthand. In
+  the GUI: the save menu's **Write To** submenu.
 - `--preserve-title` and `--preserve-description` keep a title or description the photo already has,
   filling in only the photos without one. Both still default to replacing. In the GUI: the save
   menu's **Overwrite Existing** submenu, one entry per field.

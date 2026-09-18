@@ -11,11 +11,13 @@ gui.py does: PySide6 ships no stubs and is not installed in the lint job, so a s
 see an unresolved-import error here.
 """
 
+import json
 import os
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +33,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMenu, QTreeWidgetItem
 
-from photo_tagger import gui, telemetry
+from photo_tagger import gui, metadata, telemetry
 from photo_tagger.errors import ProviderError
 from photo_tagger.gui_state import (
     FAILED,
@@ -56,7 +58,7 @@ from photo_tagger.metadata import (
 )
 from photo_tagger.models import InferenceResult, KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
-from photo_tagger.undo import list_journals, read_journal
+from photo_tagger.undo import list_journals, open_journal, read_journal
 from photo_tagger.vocabulary import Vocabulary
 from photo_tagger.vocabulary_build import KeywordCensus, TrimRules
 from photo_tagger.vocabulary_organize import OrganizeStats
@@ -1209,7 +1211,7 @@ def test_save_current_writes_and_marks_saved(
         captured.update(kwargs)
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._title.setText("New Title")  # noqa: SLF001
@@ -1227,6 +1229,37 @@ def test_save_current_writes_and_marks_saved(
     assert leaf.text(gui._COL_TAGGED) == "TDK"  # noqa: SLF001
 
 
+def test_save_writes_both_targets_and_journals_each(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Write To > Both saves the photo and a sidecar, and undo is told about each."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=["Beach"])
+    targets: list[bool] = []
+
+    def fake_write(image_path: Path, *_a: object, use_sidecar: bool = True, **_k: object) -> bool:
+        targets.append(use_sidecar)
+        # Create the sidecar the way exiftool would, so the journal can stat it.
+        image_path.with_suffix(".xmp").write_text("written")
+        return True
+
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
+    journal = open_journal(datetime.now(tz=UTC))
+    assert journal is not None
+    monkeypatch.setattr(window, "_single_save_journal", lambda: journal)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+    window._sidecar_actions["both"].setChecked(True)  # noqa: SLF001
+    window._save_current()  # noqa: SLF001
+
+    assert targets == [False, True]  # the photo, then its sidecar
+    assert window._items[str(img)].status == SAVED  # noqa: SLF001
+    written = [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
+    assert [entry["target"] for entry in written] == [str(img), str(img.with_suffix(".xmp"))]
+
+
 def test_save_keeps_a_caption_whose_overwrite_entry_is_off(
     window: gui.MainWindow,
     tmp_path: Path,
@@ -1242,7 +1275,7 @@ def test_save_keeps_a_caption_whose_overwrite_entry_is_off(
         captured["keywords"] = args[1]
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._overwrite_actions[FIELD_DESCRIPTION].setChecked(False)  # noqa: SLF001
@@ -1556,7 +1589,7 @@ def test_save_selected_writes_only_checked_generated_items(
     _stub_save_helper(monkeypatch)
     written: list[str] = []
     monkeypatch.setattr(
-        gui,
+        metadata,
         "write_metadata",
         lambda path, *_a, **_k: written.append(path.name) or True,
     )
@@ -1584,7 +1617,7 @@ def test_save_marks_failed_when_write_fails(
     """A failed write_metadata sets the item status to failed."""
     img = _jpeg(tmp_path / "a.jpg")
     _stub_reads(monkeypatch, keywords=[])
-    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: False)
+    monkeypatch.setattr(metadata, "write_metadata", lambda *_a, **_k: False)
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._save_current()  # noqa: SLF001
@@ -1610,7 +1643,7 @@ def test_save_marks_failed_when_write_raises(
         message = "exiftool missing"
         raise FileNotFoundError(message)
 
-    monkeypatch.setattr(gui, "write_metadata", boom)
+    monkeypatch.setattr(metadata, "write_metadata", boom)
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
     window._save_current()  # noqa: SLF001 - must not raise
@@ -1643,7 +1676,7 @@ def test_batch_save_runs_in_the_background_with_progress(
 ) -> None:
     """A batch save shows the bar and clock, locks the buttons, and frees them when done."""
     a, b = _two_ready_photos(window, tmp_path, monkeypatch)
-    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: True)
+    monkeypatch.setattr(metadata, "write_metadata", lambda *_a, **_k: True)
 
     window._save_selected()  # noqa: SLF001
     assert window._save_thread is not None  # noqa: SLF001 - the writes happen off the UI thread
@@ -1668,7 +1701,7 @@ def test_batch_save_reports_a_failed_write_in_the_tally(
 ) -> None:
     """One photo failing to write leaves the rest saved and is counted in the final message."""
     a, b = _two_ready_photos(window, tmp_path, monkeypatch)
-    monkeypatch.setattr(gui, "write_metadata", lambda path, *_a, **_k: path.name != "b.jpg")
+    monkeypatch.setattr(metadata, "write_metadata", lambda path, *_a, **_k: path.name != "b.jpg")
 
     window._save_selected()  # noqa: SLF001
     _drain_save(window)
@@ -1686,7 +1719,11 @@ def test_batch_save_refuses_to_start_while_generating(
     a, _b = _two_ready_photos(window, tmp_path, monkeypatch)
     _stub_generation(monkeypatch)
     written: list[str] = []
-    monkeypatch.setattr(gui, "write_metadata", lambda path, *_a, **_k: written.append(path.name))
+    monkeypatch.setattr(
+        metadata,
+        "write_metadata",
+        lambda path, *_a, **_k: written.append(path.name),
+    )
 
     window._run_generation([window._items[str(a)]])  # noqa: SLF001
     window._save_selected()  # noqa: SLF001
@@ -1718,7 +1755,7 @@ def test_cancel_stops_a_running_save(
 ) -> None:
     """The one Cancel button also covers a save: the worker is asked to stop."""
     _two_ready_photos(window, tmp_path, monkeypatch)
-    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: True)
+    monkeypatch.setattr(metadata, "write_metadata", lambda *_a, **_k: True)
 
     window._save_selected()  # noqa: SLF001
     window._cancel_generation()  # noqa: SLF001
@@ -1743,7 +1780,11 @@ def test_save_worker_shares_one_exiftool_across_the_batch(
 
     monkeypatch.setattr(gui, "managed_helper", fake_helper)
     seen: list[object] = []
-    monkeypatch.setattr(gui, "write_metadata", lambda *_a, et=None, **_k: bool(seen.append(et)))
+    monkeypatch.setattr(
+        metadata,
+        "write_metadata",
+        lambda *_a, et=None, **_k: bool(seen.append(et)),
+    )
     jobs = [
         SaveJob(
             path=tmp_path / name,
@@ -1811,7 +1852,7 @@ def test_save_worker_stops_before_the_next_photo(
         worker.stop()  # asked to cancel while the first photo is being written
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     worker.run()
     assert written == ["a.jpg"]
 
@@ -1831,7 +1872,7 @@ def _capture_write(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured.update(kwargs)
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     return captured
 
 
@@ -1887,7 +1928,7 @@ def test_save_with_no_write_fields_nags_and_writes_nothing(
     img = _jpeg(tmp_path / "a.jpg")
     _stub_reads(monkeypatch, keywords=[])
     wrote: list[int] = []
-    monkeypatch.setattr(gui, "write_metadata", lambda *_a, **_k: wrote.append(1) or True)
+    monkeypatch.setattr(metadata, "write_metadata", lambda *_a, **_k: wrote.append(1) or True)
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
     for checkbox in (window._write_title, window._write_description, window._write_keywords):  # noqa: SLF001
@@ -3370,6 +3411,10 @@ def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None
     window._sidecar_actions["raw"].setChecked(True)  # noqa: SLF001
     assert "to a sidecar for RAW" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
 
+    window._sidecar_actions["both"].setChecked(True)  # noqa: SLF001
+    tip = _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
+    assert "into the image file and an XMP sidecar" in tip
+
     window._backup.setChecked(False)  # noqa: SLF001
     assert "with no *_original backup" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
 
@@ -4380,7 +4425,7 @@ def _save_two_photos(
         path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     window._save_selected()  # noqa: SLF001
     _drain_save(window)
     return a, b
@@ -4903,7 +4948,7 @@ def test_photo_by_photo_saves_share_one_journal(
         path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     for path in (a, b):
         _select(window, window._leaf_for(path))  # noqa: SLF001
         window._save_current()  # noqa: SLF001
@@ -4929,7 +4974,7 @@ def test_a_batch_save_gets_its_own_journal(
         path.with_suffix(".xmp").write_text("<xmp/>", encoding="utf-8")
         return True
 
-    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    monkeypatch.setattr(metadata, "write_metadata", fake_write)
     _stub_save_helper(monkeypatch)
     _select(window, window._leaf_for(photo))  # noqa: SLF001
     window._save_current()  # noqa: SLF001 - one photo by hand first

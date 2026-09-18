@@ -31,9 +31,7 @@ from photo_tagger.metadata import (
     build_contextual_prompt,
     managed_helper,
     read_image_context,
-    use_sidecar_for,
-    write_metadata,
-    write_target,
+    write_metadata_everywhere,
 )
 from photo_tagger.models import KeywordSet
 from photo_tagger.sessions import build_session_vocabulary
@@ -131,7 +129,7 @@ class ProcessingOptions:
     write_title: bool = True
     write_keywords: bool = True
     backup_xmp: bool = True
-    # Sidecar or embedded, decided per photo: see photo_tagger.metadata.use_sidecar_for.
+    # Sidecar, embedded, or both: resolved per photo by photo_tagger.metadata.plan_writes.
     sidecar_mode: SidecarMode = DEFAULT_SIDECAR_MODE
     dry_run: bool = False
     temperature: float = DEFAULT_TEMPERATURE
@@ -661,27 +659,23 @@ def _write_pending(
         )
         return True
 
-    # Whether the target already existed decides how undo reverts this write: restore the
-    # ExifTool backup, or delete the sidecar the run created. It can only be known before the write.
-    sidecar = use_sidecar_for(image_path, options.sidecar_mode)
-    target = write_target(image_path, use_sidecar=sidecar)
-    existed = target.exists()
-    written = write_metadata(
+    written, targets = write_metadata_everywhere(
         image_path,
         merged_keywords,
         description=description,
         title=title,
         backup=options.backup_xmp,
-        use_sidecar=sidecar,
+        sidecar_mode=options.sidecar_mode,
         et=et,
     )
-    if written and ctx.journal is not None:
-        ctx.journal.record(
-            image_path,
-            target,
-            created=not existed,
-            backed_up=options.backup_xmp,
-        )
+    if ctx.journal is not None:
+        for target in targets:
+            ctx.journal.record(
+                image_path,
+                target.path,
+                created=not target.existed,
+                backed_up=options.backup_xmp,
+            )
     return written
 
 

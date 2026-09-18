@@ -860,10 +860,10 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
     - Loads image (RAW supported), converts to in-memory JPEG, queries the model.
     - Generates title, description, and keywords; merges with existing XMP by default
         (use --overwrite-keywords to replace).
-    - Writes metadata to an XMP sidecar (default), or embeds it directly with --embed-in-photo,
-        or splits the two per file type with --sidecar-mode raw (sidecars for RAW, embedded for
-        JPEG and friends). Use --no-write-title/--no-write-description to skip fields;
-        --no-backup-xmp to avoid backups.
+    - Writes metadata to an XMP sidecar (default), embeds it directly with --embed-in-photo,
+        splits the two per file type with --sidecar-mode raw (sidecars for RAW, embedded for JPEG
+        and friends), or does both with --sidecar-mode both. Use
+        --no-write-title/--no-write-description to skip fields; --no-backup-xmp to avoid backups.
 
     Skipping:
     - --skip-from FILE: skip files listed in FILE (one name or path per line).

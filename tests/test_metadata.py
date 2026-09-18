@@ -25,6 +25,7 @@ from photo_tagger.metadata import (
     find_tagged_images,
     format_metadata_value,
     managed_helper,
+    plan_writes,
     prompt_with_hint,
     read_caption,
     read_caption_values,
@@ -34,6 +35,7 @@ from photo_tagger.metadata import (
     read_metadata_sources,
     use_sidecar_for,
     write_metadata,
+    write_metadata_everywhere,
 )
 from photo_tagger.models import KeywordSet
 
@@ -196,6 +198,62 @@ def test_build_write_payload_skips_blank_values() -> None:
     """Empty keyword lists / blank title and description produce no entries."""
     payload = _build_write_payload(KeywordSet(), description=None, title=None, use_sidecar=True)
     assert payload == {}
+
+
+def test_plan_writes_lists_one_target_per_mode(tmp_path: Path) -> None:
+    """Every mode but "both" writes one file; "both" writes the photo and a sidecar beside it."""
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+
+    assert [t.path.name for t in plan_writes(img, "all")] == ["a.xmp"]
+    assert [t.path.name for t in plan_writes(img, "none")] == ["a.dng"]
+    assert [t.path.name for t in plan_writes(img, "raw")] == ["a.xmp"]
+    both = plan_writes(img, "both")
+    assert [t.path.name for t in both] == ["a.dng", "a.xmp"]
+    # The payload differs per target, so each one has to say which it is.
+    assert [t.use_sidecar for t in both] == [False, True]
+    # Sampled before the write: the photo is there, the sidecar is not.
+    assert [t.existed for t in both] == [True, False]
+
+
+def test_write_metadata_everywhere_writes_both_targets(tmp_path: Path) -> None:
+    """A "both" save calls the writer once per target and reports what landed, for undo."""
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    helper = _fake_helper()
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        ok, written = write_metadata_everywhere(
+            img,
+            KeywordSet(subject=["Bird"]),
+            description="A caption.",
+            sidecar_mode="both",
+        )
+
+    assert ok is True
+    assert [t.path.name for t in written] == ["a.dng", "a.xmp"]
+    # The photo gets the real EXIF tag; the sidecar holds XMP only.
+    payloads = [call.kwargs["tags"] for call in helper.set_tags.call_args_list]
+    assert TAG_EXIF_IMAGE_DESCRIPTION in payloads[0]
+    assert TAG_EXIF_IMAGE_DESCRIPTION not in payloads[1]
+
+
+def test_write_metadata_everywhere_reports_a_half_written_photo(tmp_path: Path) -> None:
+    """One target failing is not a clean save, but what did land still has to reach the journal."""
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    helper = _fake_helper()
+    helper.set_tags.side_effect = [None, ValueError("boom")]
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        ok, written = write_metadata_everywhere(
+            img,
+            KeywordSet(subject=["Bird"]),
+            sidecar_mode="both",
+        )
+
+    assert ok is False
+    assert [t.path.name for t in written] == ["a.dng"]
 
 
 def test_build_write_payload_sets_the_exif_description_only_when_embedding() -> None:

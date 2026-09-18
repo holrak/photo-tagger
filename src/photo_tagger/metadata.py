@@ -932,7 +932,9 @@ def is_raw_file(image_path: Path) -> bool:
 
 def use_sidecar_for(image_path: Path, mode: SidecarMode) -> bool:
     """
-    Decide whether *image_path* gets an XMP sidecar under *mode*.
+    Report whether *image_path* gets an XMP sidecar under *mode*.
+
+    True for "both", which also writes the photo: ask :func:`plan_writes` for the full answer.
 
     Examples:
         >>> use_sidecar_for(Path("/photos/image.dng"), "raw")
@@ -963,6 +965,72 @@ def write_target(image_path: Path, *, use_sidecar: bool) -> Path:
         'image.cr3'
     """
     return image_path.with_suffix(".xmp") if use_sidecar else image_path
+
+
+@dataclass(slots=True, frozen=True)
+class WriteTarget:
+    """One file a save writes for a photo."""
+
+    path: Path
+    # Whether this target is the sidecar, which decides the payload: a sidecar holds XMP only.
+    use_sidecar: bool
+    # Whether the file was there before the write. Undo needs it to tell "restore the backup" from
+    # "delete what the run created", and it can only be known beforehand.
+    existed: bool
+
+
+def plan_writes(image_path: Path, mode: SidecarMode) -> list[WriteTarget]:
+    """
+    List the files a save under *mode* writes for *image_path*, as they are before the write.
+
+    One target for every mode but "both", which writes the photo *and* a sidecar beside it: the
+    photo travels with its metadata, and the sidecar is what a catalog edits without touching the
+    photo again.
+
+    Examples:
+        >>> [t.path.name for t in plan_writes(Path("/photos/image.cr3"), "both")]
+        ['image.cr3', 'image.xmp']
+    """
+    # Photo before sidecar, the order metadata_targets reads them in.
+    uses_sidecar = [False, True] if mode == "both" else [use_sidecar_for(image_path, mode)]
+    targets: list[WriteTarget] = []
+    for use_sidecar in uses_sidecar:
+        path = write_target(image_path, use_sidecar=use_sidecar)
+        targets.append(WriteTarget(path=path, use_sidecar=use_sidecar, existed=path.exists()))
+    return targets
+
+
+def write_metadata_everywhere(  # noqa: PLR0913 - distinct optional fields are clearer as kwargs.
+    image_path: Path,
+    keywords: KeywordSet,
+    *,
+    description: str | None = None,
+    title: str | None = None,
+    backup: bool = True,
+    sidecar_mode: SidecarMode,
+    et: ExifToolHelper | None = None,
+) -> tuple[bool, list[WriteTarget]]:
+    """
+    Write *image_path*'s metadata everywhere *sidecar_mode* asks for.
+
+    Returns whether every target was written, and the ones that were, for the caller's undo journal.
+    A partial failure under "both" still reports what landed, so undo can revert it.
+    """
+    targets = plan_writes(image_path, sidecar_mode)
+    written = [
+        target
+        for target in targets
+        if write_metadata(
+            image_path,
+            keywords,
+            description=description,
+            title=title,
+            backup=backup,
+            use_sidecar=target.use_sidecar,
+            et=et,
+        )
+    ]
+    return (len(written) == len(targets), written)
 
 
 # What exiftool puts in front of an error it would downgrade to a warning under -m. Matched

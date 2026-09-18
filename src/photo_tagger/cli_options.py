@@ -231,10 +231,11 @@ class OutputConfig:
             name=("--sidecar-mode",),
             help=(
                 "Where metadata goes: 'all' (the default) writes an XMP sidecar next to every "
-                "photo, 'none' embeds it in the photo itself, and 'raw' does both, a sidecar for "
-                "RAW files and embedded for everything else. 'raw' is the answer for a folder of "
-                "RAW+JPEG pairs, where the RAWs should keep their bytes untouched but the JPEGs "
-                "should carry their own metadata"
+                "photo, 'none' embeds it in the photo itself, 'raw' splits by file type (a sidecar "
+                "for RAW files, embedded for everything else), and 'both' writes each photo and a "
+                "sidecar beside it. 'raw' is the answer for a folder of RAW+JPEG pairs, where the "
+                "RAWs should keep their bytes untouched but the JPEGs should carry their own "
+                "metadata"
             ),
         ),
     ] = None

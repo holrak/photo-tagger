@@ -37,10 +37,10 @@ NON_RAW_EXTENSIONS = frozenset(
 )
 
 # Where a run puts the metadata it writes: "all" into XMP sidecars, "none" into the image files
-# themselves, "raw" into a sidecar for RAW files and into the image for everything else. "raw" is
-# the mixed-folder answer: a DNG keeps its bytes untouched while the JPEG beside it carries its own
-# metadata.
-SidecarMode = Literal["all", "none", "raw"]
+# themselves, "raw" into a sidecar for RAW files and into the image for everything else, "both"
+# into each photo and a sidecar beside it. "raw" is the mixed-folder answer: a RAW keeps its bytes
+# untouched while the JPEG beside it carries its own metadata.
+SidecarMode = Literal["all", "none", "raw", "both"]
 DEFAULT_SIDECAR_MODE: SidecarMode = "all"
 
 

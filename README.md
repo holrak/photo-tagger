@@ -179,9 +179,10 @@ Key options:
 - `--no-write-title` / `--no-write-description` / `--no-write-keywords` – skip writing those fields
 - `--no-backup-xmp` – avoid creating `*_original` snapshot before writing
 - `--embed-in-photo` – write metadata directly into the image instead of creating an XMP sidecar
-- `--sidecar-mode {all,none,raw}` – where metadata goes: sidecars for every photo (`all`, the
-  default), inside every photo (`none`, the same as `--embed-in-photo`), or one of each per file
-  type (`raw`: a sidecar for RAW files, embedded for JPEG and friends)
+- `--sidecar-mode {all,none,raw,both}` – where metadata goes: sidecars for every photo (`all`, the
+  default), inside every photo (`none`, the same as `--embed-in-photo`), one of each per file type
+  (`raw`: a sidecar for RAW files, embedded for JPEG and friends), or `both` (each photo *and* a
+  sidecar beside it)
 - `--dry-run` – run the model and log the proposed metadata without writing XMP
 - `-w/--workers N` – process N photos concurrently using a thread pool (default 1)
 - `--no-progress` – hide the live rich progress bar (auto-disabled on non-interactive stdouts)

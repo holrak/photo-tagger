@@ -258,8 +258,9 @@ The arrow on either **Save** button opens the save options, which choose what ev
     photos without it, so a caption you wrote by hand survives a re-run.
 - **Write To** picks where a save puts the metadata, the GUI's equivalent of the CLI's
     `--sidecar-mode`: **XMP Sidecar** (the default) writes a `.xmp` file next to every photo, **The
-    Photo Itself** writes into each image file, and **Sidecar for RAW, Photo Otherwise** does one of
-    each per file type, for a folder of RAW+JPEG pairs.
+    Photo Itself** writes into each image file, **Sidecar for RAW, Photo Otherwise** does one of
+    each per file type, for a folder of RAW+JPEG pairs, and **Both, Photo and Sidecar** writes the
+    photo *and* a sidecar, so the photo travels tagged and the sidecar stays for your catalog.
 - **Keep ExifTool Backup** (on by default) lets ExifTool save the untouched file as `*_original`
     before writing, the GUI's equivalent of the CLI's `--backup-xmp` / `--no-backup-xmp`. Uncheck it
     to write in place: saving a few thousand photos otherwise leaves a full second copy of each one

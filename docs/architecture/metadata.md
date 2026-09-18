@@ -133,7 +133,7 @@ Title and description are only written when `--write-title` and `--write-descrip
 ### Sidecar or embedded
 
 By default photo-tagger writes an XMP sidecar named after the image (`image.cr3` gets `image.xmp`).
-This leaves the original file byte-for-byte untouched. `--sidecar-mode` picks between the three
+This leaves the original file byte-for-byte untouched. `--sidecar-mode` picks between the four
 answers; `--write-sidecar` and `--embed-in-photo` are shorthand for the first two.
 
 === "Sidecar (default, `--sidecar-mode all`)"
@@ -160,6 +160,14 @@ answers; `--write-sidecar` and `--embed-in-photo` are shorthand for the first tw
       duck.jpg        # not RAW: metadata written into the file itself
     ```
 
+=== "Both (`--sidecar-mode both`)"
+
+    ```text
+    photos/
+      duck.cr3        # metadata written into the file itself
+      duck.xmp        # and the same metadata beside it
+    ```
+
 !!! note
 
     Sidecars keep your originals completely untouched, and Lightroom reads the `.xmp` file alongside the
@@ -170,6 +178,11 @@ produces: the RAWs keep their bytes, and each JPEG carries its own metadata so i
 RAW is decided by extension, by exclusion: a suffix Pillow reads natively (`.jpg`, `.png`, `.tif`,
 `.heic`, ...) is not RAW, and anything else is, so an unfamiliar extension gets the cautious answer
 and keeps its file untouched.
+
+`--sidecar-mode both` is the belt-and-braces answer: every photo is written twice, into itself and
+into a sidecar. The photo then carries its metadata wherever it is copied, while the sidecar stays
+for the catalog to edit. It costs two ExifTool writes per photo, and `plan_writes` is what turns a
+mode into that list of targets. Undo records each one, so reverting puts back both.
 
 ### Cameras ExifTool will not write to on the first try
 

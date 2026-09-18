@@ -260,9 +260,7 @@ from photo_tagger.metadata import (
     read_caption_values,
     read_image_context,
     read_metadata_sources,
-    use_sidecar_for,
-    write_metadata,
-    write_target,
+    write_metadata_everywhere,
 )
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES, ProviderName, get_backend
 from photo_tagger.undo import (
@@ -293,6 +291,7 @@ if TYPE_CHECKING:
 
     from exiftool import ExifToolHelper
 
+    from photo_tagger.metadata import WriteTarget
     from photo_tagger.undo import UndoJournal, UndoResult, WriteRecord
     from photo_tagger.vocabulary import Vocabulary
     from photo_tagger.vocabulary_build import TrimResult
@@ -484,6 +483,14 @@ _WRITE_TO_CHOICES: tuple[tuple[SidecarMode, str, str], ...] = (
             "folder of RAW+JPEG pairs.",
         ),
     ),
+    (
+        "both",
+        gettext_noop("Both, Photo and Sidecar"),
+        gettext_noop(
+            "Write into every photo and put the same metadata in a .xmp beside it. Twice the "
+            "writes, and the photo travels tagged even where the sidecar is left behind.",
+        ),
+    ),
 )
 
 # The Overwrite Existing submenu, as (field, label, tooltip). Keywords merge, so that entry starts
@@ -515,6 +522,7 @@ _WRITE_TO_SUMMARIES: dict[SidecarMode, Callable[[], str]] = {
     "all": lambda: _("to an XMP sidecar"),
     "none": lambda: _("into the image file"),
     "raw": lambda: _("to a sidecar for RAW, into the image file otherwise"),
+    "both": lambda: _("into the image file and an XMP sidecar"),
 }
 
 # Theme-agnostic polish: only spacing/rounding plus the brand accent on primary actions and
@@ -646,6 +654,20 @@ def _svg_icon(name: str) -> QIcon:
 def _app_icon() -> QIcon:
     """Load the bundled app icon, or an empty icon if it is not present."""
     return _svg_icon("icon.svg")
+
+
+def _record_writes(
+    journal: UndoJournal | None,
+    image_path: Path,
+    targets: list[WriteTarget],
+    *,
+    backup: bool,
+) -> None:
+    """Journal every file a save wrote for one photo, so undo can put each one back."""
+    if journal is None:
+        return
+    for target in targets:
+        journal.record(image_path, target.path, created=not target.existed, backed_up=backup)
 
 
 def _readonly_box(min_height: int) -> QPlainTextEdit:
@@ -927,31 +949,20 @@ class SaveWorker(QObject):
         for job in self._jobs:
             if self._stop:
                 return
-            # Whether the target already existed decides how undo reverts this write: restore the
-            # ExifTool backup, or delete the sidecar this save created. Only knowable beforehand.
-            sidecar = use_sidecar_for(job.path, self._sidecar_mode)
-            target = write_target(job.path, use_sidecar=sidecar)
-            existed = target.exists()
             try:
-                ok = write_metadata(
+                ok, targets = write_metadata_everywhere(
                     job.path,
                     job.keywords,
                     description=job.description,
                     title=job.title,
                     backup=self._backup,
-                    use_sidecar=sidecar,
+                    sidecar_mode=self._sidecar_mode,
                     et=helper,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("gui_save_failed", file=job.path.name, error=str(exc))
-                ok = False
-            if ok and self._journal is not None:
-                self._journal.record(
-                    job.path,
-                    target,
-                    created=not existed,
-                    backed_up=self._backup,
-                )
+                ok, targets = False, []
+            _record_writes(self._journal, job.path, targets, backup=self._backup)
             self._emitted += 1
             self.file_done.emit(str(job.path), ok)
 
@@ -4390,31 +4401,25 @@ class MainWindow(QMainWindow):
         """
         Write the item's checked fields to disk; return success.
 
-        Unchecked fields stay as is. This is the inline path for saving one photo, which is a single
-        ExifTool call; a whole batch goes through :class:`SaveWorker` instead.
+        Unchecked fields stay as is. This is the inline path for saving one photo; a whole batch
+        goes through :class:`SaveWorker` instead.
         """
         options = self._save_options()
         job = build_save_job(item, options)
-        journal = self._single_save_journal()
-        # Whether the target exists decides how undo reverts this write, and only holds before it.
-        sidecar = use_sidecar_for(job.path, options.sidecar_mode)
-        target = write_target(job.path, use_sidecar=sidecar)
-        existed = target.exists()
         try:
-            ok = write_metadata(
+            ok, targets = write_metadata_everywhere(
                 job.path,
                 job.keywords,
                 description=job.description,
                 title=job.title,
                 backup=options.backup,
-                use_sidecar=sidecar,
+                sidecar_mode=options.sidecar_mode,
             )
         except Exception as exc:  # noqa: BLE001 - exiftool itself failing to start must surface
             # as a failed save, not an uncaught exception Qt swallows into the log unseen.
             logger.exception("gui_save_single_failed", error=str(exc), file=str(job.path))
-            ok = False
-        if ok and journal is not None:
-            journal.record(job.path, target, created=not existed, backed_up=options.backup)
+            ok, targets = False, []
+        _record_writes(self._single_save_journal(), job.path, targets, backup=options.backup)
         self._apply_write_result(item, job, ok=ok)
         return ok
 
