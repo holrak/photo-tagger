@@ -124,7 +124,9 @@ def test_process_photo_writes_metadata(
 
     write_call = patched_pipeline["write"].call_args
     kwargs = write_call.kwargs
-    assert kwargs["description"] == "Description."
+    # Every equality assert in this file is actual-first. The only literal-first comparisons are
+    # membership tests (`"Beach" in ...`), which cannot be written the other way round.
+    assert kwargs["description"] == "Description."  # NOSONAR S3415
     assert kwargs["title"] == "Title"
     assert kwargs["use_sidecar"] is True
     keywords = write_call.args[1]

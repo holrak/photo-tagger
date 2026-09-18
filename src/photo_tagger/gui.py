@@ -2529,10 +2529,21 @@ class MainWindow(QMainWindow):
                 ),
             )
 
+    def _warn_if_no_photos(self) -> bool:
+        """
+        Say the list is empty, and report whether the caller should give up.
+
+        Every bulk selection action starts with this. With nothing loaded there is nothing to
+        select, and returning silently would look like a dead menu item.
+        """
+        if self._items:
+            return False
+        self._status.setText(_("Add photos before selecting."))
+        return True
+
     def _select_by_pattern(self, verb: str) -> None:
         """Ask for a name pattern and apply *verb* to the photos it matches."""
-        if not self._items:
-            self._status.setText(_("Add photos before selecting."))
+        if self._warn_if_no_photos():
             return
         pattern, accepted = QInputDialog.getText(
             self,
@@ -2558,8 +2569,7 @@ class MainWindow(QMainWindow):
         phrase: str,
     ) -> None:
         """Apply one bulk selection action and report what it did; *phrase* names the criterion."""
-        if not self._items:
-            self._status.setText(_("Add photos before selecting."))
+        if self._warn_if_no_photos():
             return
         result = apply_selection(self._items.values(), matches, verb)
         if result.changed:
@@ -2584,8 +2594,7 @@ class MainWindow(QMainWindow):
 
     def _set_all_checked(self, *, checked: bool) -> None:
         """Check or uncheck every photo at once."""
-        if not self._items:
-            self._status.setText(_("Add photos before selecting."))
+        if self._warn_if_no_photos():
             return
         for item in self._items.values():
             item.selected = checked
@@ -2594,8 +2603,7 @@ class MainWindow(QMainWindow):
 
     def _invert_checked(self) -> None:
         """Flip every photo's checkbox: checked becomes unchecked and vice versa."""
-        if not self._items:
-            self._status.setText(_("Add photos before selecting."))
+        if self._warn_if_no_photos():
             return
         for item in self._items.values():
             item.selected = not item.selected

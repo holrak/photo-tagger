@@ -1064,7 +1064,8 @@ def _set_tags(helper: ExifToolHelper, set_kwargs: dict[str, Any], target: Path) 
         logger.warning(
             "retrying_write_ignoring_minor_errors",
             target=str(target),
-            reason=(exc.stderr or exc.stdout or "").strip(),
+            # The parens bind .strip() to the whole or-chain, not to the "" literal.
+            reason=(exc.stderr or exc.stdout or "").strip(),  # NOSONAR S1110
         )
         retry_kwargs: dict[str, Any] = dict(set_kwargs)
         retry_kwargs["params"] = [*set_kwargs.get("params", []), _IGNORE_MINOR_ERRORS]
