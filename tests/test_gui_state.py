@@ -109,6 +109,7 @@ from photo_tagger.gui_state import (
     record_dropped_terms,
     reveal_command,
     reveal_label,
+    search_summary,
     sort_photos,
     status_sort_rank,
     status_summary,
@@ -998,6 +999,12 @@ def test_matches_name_pattern(pattern: str, *, expected: bool) -> None:
     """Name patterns are case-insensitive, and plain text means "contains"."""
     item = PhotoItem(path=Path("/photos/IMG_0001.dng"))
     assert matches_name_pattern(item, pattern) is expected
+
+
+def test_search_summary_counts_what_is_hidden() -> None:
+    """A filtered list says so, since the counts beside it are of the whole list."""
+    assert search_summary(2, 4) == "Showing 2 of 4 photos"
+    assert search_summary(0, 1) == "Showing 0 of 1 photo"
 
 
 def test_flat_labels_keep_plain_names_inside_one_folder() -> None:

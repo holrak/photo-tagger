@@ -1199,6 +1199,20 @@ def status_summary(items: Iterable[PhotoItem]) -> str:
     )
 
 
+def search_summary(shown: int, total: int) -> str:
+    """
+    Lead the status line with what an active search is hiding.
+
+    Without this a filtered list looks like a list that lost photos, and the counts beside it (which
+    are of the whole list, since a hidden photo is still processed) would not add up.
+    """
+    return ngettext(
+        "Showing {shown} of {total} photo",
+        "Showing {shown} of {total} photos",
+        total,
+    ).format(shown=shown, total=total)
+
+
 def format_duration(seconds: float) -> str:
     """
     Render a duration as ``m:ss``, growing to ``h:mm:ss`` once it passes an hour.

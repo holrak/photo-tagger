@@ -223,6 +223,7 @@ from photo_tagger.gui_state import (
     record_dropped_terms,
     reveal_command,
     reveal_label,
+    search_summary,
     sort_photos,
     status_sort_rank,
     status_summary,
@@ -397,12 +398,18 @@ _TAGGED_PRESETS: tuple[tuple[str, frozenset[str], bool, str], ...] = (
     (gettext_noop("Has keywords"), frozenset({FIELD_KEYWORDS}), True, gettext_noop("keywords")),
 )
 
+# Edge of the small drawn icons in the row above the photo list, in pixels.
+_TOOLBAR_ICON = 14
+
+# How long the search box waits after a keystroke before it re-filters the list. Long enough that
+# typing a word rebuilds the tree once rather than once per letter, short enough to feel live.
+_SEARCH_DEBOUNCE_MS = 150
+
 # How the photo list is laid out, picked from the small view button above it. Each entry is
 # (mode, menu label, tooltip). The wording follows what file browsers call these, rather than
-# inventing our own, and the glyph is the list icon those buttons conventionally carry.
+# inventing our own.
 VIEW_TREE = "tree"
 VIEW_LIST = "list"
-_VIEW_GLYPH = "☰"
 _VIEW_MODES: tuple[tuple[str, str, str], ...] = (
     (
         VIEW_TREE,
@@ -596,10 +603,21 @@ def _stylesheet() -> str:
     return _STYLESHEET.replace("@CHEVRONLIGHT@", chevron_light).replace("@CHEVRON@", chevron)
 
 
+def _svg_icon(name: str) -> QIcon:
+    """
+    Load one of the bundled SVG icons, or an empty icon when it is missing.
+
+    Drawn rather than typed: a text glyph renders at whatever weight the platform font feels like
+    and cannot be aligned with the rest of a toolbar. The icons share the muted grey the chevron
+    and the hint labels use, which reads on both a light and a dark palette.
+    """
+    path = _RESOURCES / name
+    return QIcon(str(path)) if path.exists() else QIcon()
+
+
 def _app_icon() -> QIcon:
     """Load the bundled app icon, or an empty icon if it is not present."""
-    icon_path = _RESOURCES / "icon.svg"
-    return QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    return _svg_icon("icon.svg")
 
 
 def _readonly_box(min_height: int) -> QPlainTextEdit:
@@ -2179,6 +2197,7 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.addLayout(self._build_tree_controls())
+        box.addLayout(self._build_search_row())
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels([_("Photos"), _("Type"), _("Status"), _("Tagged")])
@@ -2242,9 +2261,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(add)
         controls.addStretch(1)
 
-        controls.addWidget(self._build_view_button())
-        controls.addSpacing(8)
-
         select = QPushButton(_("Select"))
         select.setObjectName("menubutton")
         select.setToolTip(tooltip("Check or uncheck photos in bulk."))
@@ -2259,6 +2275,53 @@ class MainWindow(QMainWindow):
         controls.addWidget(remove)
         return controls
 
+    def _build_search_row(self) -> QHBoxLayout:
+        """Build the slim row right above the list: the search box, and the view-mode button."""
+        row = QHBoxLayout()
+        self._search = QLineEdit()
+        self._search.setObjectName("search")
+        self._search.setPlaceholderText(_("Search photos"))
+        self._search.setClearButtonEnabled(True)
+        self._search.addAction(
+            _svg_icon("search.svg"),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self._search.setToolTip(
+            tooltip(
+                "Show only the photos whose name matches. Plain text matches anywhere in the "
+                "name, and *, ? and [] are wildcards, so *_edit.jpg works. This changes what "
+                "the list shows, not what a run processes: a hidden photo that is checked is "
+                "still generated and saved.",
+            ),
+        )
+        # Re-filtering rebuilds every row, so a long list is rebuilt once per word typed rather
+        # than once per letter.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(_SEARCH_DEBOUNCE_MS)
+        self._search_timer.timeout.connect(self._apply_search)
+        self._search.textChanged.connect(lambda _text: self._search_timer.start())
+        row.addWidget(self._search, stretch=1)
+        row.addWidget(self._build_view_button())
+        return row
+
+    def _apply_search(self) -> None:
+        """Redraw the list through the current search text."""
+        self._rebuild_tree()
+        self._update_status()
+
+    def _visible_paths(self) -> list[Path]:
+        """
+        Return the photos the list draws: all of them, or those the search box matches.
+
+        Only the view narrows. What a run processes is still every checked photo, the same way the
+        thumbnail grid's own filter never changed what Generate Selected picks up.
+        """
+        query = self._search.text().strip()
+        if not query:
+            return self._item_paths()
+        return [item.path for item in self._items.values() if matches_name_pattern(item, query)]
+
     def _build_view_button(self) -> QToolButton:
         """
         Build the small view-mode button that sits above the photo list.
@@ -2269,12 +2332,13 @@ class MainWindow(QMainWindow):
         """
         button = self._view_button = QToolButton()
         button.setObjectName("viewmode")
-        button.setText(_VIEW_GLYPH)
-        # Flat: without this some styles paint a raised button frame around the glyph, which is
+        button.setIcon(_svg_icon("list-view.svg"))
+        button.setIconSize(QSize(_TOOLBAR_ICON, _TOOLBAR_ICON))
+        # Flat: without this some styles paint a raised button frame around the icon, which is
         # exactly the weight this control is meant not to have.
         button.setAutoRaise(True)
         # The menu is popped by hand rather than attached with setMenu: an attached one makes Qt
-        # paint its arrow over the glyph, and the arrow is not reliably styled away.
+        # paint its arrow over the icon, and the arrow is not reliably styled away.
         button.clicked.connect(self._show_view_menu)
         menu = self._view_menu = QMenu(self)
         menu.setToolTipsVisible(True)
@@ -3558,7 +3622,7 @@ class MainWindow(QMainWindow):
         # end re-applies whatever column/direction the header is currently set to.
         self._tree.setSortingEnabled(False)
         self._empty_tree()
-        paths = self._item_paths()
+        paths = self._visible_paths()
         if self._flat_list():
             self._add_flat_rows(paths)
         else:
@@ -5710,7 +5774,12 @@ class MainWindow(QMainWindow):
 
     def _update_status(self) -> None:
         if self._items:
-            self._status.setText(status_summary(self._items.values()))
+            summary = status_summary(self._items.values())
+            if self._search.text().strip():
+                # _leaf_rows holds exactly the photos the last rebuild drew.
+                shown = search_summary(len(self._leaf_rows), len(self._items))
+                summary = f"{shown} · {summary}"
+            self._status.setText(summary)
         # Retry only makes sense when something actually failed (and no run is in flight).
         if self._thread is None and self._save_thread is None:
             self._retry_button.setEnabled(self._has_failures())

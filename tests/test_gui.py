@@ -744,6 +744,93 @@ def _top_rows(window: gui.MainWindow) -> list[QTreeWidgetItem]:
     return [tree.topLevelItem(index) for index in range(tree.topLevelItemCount())]
 
 
+def _search(window: gui.MainWindow, text: str) -> None:
+    """Type into the search box and let its debounce fire at once."""
+    window._search.setText(text)  # noqa: SLF001
+    window._apply_search()  # noqa: SLF001
+
+
+def test_search_narrows_the_tree_to_the_matches(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Typing a name leaves the matching photos (under their folders) and hides the rest."""
+    first, second = _add_two_shoots(window, tmp_path)
+    other = tmp_path / "shoot1" / "sunset.jpg"
+    _jpeg(other)
+    window._add_inputs([other])  # noqa: SLF001
+
+    _search(window, "DSC")
+
+    assert set(window._leaf_rows) == {str(first), str(second)}  # noqa: SLF001
+    # The folders holding a match survive; nothing else does.
+    assert set(window._folder_rows) == {  # noqa: SLF001
+        str(tmp_path),
+        str(first.parent),
+        str(second.parent),
+    }
+    assert "Showing 2 of 3 photos" in window._status.text()  # noqa: SLF001
+
+
+def test_search_matches_wildcards_and_clears(window: gui.MainWindow, tmp_path: Path) -> None:
+    """A glob filters like the Select menu's patterns do, and emptying the box restores the list."""
+    first, second = _add_two_shoots(window, tmp_path)
+    edit = tmp_path / "shoot1" / "sunset_edit.jpg"
+    _jpeg(edit)
+    window._add_inputs([edit])  # noqa: SLF001
+
+    _search(window, "*_edit.jpg")
+    assert set(window._leaf_rows) == {str(edit)}  # noqa: SLF001
+
+    _search(window, "")
+    assert set(window._leaf_rows) == {str(first), str(second), str(edit)}  # noqa: SLF001
+    assert "Showing" not in window._status.text()  # noqa: SLF001
+
+
+def test_search_narrows_the_flat_list_too(window: gui.MainWindow, tmp_path: Path) -> None:
+    """The two view modes filter the same way; only the grouping differs."""
+    first, second = _add_two_shoots(window, tmp_path)
+    other = tmp_path / "shoot1" / "sunset.jpg"
+    _jpeg(other)
+    window._add_inputs([other])  # noqa: SLF001
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+
+    _search(window, "DSC")
+
+    assert set(window._leaf_rows) == {str(first), str(second)}  # noqa: SLF001
+    assert window._folder_rows == {}  # noqa: SLF001
+
+
+def test_search_hides_photos_without_dropping_them_from_a_run(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    The search is a view filter, not a selection.
+
+    A checked photo the box is hiding is still generated, the same way the thumbnail grid's own
+    filter never changed what a run picks up. Nothing about the list itself is lost either.
+    """
+    first, _second = _add_two_shoots(window, tmp_path)
+    hidden = tmp_path / "shoot1" / "sunset.jpg"
+    _jpeg(hidden)
+    window._add_inputs([hidden])  # noqa: SLF001
+
+    _search(window, "DSC")
+
+    assert str(hidden) not in window._leaf_rows  # noqa: SLF001 - off screen
+    assert window._items[str(hidden)].selected is True  # noqa: SLF001 - still checked
+    started: list[list[str]] = []
+    monkeypatch.setattr(
+        gui.MainWindow,
+        "_run_generation",
+        lambda _self, items, **_kw: started.append([item.path.name for item in items]),
+    )
+
+    window._generate()  # noqa: SLF001
+
+    assert sorted(started[0]) == ["DSC_0042.jpg", "DSC_0042.jpg", "sunset.jpg"]
+    assert str(first) in window._leaf_rows  # noqa: SLF001
+
+
 def test_view_button_offers_the_two_layouts_with_tree_active(window: gui.MainWindow) -> None:
     """The quiet view button carries both layouts, exclusive, and starts on the folder tree."""
     labels = [action.text() for action in window._view_menu.actions()]  # noqa: SLF001

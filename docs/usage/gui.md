@@ -82,7 +82,15 @@ folders stay grouped above their sibling files either way):
 - **Tagged**: which metadata the file already carries, filled in by a background scan after you add
     photos: `T` title, `D` description, `K` keywords, `-` for none (hover for the full list).
 
-The small **☰** button left of **Select** picks how the list is laid out: **View as Tree** (the
+Above the list is a **search box**: type into it and the list narrows to the photos whose name
+matches. Plain text matches anywhere in the name (`IMG` finds `IMG_0001.dng`), and `*`, `?` and `[]`
+are wildcards (`*_edit.jpg`), the same rule the Select menu's **Name Pattern...** uses. Matching
+ignores case, and in the folder tree the folders holding a match stay so you can still see where the
+photos live. This only changes what the list shows: a photo the box is hiding is still in the list
+and, if it is checked, is still generated and saved. The status bar says `Showing 2 of 40 photos`
+whenever a search is narrowing things, so a filtered list never reads as a list that lost photos.
+
+The small button at the end of that row picks how the list is laid out: **View as Tree** (the
 default, grouped under each folder) or **View as List**. As a list, every photo sits at one level,
 so a sort runs across the whole list instead of inside each folder, which is what you want to see
 every failure, or every `dng`, together no matter where it lives. Photos keep their filename when
