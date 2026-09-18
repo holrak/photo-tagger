@@ -99,7 +99,7 @@ Run the local checks before you push so CI does not surface anything you could h
     ```bash
     uv run ruff check --fix .                       # Lint + auto-fix
     uv run ruff format .                            # Format
-    zuban check                                     # Strict type check
+    uv run zuban check                              # Strict type check
     uv run pycroscope --config-file pyproject.toml  # Semi-static analysis
     prek run -a                                     # Run all pre-commit hooks
     ```

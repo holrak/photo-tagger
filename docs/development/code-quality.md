@@ -29,8 +29,13 @@ uv run ruff format .
 `zuban` is the strict, mypy-compatible type checker. It catches type mismatches that ruff does not.
 
 ```bash
-zuban check
+uv run zuban check
 ```
+
+!!! note
+
+    Use `uv run`, not a bare `zuban check`: a global `uv tool install zuban` on `PATH` would shadow the
+    version pinned in `uv.lock`.
 
 ### pycroscope
 
@@ -101,18 +106,24 @@ The configured hooks are:
 | -------------------------- | ------------------------------------------------------------- |
 | pre-commit-hooks basics    | Whitespace, end-of-file, merge conflicts, and similar basics. |
 | uv-lock                    | Keeps `uv.lock` in sync with `pyproject.toml`.                |
+| docformatter               | Reflows docstrings to 100 columns (runs before ruff).         |
 | ruff-check                 | Lints with ruff and applies auto-fixes.                       |
 | ruff-format                | Formats code to the 100-column style.                         |
 | mdformat                   | Formats Markdown (a base pass plus a docs pass for `docs/`).  |
 | bandit                     | Scans for common security issues.                             |
-| zizmor                     | Audits the GitHub Actions workflows for security.             |
 | pyupgrade                  | Rewrites code to modern syntax (`--py314-plus`).              |
 | cspell                     | Spell-checks code and docs.                                   |
 | typos                      | Catches common typos.                                         |
 | renovate-config-validator  | Validates the Renovate config.                                |
+| zizmor                     | Audits the GitHub Actions workflows for security.             |
 | zuban (local)              | Strict type check.                                            |
 | pycroscope (local)         | Semi-static analysis with the project config.                 |
 | check-version-sync (local) | Keeps the package version consistent across project files.    |
+| check-docs-sync (local)    | Keeps the documented CLI surface matching the real app.       |
+| check-translations (local) | Fails if a `.po` changed without recompiling the catalog.     |
+
+The local hooks all run through `uv run`, so they use the versions pinned in `uv.lock` rather than
+whatever happens to be first on `PATH`.
 
 The `check-version-sync` hook checks the version in `pyproject.toml`, `uv.lock`, `SECURITY.md`, and
 `CHANGELOG.md`. The package itself no longer hardcodes a version: `photo_tagger.__version__` reads
@@ -126,7 +137,7 @@ the tools directly gives clearer output when something fails:
 ```bash
 uv run ruff check --fix .
 uv run ruff format .
-zuban check
+uv run zuban check
 uv run pycroscope --config-file pyproject.toml
 prek run -a
 ```

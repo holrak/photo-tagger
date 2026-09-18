@@ -76,7 +76,7 @@ version string. `scripts/check_version_sync.py` guards the hand-maintained docs 
 ```bash
 uv run ruff check --fix .                              # Lint + auto-fix
 uv run ruff format .                                   # Format
-zuban check                                            # Strict type check (mypy-compatible)
+uv run zuban check                                     # Strict type check (mypy-compatible)
 uv run pycroscope --config-file pyproject.toml         # Semi-static analyzer (complements zuban)
 prek run -a                                            # Run all pre-commit hooks
 ```

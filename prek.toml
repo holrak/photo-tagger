@@ -122,11 +122,12 @@ repo = "local"
 
 # Whole-project, never a file list: handed a subset, zuban resolves imports it cannot see
 # and invents errors (a chunk holding only ai.py misreads pydantic-ai's two-parameter Agent
-# as taking one). It is also the `zuban check` AGENTS.md tells contributors to run.
+# as taking one). It is also the `uv run zuban check` AGENTS.md tells contributors to run.
+# Through `uv run`: a bare `zuban` off PATH may be a global uv tool, not the locked one.
 [[repos.hooks]]
 id = "zuban"
 name = "zuban type check"
-entry = "zuban check"
+entry = "uv run zuban check"
 language = "system"
 types = ["python"]
 pass_filenames = false
