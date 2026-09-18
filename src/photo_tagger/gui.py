@@ -197,6 +197,7 @@ from photo_tagger.gui_state import (
     file_type_label,
     filter_photos,
     fit_zoom,
+    flat_labels,
     format_existing_keywords,
     harmonize_sessions,
     harmonize_summary,
@@ -396,6 +397,29 @@ _TAGGED_PRESETS: tuple[tuple[str, frozenset[str], bool, str], ...] = (
     (gettext_noop("Has keywords"), frozenset({FIELD_KEYWORDS}), True, gettext_noop("keywords")),
 )
 
+# How the photo list is laid out, picked from the small view button above it. Each entry is
+# (mode, menu label, tooltip). The wording follows what file browsers call these, rather than
+# inventing our own, and the glyph is the list icon those buttons conventionally carry.
+VIEW_TREE = "tree"
+VIEW_LIST = "list"
+_VIEW_GLYPH = "☰"
+_VIEW_MODES: tuple[tuple[str, str, str], ...] = (
+    (
+        VIEW_TREE,
+        gettext_noop("View as Tree"),
+        gettext_noop("Group each photo under the folder it came from."),
+    ),
+    (
+        VIEW_LIST,
+        gettext_noop("View as List"),
+        gettext_noop(
+            "List every photo at one level, so clicking Status or Type sorts the whole list "
+            "rather than each folder on its own. Folder rows (and their checkboxes) are gone "
+            "while it is on; a photo's folder still opens from Go > Enclosing Folder.",
+        ),
+    ),
+)
+
 # The Select menu's three bulk verbs, each offering the same criteria below. Each entry is
 # (verb, menu label, tooltip).
 _SELECT_VERBS: tuple[tuple[str, str, str], ...] = (
@@ -504,6 +528,10 @@ QToolButton#sortdir {
 }
 QToolButton#sortdir:hover { background: rgba(130, 130, 140, 26%); }
 QToolButton#sortdir:checked { background: rgba(99, 102, 241, 22%); border-color: #6366f1; }
+/* The view-mode button: a bare glyph, no frame, so the choice stays quiet next to the labelled
+   buttons it shares the row with. */
+QToolButton#viewmode { font-size: 15px; padding: 4px 8px; color: rgba(130, 130, 140, 90%); }
+QToolButton#viewmode:hover { color: #6366f1; }
 QToolButton#navbtn {
     border: 1px solid rgba(130, 130, 140, 60%); border-radius: 6px; padding: 2px 10px;
 }
@@ -2214,6 +2242,9 @@ class MainWindow(QMainWindow):
         controls.addWidget(add)
         controls.addStretch(1)
 
+        controls.addWidget(self._build_view_button())
+        controls.addSpacing(8)
+
         select = QPushButton(_("Select"))
         select.setObjectName("menubutton")
         select.setToolTip(tooltip("Check or uncheck photos in bulk."))
@@ -2227,6 +2258,62 @@ class MainWindow(QMainWindow):
         remove.clicked.connect(self._remove_selected)
         controls.addWidget(remove)
         return controls
+
+    def _build_view_button(self) -> QToolButton:
+        """
+        Build the small view-mode button that sits above the photo list.
+
+        Deliberately quiet: an icon that opens a menu, the way a file browser offers its list and
+        tree views, rather than a labelled button competing with Select and Remove for a choice
+        most people make once.
+        """
+        button = self._view_button = QToolButton()
+        button.setObjectName("viewmode")
+        button.setText(_VIEW_GLYPH)
+        # Flat: without this some styles paint a raised button frame around the glyph, which is
+        # exactly the weight this control is meant not to have.
+        button.setAutoRaise(True)
+        # The menu is popped by hand rather than attached with setMenu: an attached one makes Qt
+        # paint its arrow over the glyph, and the arrow is not reliably styled away.
+        button.clicked.connect(self._show_view_menu)
+        menu = self._view_menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        group = self._view_group = QActionGroup(self)
+        self._view_actions = {}
+        for mode, label, hint in _VIEW_MODES:
+            action = QAction(_(label), self)
+            action.setCheckable(True)
+            action.setChecked(mode == VIEW_TREE)
+            action.setToolTip(tooltip(hint))
+            group.addAction(action)
+            menu.addAction(action)
+            self._view_actions[mode] = action
+        self._refresh_view_button()
+        # One connection covers both directions: the group unchecks the other mode for us.
+        self._view_actions[VIEW_LIST].toggled.connect(self._on_view_mode_changed)
+        return button
+
+    def _show_view_menu(self) -> None:
+        """Drop the view menu under the button, the way an attached menu would."""
+        self._view_menu.popup(self._view_button.mapToGlobal(self._view_button.rect().bottomLeft()))
+
+    def _flat_list(self) -> bool:
+        """Whether the photo list is flat, rather than grouped under folder rows."""
+        return self._view_actions[VIEW_LIST].isChecked()
+
+    def _on_view_mode_changed(self, _flat: bool) -> None:  # noqa: FBT001 - Qt toggled(bool) slot.
+        """Rebuild the list the other way round; the rebuild restores what was open."""
+        self._refresh_view_button()
+        self._rebuild_tree()
+
+    def _refresh_view_button(self) -> None:
+        """Name the active mode in the button's tooltip, since the button itself never says."""
+        active = next(
+            label for mode, label, _hint in _VIEW_MODES if self._view_actions[mode].isChecked()
+        )
+        self._view_button.setToolTip(
+            tooltip("How the photo list is laid out. Now: {mode}.", mode=_(active)),
+        )
 
     def _build_add_menu(self) -> QMenu:
         """Build the Add button's arrow menu: the folder dialog plus the folder-scan settings."""
@@ -3471,13 +3558,17 @@ class MainWindow(QMainWindow):
         # end re-applies whatever column/direction the header is currently set to.
         self._tree.setSortingEnabled(False)
         self._empty_tree()
-        for node in build_tree([item.path for item in self._items.values()]):
-            self._add_folder_node(self._tree, node)
+        paths = self._item_paths()
+        if self._flat_list():
+            self._add_flat_rows(paths)
+        else:
+            for node in build_tree(paths):
+                self._add_folder_node(self._tree, node)
         self._tree.setSortingEnabled(True)
         self._sync_grid_checks()
         # Photos that just left the list have to leave the history with them, or Back would try to
         # open a row that no longer exists. Folders go too when their last photo did.
-        self._history.prune(lambda location: self._row_for(location) is not None)
+        self._history.prune(self._location_exists)
         self._refresh_nav()
         # Emptying the tree dropped the selection (_on_current_changed ignores it while _syncing,
         # so the right-hand pane kept whatever was open). Restore the highlight so bulk actions
@@ -3496,6 +3587,15 @@ class MainWindow(QMainWindow):
         if entry is not None:
             self._tree.setCurrentItem(entry)
 
+    def _add_flat_rows(self, paths: list[Path]) -> None:
+        """Add every photo as a top-level row, so a column sort runs across the whole list."""
+        labels = flat_labels(paths)
+        for path in paths:
+            leaf = self._add_leaf(self._tree, path, labels[path])
+            # The label is relative to the folder the photos share, so the full path is worth
+            # a tooltip here in a way it is not under a folder row that already names it.
+            leaf.setToolTip(_COL_NAME, str(path))
+
     def _add_folder_node(self, parent: object, node: FolderNode) -> None:
         folder_item = _SortableTreeItem(parent, [node.label, ""])
         folder_item.setData(0, _PATH_ROLE, str(node.path))
@@ -3506,18 +3606,20 @@ class MainWindow(QMainWindow):
         for sub in node.folders:
             self._add_folder_node(folder_item, sub)
         for path in node.files:
-            item = self._items[str(path)]
-            leaf = _SortableTreeItem(
-                folder_item,
-                [path.name, file_type_label(path), "", ""],
-            )
-            leaf.setData(0, _PATH_ROLE, str(path))
-            # Files leave _IS_DIR_ROLE unset (None), which reads as "not a folder".
-            leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            leaf.setCheckState(0, _checked(item.selected))
-            self._leaf_rows[str(path)] = leaf
-            self._render_status_cells(leaf, item)
+            self._add_leaf(folder_item, path, path.name)
         self._sync_folder_check(folder_item)
+
+    def _add_leaf(self, parent: object, path: Path, label: str) -> _SortableTreeItem:
+        """Add one photo's row under *parent*, showing it as *label*."""
+        item = self._items[str(path)]
+        leaf = _SortableTreeItem(parent, [label, file_type_label(path), "", ""])
+        leaf.setData(0, _PATH_ROLE, str(path))
+        # Files leave _IS_DIR_ROLE unset (None), which reads as "not a folder".
+        leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        leaf.setCheckState(0, _checked(item.selected))
+        self._leaf_rows[str(path)] = leaf
+        self._render_status_cells(leaf, item)
+        return leaf
 
     # --- tree interaction ------------------------------------------------------------------
 
@@ -3615,52 +3717,75 @@ class MainWindow(QMainWindow):
 
     def _walk_history(self, step: Callable[[], Location | None]) -> None:
         """
-        Show the next place *step* offers, skipping any whose tree row has since gone.
+        Show the next place *step* offers, skipping any that has since left the list.
 
-        Places leave the history as their rows leave the list (see ``_rebuild_tree``), so the skip
-        is only a safety net, for a folder a rebuild has re-labelled or collapsed away.
+        Places leave the history as their photos leave the list (see ``_rebuild_tree``), so the skip
+        is only a safety net.
         """
         while (location := step()) is not None:
-            row = self._row_for(location)
-            if row is not None:
-                # Highlight the row without re-entering _on_current_changed: the trail already
-                # points at this place, and the pane is opened right below.
-                self._syncing = True
-                try:
-                    self._tree.setCurrentItem(row)
-                finally:
-                    self._syncing = False
-                self._open_location(location)
+            if self._location_exists(location):
+                self._show_location(location)
                 return
         self._refresh_nav()
 
     def _go_up(self) -> None:
         """Show the grid of the folder holding what is open, the way Finder goes up a level."""
         location = self._history.current
-        row = self._enclosing_row(location) if location is not None else None
-        if row is None:
+        folder = self._enclosing_folder(location) if location is not None else None
+        if folder is None:
             self._status.setText(_("Nothing above this in the list."))
             return
-        # A fresh navigation, so it goes through the tree and is recorded like any other.
-        self._tree.setCurrentItem(row)
+        self._show_location(Location(path=folder, is_dir=True))
+
+    def _show_location(self, location: Location) -> None:
+        """
+        Open *location*, highlighting its tree row when it has one.
+
+        The highlight is set without re-entering ``_on_current_changed``, since the pane is opened
+        right below. A folder often has no row to highlight: the flat list has none at all, and the
+        nested one can collapse a single-child chain away, so the selection is cleared instead.
+        """
+        self._syncing = True
+        try:
+            self._tree.setCurrentItem(self._row_for(location))
+        finally:
+            self._syncing = False
+        self._open_location(location)
 
     def _row_for(self, location: Location) -> QTreeWidgetItem | None:
-        """Return the tree row *location* stands for, or None once it has left the list."""
+        """Return the tree row *location* stands for, or None when it has none."""
         rows = self._folder_rows if location.is_dir else self._leaf_rows
         return rows.get(str(location.path))
 
-    def _enclosing_row(self, location: Location) -> QTreeWidgetItem | None:
+    def _location_exists(self, location: Location) -> bool:
         """
-        Return the nearest folder row above *location*, or None when it is already a top row.
+        Whether *location* is still something the window can open.
 
-        Walking up is needed because the tree collapses single-child folder chains, so a photo's own
-        folder is always a row but a folder's parent may not be.
+        Asked of the photos, not of the tree rows: a folder is a real place whenever the list holds
+        anything under it, whether or not this view happens to draw a row for it.
+        """
+        if location.is_dir:
+            return bool(paths_under(self._item_paths(), location.path))
+        return str(location.path) in self._items
+
+    def _enclosing_folder(self, location: Location) -> Path | None:
+        """
+        Return the folder whose grid sits above *location*, or None at the top of the list.
+
+        In the nested tree that is the nearest ancestor with a row of its own, since single-child
+        folder chains are collapsed away. The flat list draws no folder rows, so there the path
+        itself answers: a photo's own folder always holds it.
         """
         folder = location.path.parent
+        if folder == location.path:  # already at the filesystem root
+            return None
+        if self._flat_list():
+            return folder
         while True:
-            row = self._folder_rows.get(str(folder))
-            if row is not None or folder.parent == folder:
-                return row
+            if str(folder) in self._folder_rows:
+                return folder
+            if folder.parent == folder:
+                return None
             folder = folder.parent
 
     def _refresh_nav(self) -> None:

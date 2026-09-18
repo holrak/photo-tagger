@@ -634,6 +634,25 @@ def build_tree(paths: Iterable[Path]) -> list[FolderNode]:
     return [_display_node(top, None) for top in tops]
 
 
+def flat_labels(paths: Iterable[Path]) -> dict[Path, str]:
+    """
+    Label every path for the flat list: its filename, or its path below the folder they share.
+
+    Flattening drops the folder each photo came from, which matters the moment two of them are
+    called DSC_0042.NEF. One folder's worth of photos therefore keeps plain filenames, and a list
+    spanning several shows just the part of the path that tells them apart. Paths with nothing in
+    common (two drives on Windows) fall back to the full path, which always does.
+    """
+    paths = list(paths)
+    if len({path.parent for path in paths}) <= 1:
+        return {path: path.name for path in paths}
+    try:
+        root = os.path.commonpath([str(path) for path in paths])
+    except ValueError:
+        return {path: str(path) for path in paths}
+    return {path: str(path.relative_to(root)) for path in paths}
+
+
 def paths_under(paths: Iterable[Path], folder: Path) -> list[Path]:
     """Return the paths that live under *folder* (at any depth), order preserved."""
     return [path for path in paths if path.is_relative_to(folder)]

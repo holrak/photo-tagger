@@ -82,6 +82,18 @@ folders stay grouped above their sibling files either way):
 - **Tagged**: which metadata the file already carries, filled in by a background scan after you add
     photos: `T` title, `D` description, `K` keywords, `-` for none (hover for the full list).
 
+The small **☰** button left of **Select** picks how the list is laid out: **View as Tree** (the
+default, grouped under each folder) or **View as List**. As a list, every photo sits at one level,
+so a sort runs across the whole list instead of inside each folder, which is what you want to see
+every failure, or every `dng`, together no matter where it lives. Photos keep their filename when
+they all come from one folder, and show the part of the path that tells them apart when they do not,
+so two `DSC_0042.NEF` stay distinguishable (hover a row for the full path).
+
+Only the folder rows go: every photo keeps its own checkbox, and the rest of the window is
+unchanged. What you lose is checking a whole folder in one click and opening a folder's grid by
+clicking its row, so **Go > Enclosing Folder** (++cmd+up++ / ++alt+up++) is how you reach the grid
+while the list is flat. The choice lasts for the session and is not written to the config file.
+
 The **Select** menu checks and unchecks photos in bulk, so you do not have to hunt through a large
 list by hand:
 

@@ -725,6 +725,123 @@ def test_set_all_checked_with_no_photos_nags(window: gui.MainWindow) -> None:
     assert "Add photos" in window._status.text()  # noqa: SLF001
 
 
+def _add_two_shoots(window: gui.MainWindow, tmp_path: Path) -> tuple[Path, Path]:
+    """Add two subfolders that each hold a photo of the same name, recursively."""
+    first = tmp_path / "shoot1" / "DSC_0042.jpg"
+    second = tmp_path / "shoot2" / "DSC_0042.jpg"
+    for path in (first, second):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _jpeg(path)
+    window._extensions.setText("jpg")  # noqa: SLF001
+    window._recursive.setChecked(True)  # noqa: SLF001
+    window._add_inputs([tmp_path])  # noqa: SLF001
+    return first, second
+
+
+def _top_rows(window: gui.MainWindow) -> list[QTreeWidgetItem]:
+    """Return the tree's top-level rows."""
+    tree = window._tree  # noqa: SLF001
+    return [tree.topLevelItem(index) for index in range(tree.topLevelItemCount())]
+
+
+def test_view_button_offers_the_two_layouts_with_tree_active(window: gui.MainWindow) -> None:
+    """The quiet view button carries both layouts, exclusive, and starts on the folder tree."""
+    labels = [action.text() for action in window._view_menu.actions()]  # noqa: SLF001
+    assert labels == ["View as Tree", "View as List"]
+    assert all(action.isCheckable() for action in window._view_menu.actions())  # noqa: SLF001
+    assert window._view_actions[gui.VIEW_TREE].isChecked()  # noqa: SLF001
+    assert window._flat_list() is False  # noqa: SLF001
+    # The button says nothing on its face, so the tooltip has to name the active layout.
+    assert "View as Tree" in _unwrapped(window._view_button.toolTip())  # noqa: SLF001
+
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+
+    # Picking one mode drops the other: the two are one exclusive group.
+    assert window._view_actions[gui.VIEW_TREE].isChecked() is False  # noqa: SLF001
+    assert window._flat_list() is True  # noqa: SLF001
+    assert "View as List" in _unwrapped(window._view_button.toolTip())  # noqa: SLF001
+
+
+def test_flat_list_puts_every_photo_at_one_level(window: gui.MainWindow, tmp_path: Path) -> None:
+    """
+    Flat drops the folder rows so a column sort runs across the whole list.
+
+    The labels keep the folder each photo came from, or the two DSC_0042.jpg would be
+    indistinguishable once the grouping is gone.
+    """
+    _add_two_shoots(window, tmp_path)
+
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+
+    rows = _top_rows(window)
+    assert all(row.data(0, gui._IS_DIR_ROLE) is None for row in rows)  # noqa: SLF001
+    assert window._folder_rows == {}  # noqa: SLF001
+    assert sorted(row.text(0) for row in rows) == [
+        str(Path("shoot1") / "DSC_0042.jpg"),
+        str(Path("shoot2") / "DSC_0042.jpg"),
+    ]
+
+
+def test_flat_list_toggles_back_to_the_folder_tree(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Switching back restores the grouping, and a checkbox changed while flat survives it."""
+    first, _second = _add_two_shoots(window, tmp_path)
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+
+    leaf = window._leaf_for(first)  # noqa: SLF001
+    assert leaf is not None
+    leaf.setCheckState(0, Qt.CheckState.Unchecked)
+    assert window._items[str(first)].selected is False  # noqa: SLF001
+
+    window._view_actions[gui.VIEW_TREE].setChecked(True)  # noqa: SLF001
+
+    assert _check_state(window, first) == Qt.CheckState.Unchecked
+    # The folder rows are back, and the one holding the unchecked photo says so.
+    folder_row = window._folder_rows[str(first.parent)]  # noqa: SLF001
+    assert folder_row.checkState(0) == Qt.CheckState.Unchecked
+
+
+def test_flat_list_keeps_the_open_photo_selected(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Flipping the view is not navigation: the photo being reviewed stays open and highlighted."""
+    first, _second = _add_two_shoots(window, tmp_path)
+    _select(window, window._leaf_for(first))  # noqa: SLF001
+
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+
+    assert window._current is not None  # noqa: SLF001
+    assert window._current.path == first  # noqa: SLF001
+    assert window._tree.currentItem() is window._leaf_for(first)  # noqa: SLF001
+
+
+def test_flat_list_still_opens_the_enclosing_folder(window: gui.MainWindow, tmp_path: Path) -> None:
+    """With no folder rows to click, Go > Enclosing Folder still reaches the thumbnail grid."""
+    first, _second = _add_two_shoots(window, tmp_path)
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+    _select(window, window._leaf_for(first))  # noqa: SLF001
+
+    window._go_up()  # noqa: SLF001
+
+    assert window._grid_folder == first.parent  # noqa: SLF001
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+
+
+def test_history_survives_the_switch_to_the_flat_list(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """A grid visited before the switch is still on the trail once its folder row is gone."""
+    first, _second = _add_two_shoots(window, tmp_path)
+    _select(window, window._folder_rows[str(first.parent)])  # noqa: SLF001 - opens the grid
+    _select(window, window._leaf_for(first))  # noqa: SLF001
+
+    window._view_actions[gui.VIEW_LIST].setChecked(True)  # noqa: SLF001
+    window._go_back()  # noqa: SLF001
+
+    assert window._grid_folder == first.parent  # noqa: SLF001
+    assert window._right.currentIndex() == gui._PAGE_GRID  # noqa: SLF001
+    # Nothing in the flat list stands for a folder, so no row is left highlighted.
+    assert window._tree.currentItem() is None  # noqa: SLF001
+
+
 def _select_submenu(window: gui.MainWindow, label: str) -> QMenu:
     """Return the Select menu's submenu titled *label* (asserting it is there)."""
     found = [

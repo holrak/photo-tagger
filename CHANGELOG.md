@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format is based on
 - `--sidecar-mode {all,none,raw}` picks the write target; `raw` does both, a sidecar for RAW files
   and embedded for the rest, for a folder of RAW+JPEG pairs. `--write-sidecar` / `--embed-in-photo`
   are now shorthand. In the GUI: the save menu's **Write To** submenu.
+- GUI: the photo list can be shown flat (**View as List**), so a sort runs across every photo
+  instead of inside each folder.
 - GUI: the **Select** menu can check, uncheck, or check only the photos matching a file type,
   status, or name pattern.
 - GUI: clicking the preview opens the photo in a window that zooms up to 8:1 and pans.

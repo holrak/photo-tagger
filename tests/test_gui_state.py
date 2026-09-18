@@ -77,6 +77,7 @@ from photo_tagger.gui_state import (
     file_type_label,
     filter_photos,
     fit_zoom,
+    flat_labels,
     format_duration,
     format_existing_keywords,
     group_by_parent,
@@ -997,6 +998,38 @@ def test_matches_name_pattern(pattern: str, *, expected: bool) -> None:
     """Name patterns are case-insensitive, and plain text means "contains"."""
     item = PhotoItem(path=Path("/photos/IMG_0001.dng"))
     assert matches_name_pattern(item, pattern) is expected
+
+
+def test_flat_labels_keep_plain_names_inside_one_folder() -> None:
+    """With nothing to disambiguate, the flat list reads exactly like the nested one."""
+    paths = [Path("/photos/a.jpg"), Path("/photos/b.jpg")]
+    assert flat_labels(paths) == {paths[0]: "a.jpg", paths[1]: "b.jpg"}
+
+
+def test_flat_labels_show_the_path_below_the_shared_folder() -> None:
+    """Two folders holding the same filename stay told apart once the grouping is gone."""
+    first, second = Path("/photos/shoot1/DSC_0042.NEF"), Path("/photos/shoot2/DSC_0042.NEF")
+
+    labels = flat_labels([first, second])
+
+    assert labels == {
+        first: str(Path("shoot1") / "DSC_0042.NEF"),
+        second: str(Path("shoot2") / "DSC_0042.NEF"),
+    }
+
+
+def test_flat_labels_fall_back_to_the_full_path_without_a_shared_root() -> None:
+    """Paths with no common root at all (mixed absolute and relative) still label uniquely."""
+    absolute, relative = Path("/photos/a.jpg"), Path("shoot/b.jpg")
+
+    labels = flat_labels([absolute, relative])
+
+    assert labels == {absolute: str(absolute), relative: str(relative)}
+
+
+def test_flat_labels_of_an_empty_list() -> None:
+    """An empty list labels nothing, rather than reaching for a common root that is not there."""
+    assert flat_labels([]) == {}
 
 
 def test_paths_matching_fields_all_requires_every_field() -> None:
