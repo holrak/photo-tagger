@@ -18,10 +18,10 @@ fix lands, it goes out as a new release on that line, so upgrading is how you ge
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 0.8.0 (latest) | :white_check_mark: |
-| < 0.8.0        | :x:                |
+| 0.9.0 (latest) | :white_check_mark: |
+| < 0.9.0        | :x:                |
 
-The current release is 0.8.0. Upgrade with:
+The current release is 0.9.0. Upgrade with:
 
 ```bash
 uv tool upgrade photo-tagger

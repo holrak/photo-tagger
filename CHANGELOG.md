@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-18
+
 ### Added
 
 - `--sidecar-mode {all,none,raw,both}` picks the write target: a sidecar per photo, inside each
@@ -398,3 +400,4 @@ Initial release.
 [0.6.0]: https://github.com/jbsilva/photo-tagger/compare/v0.5.0...v0.6.0
 [0.7.0]: https://github.com/jbsilva/photo-tagger/compare/v0.6.0...v0.7.0
 [0.8.0]: https://github.com/jbsilva/photo-tagger/compare/v0.7.0...v0.8.0
+[0.9.0]: https://github.com/jbsilva/photo-tagger/compare/v0.8.0...v0.9.0
