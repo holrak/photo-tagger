@@ -51,6 +51,19 @@ photo-tagger \
     `--embed-in-photo` modifies your originals. ExifTool keeps a `*_original` backup by default; add
     `--no-backup-xmp` only if you are sure you do not need it.
 
+## Tag a folder of RAW + JPEG pairs
+
+A camera set to RAW+JPEG leaves two files per shot. `--sidecar-mode raw` handles both in one pass:
+the CR3 (or DNG, NEF, ARW) keeps its bytes and gets a `.xmp` beside it, while the JPEG carries its
+own metadata so it travels intact.
+
+```bash
+photo-tagger \
+  -i ~/Pictures/shoot \
+  --ext cr3,jpg \
+  --sidecar-mode raw
+```
+
 ## Point at a remote Ollama host with a custom model
 
 Use an Ollama server on another machine and a specific vision-language model.

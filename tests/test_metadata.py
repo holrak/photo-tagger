@@ -30,6 +30,7 @@ from photo_tagger.metadata import (
     read_image_context,
     read_keyword_sets,
     read_metadata_sources,
+    use_sidecar_for,
     write_metadata,
 )
 from photo_tagger.models import KeywordSet
@@ -808,6 +809,38 @@ def test_write_metadata_targets_the_sidecar_by_default(tmp_path: Path) -> None:
     sidecar_call, embed_call = helper.set_tags.call_args_list
     assert sidecar_call.kwargs["files"] == [str(img.with_suffix(".xmp"))]
     assert embed_call.kwargs["files"] == [str(img)]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("shot.dng", True),
+        ("shot.CR3", True),
+        ("shot.nef", True),
+        # A RAW format on no list here (Phase One) still counts as RAW, so its bytes are left
+        # alone. Unknown means cautious, not embedded.
+        ("shot.iiq", True),
+        ("shot.jpg", False),
+        ("shot.JPEG", False),
+        ("shot.tif", False),
+        ("shot.heic", False),
+    ],
+)
+def test_use_sidecar_for_raw_mode_splits_by_file_type(
+    tmp_path: Path,
+    name: str,
+    *,
+    expected: bool,
+) -> None:
+    """The 'raw' mode is the mixed-folder answer: sidecars for RAW, embedded for the rest."""
+    assert use_sidecar_for(tmp_path / name, "raw") is expected
+
+
+@pytest.mark.parametrize("name", ["shot.dng", "shot.jpg"])
+def test_use_sidecar_for_all_and_none_ignore_the_file_type(tmp_path: Path, name: str) -> None:
+    """Outside 'raw' the mode alone decides, so both modes answer the same for any photo."""
+    assert use_sidecar_for(tmp_path / name, "all") is True
+    assert use_sidecar_for(tmp_path / name, "none") is False
 
 
 def test_read_caption_prefers_xmp_over_the_fallback_tags(tmp_path: Path) -> None:

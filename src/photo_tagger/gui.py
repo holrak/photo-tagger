@@ -117,14 +117,16 @@ from photo_tagger.cache import (
     safe_cache_get,
     safe_cache_put,
 )
-from photo_tagger.cli_options import load_defaults
+from photo_tagger.cli_options import load_defaults, resolve_sidecar_mode
 from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
     DEFAULT_JPEG_QUALITY,
     DEFAULT_MAX_TOKENS,
     DEFAULT_OUTPUT_LANGUAGE,
+    DEFAULT_SIDECAR_MODE,
     DEFAULT_TEMPERATURE,
     DEFAULT_USER_PROMPT,
+    SidecarMode,
 )
 from photo_tagger.config_file import find_config_file, load_config, user_config_path
 from photo_tagger.csv_report import write_report
@@ -242,6 +244,7 @@ from photo_tagger.metadata import (
     read_caption,
     read_image_context,
     read_metadata_sources,
+    use_sidecar_for,
     write_metadata,
     write_target,
 )
@@ -383,6 +386,37 @@ _TAGGED_PRESETS: tuple[tuple[str, frozenset[str], bool, str], ...] = (
     ),
     (gettext_noop("Has keywords"), frozenset({FIELD_KEYWORDS}), True, gettext_noop("keywords")),
 )
+
+# The Write To submenu, mirroring the CLI's --sidecar-mode. Each entry is (mode, menu label,
+# tooltip). Exclusive: a save writes one way, and the mixed mode decides per photo.
+_WRITE_TO_CHOICES: tuple[tuple[SidecarMode, str, str], ...] = (
+    (
+        "all",
+        gettext_noop("XMP Sidecar"),
+        gettext_noop("Write a .xmp file next to every photo, leaving the photos untouched."),
+    ),
+    (
+        "none",
+        gettext_noop("The Photo Itself"),
+        gettext_noop("Write into every image file, creating no sidecars."),
+    ),
+    (
+        "raw",
+        gettext_noop("Sidecar for RAW, Photo Otherwise"),
+        gettext_noop(
+            "Write a .xmp file beside each RAW photo and write into everything else. For a "
+            "folder of RAW+JPEG pairs.",
+        ),
+    ),
+)
+
+# How each Write To mode reads inside the Save buttons' "Currently writes ..." sentence. Lambdas,
+# not strings: the sentence is built on demand, so each phrase has to be translated on demand too.
+_WRITE_TO_SUMMARIES: dict[SidecarMode, Callable[[], str]] = {
+    "all": lambda: _("to an XMP sidecar"),
+    "none": lambda: _("into the image file"),
+    "raw": lambda: _("to a sidecar for RAW, into the image file otherwise"),
+}
 
 # Theme-agnostic polish: only spacing/rounding plus the brand accent on primary actions and
 # the preview area. Colors for text and input backgrounds are left to the OS palette, so the
@@ -744,14 +778,14 @@ class SaveWorker(QObject):
         jobs: list[SaveJob],
         *,
         backup: bool,
-        use_sidecar: bool,
+        sidecar_mode: SidecarMode,
         journal: UndoJournal | None = None,
     ) -> None:
         """Store the resolved write jobs and the two file-level options; nothing runs until run."""
         super().__init__()
         self._jobs = jobs
         self._backup = backup
-        self._use_sidecar = use_sidecar
+        self._sidecar_mode = sidecar_mode
         self._journal = journal
         self._emitted = 0
         self._stop = False
@@ -781,7 +815,8 @@ class SaveWorker(QObject):
                 return
             # Whether the target already existed decides how undo reverts this write: restore the
             # ExifTool backup, or delete the sidecar this save created. Only knowable beforehand.
-            target = write_target(job.path, use_sidecar=self._use_sidecar)
+            sidecar = use_sidecar_for(job.path, self._sidecar_mode)
+            target = write_target(job.path, use_sidecar=sidecar)
             existed = target.exists()
             try:
                 ok = write_metadata(
@@ -790,7 +825,7 @@ class SaveWorker(QObject):
                     description=job.description,
                     title=job.title,
                     backup=self._backup,
-                    use_sidecar=self._use_sidecar,
+                    use_sidecar=sidecar,
                     et=helper,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -1922,7 +1957,7 @@ class MainWindow(QMainWindow):
             write_description=self._write_description.isChecked(),
             write_keywords=self._write_keywords.isChecked(),
             preserve_keywords=not self._overwrite.isChecked(),
-            use_sidecar=not self._embed.isChecked(),
+            sidecar_mode=self._sidecar_mode(),
             backup_xmp=self._backup.isChecked(),
             telemetry_enabled=self._telemetry_enabled,
             vocabulary=self._vocabulary_path,
@@ -2831,8 +2866,6 @@ class MainWindow(QMainWindow):
             tooltip("Replace existing keywords instead of merging the new ones in."),
         )
         self._overwrite.toggled.connect(self._refresh_derived)
-        self._embed = QAction(_("Embed in Photo"), self)
-        self._embed.setToolTip(tooltip("Write into the image file instead of an XMP sidecar."))
         self._backup = QAction(_("Keep ExifTool Backup"), self)
         self._backup.setToolTip(
             tooltip(
@@ -2843,12 +2876,12 @@ class MainWindow(QMainWindow):
         )
         for action, checked in (
             (self._overwrite, not output.preserve_keywords),
-            (self._embed, not output.use_sidecar),
             (self._backup, output.backup_xmp),
         ):
             action.setCheckable(True)
             action.setChecked(checked)
             menu.addAction(action)
+        menu.addMenu(self._build_write_to_menu(resolve_sidecar_mode(output)))
         # A config that starts with keywords off must also start with Overwrite grayed out.
         self._overwrite.setEnabled(self._write_keywords.isChecked())
         # Every toggle refreshes the Save buttons' option summary. Connected after the
@@ -2858,11 +2891,35 @@ class MainWindow(QMainWindow):
             self._write_description,
             self._write_keywords,
             self._overwrite,
-            self._embed,
             self._backup,
+            *self._sidecar_actions.values(),
         ):
             action.toggled.connect(self._refresh_save_tooltips)
         return menu
+
+    def _build_write_to_menu(self, mode: SidecarMode) -> QMenu:
+        """Build the exclusive Write To submenu, with *mode* pre-picked."""
+        menu = QMenu(_("Write To"), self)
+        menu.setToolTipsVisible(True)
+        menu.setToolTip(tooltip("Where a save puts the metadata."))
+        group = self._sidecar_group = QActionGroup(self)
+        self._sidecar_actions = {}
+        for value, label, hint in _WRITE_TO_CHOICES:
+            action = QAction(_(label), self)
+            action.setCheckable(True)
+            action.setChecked(value == mode)
+            action.setToolTip(tooltip(hint))
+            group.addAction(action)
+            menu.addAction(action)
+            self._sidecar_actions[value] = action
+        return menu
+
+    def _sidecar_mode(self) -> SidecarMode:
+        """Return the picked Write To mode; the action group keeps exactly one checked."""
+        for value, action in self._sidecar_actions.items():
+            if action.isChecked():
+                return value
+        return DEFAULT_SIDECAR_MODE
 
     def _save_options_summary(self) -> str:
         """Describe what a save currently writes, for the Save buttons' tooltips."""
@@ -2882,9 +2939,7 @@ class MainWindow(QMainWindow):
                 if self._overwrite.isChecked()
                 else _("merging with existing keywords"),
             )
-        parts.append(
-            _("into the image file") if self._embed.isChecked() else _("to an XMP sidecar"),
-        )
+        parts.append(_WRITE_TO_SUMMARIES[self._sidecar_mode()]())
         parts.append(
             _("keeping a *_original backup")
             if self._backup.isChecked()
@@ -3845,7 +3900,7 @@ class MainWindow(QMainWindow):
             write_keywords=self._write_keywords.isChecked(),
             overwrite=self._overwrite.isChecked(),
             backup=self._backup.isChecked(),
-            use_sidecar=not self._embed.isChecked(),
+            sidecar_mode=self._sidecar_mode(),
             verbatim=self._verbatim_spellings(),
         )
 
@@ -3903,7 +3958,8 @@ class MainWindow(QMainWindow):
         job = build_save_job(item, options)
         journal = self._single_save_journal()
         # Whether the target exists decides how undo reverts this write, and only holds before it.
-        target = write_target(job.path, use_sidecar=options.use_sidecar)
+        sidecar = use_sidecar_for(job.path, options.sidecar_mode)
+        target = write_target(job.path, use_sidecar=sidecar)
         existed = target.exists()
         try:
             ok = write_metadata(
@@ -3912,7 +3968,7 @@ class MainWindow(QMainWindow):
                 description=job.description,
                 title=job.title,
                 backup=options.backup,
-                use_sidecar=options.use_sidecar,
+                use_sidecar=sidecar,
             )
         except Exception as exc:  # noqa: BLE001 - exiftool itself failing to start must surface
             # as a failed save, not an uncaught exception Qt swallows into the log unseen.
@@ -3993,7 +4049,7 @@ class MainWindow(QMainWindow):
         self._save_worker = SaveWorker(
             jobs,
             backup=options.backup,
-            use_sidecar=options.use_sidecar,
+            sidecar_mode=options.sidecar_mode,
             journal=self._save_journal,
         )
         self._save_worker.moveToThread(self._save_thread)

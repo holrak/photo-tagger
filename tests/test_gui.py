@@ -1267,7 +1267,7 @@ def test_save_worker_shares_one_exiftool_across_the_batch(
         )
         for name in ("a.jpg", "b.jpg")
     ]
-    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    worker = gui.SaveWorker(jobs, backup=True, sidecar_mode="all")
     results: list[tuple[str, bool]] = []
     worker.file_done.connect(lambda path, ok: results.append((Path(path).name, ok)))
 
@@ -1290,7 +1290,7 @@ def test_save_worker_reports_failures_when_exiftool_cannot_start(
 
     monkeypatch.setattr(gui, "managed_helper", boom)
     jobs = [SaveJob(path=tmp_path / "a.jpg", keywords=KeywordSet(), title="T", description=None)]
-    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    worker = gui.SaveWorker(jobs, backup=True, sidecar_mode="all")
     results: list[bool] = []
     finished: list[bool] = []
     worker.file_done.connect(lambda _path, ok: results.append(ok))
@@ -1317,7 +1317,7 @@ def test_save_worker_stops_before_the_next_photo(
         )
         for name in ("a.jpg", "b.jpg", "c.jpg")
     ]
-    worker = gui.SaveWorker(jobs, backup=True, use_sidecar=True)
+    worker = gui.SaveWorker(jobs, backup=True, sidecar_mode="all")
     written: list[str] = []
 
     def fake_write(path: Path, *_a: object, **_k: object) -> bool:
@@ -2772,7 +2772,7 @@ def test_save_options_default_to_writing_all_fields(window: gui.MainWindow) -> N
         assert action.isCheckable()
         assert action.isChecked()
     assert not window._overwrite.isChecked()  # noqa: SLF001 - merge, not overwrite
-    assert not window._embed.isChecked()  # noqa: SLF001 - sidecar, not embed
+    assert window._sidecar_mode() == "all"  # noqa: SLF001 - sidecar, not embed
     assert window._backup.isChecked()  # noqa: SLF001 - keep ExifTool's *_original
 
 
@@ -2845,8 +2845,10 @@ def test_save_buttons_share_the_options_menu(window: gui.MainWindow) -> None:
     actions = window._save_options_menu.actions()  # noqa: SLF001
     assert window._write_title in actions  # noqa: SLF001
     assert window._overwrite in actions  # noqa: SLF001
-    assert window._embed in actions  # noqa: SLF001
     assert window._backup in actions  # noqa: SLF001
+    # The Write To choices hang off a submenu of that same menu.
+    submenus = [action.menu() for action in actions if action.menu() is not None]
+    assert any(window._sidecar_actions["raw"] in menu.actions() for menu in submenus)  # noqa: SLF001
 
 
 def _unwrapped(tip: str) -> str:
@@ -2867,12 +2869,15 @@ def test_save_tooltips_follow_the_chosen_options(window: gui.MainWindow) -> None
     assert "XMP sidecar" in _unwrapped(window._save_button.toolTip())  # noqa: SLF001
 
     window._write_description.setChecked(False)  # noqa: SLF001
-    window._embed.setChecked(True)  # noqa: SLF001
+    window._sidecar_actions["none"].setChecked(True)  # noqa: SLF001
 
     tip = _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
     assert "title, keywords" in tip
     assert "into the image file" in tip
     assert "keeping a *_original backup" in tip
+
+    window._sidecar_actions["raw"].setChecked(True)  # noqa: SLF001
+    assert "to a sidecar for RAW" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
 
     window._backup.setChecked(False)  # noqa: SLF001
     assert "with no *_original backup" in _unwrapped(window._save_selected_button.toolTip())  # noqa: SLF001
@@ -3524,7 +3529,7 @@ def test_save_config_writes_the_gui_choices(
     window._model.setCurrentText("qwen/qwen3-vl-30b")  # noqa: SLF001
     window._api_key.setText("sk-secret")  # noqa: SLF001 - must NOT be written
     window._extensions.setText("jpg,cr3")  # noqa: SLF001
-    window._embed.setChecked(True)  # noqa: SLF001
+    window._sidecar_actions["raw"].setChecked(True)  # noqa: SLF001
     window._backup.setChecked(False)  # noqa: SLF001
 
     window._save_config()  # noqa: SLF001
@@ -3534,7 +3539,7 @@ def test_save_config_writes_the_gui_choices(
     data = tomllib.loads(text)
     assert data["provider"]["model_name"] == "qwen/qwen3-vl-30b"
     assert data["extensions"] == "jpg,cr3"
-    assert data["output"]["use_sidecar"] is False
+    assert data["output"]["sidecar_mode"] == "raw"
     assert data["output"]["backup_xmp"] is False
     assert data["telemetry"]["enabled"] is True
 

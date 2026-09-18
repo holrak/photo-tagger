@@ -87,19 +87,20 @@ keep the output focused; the JPEG settings control how much detail the model see
 The output group decides what metadata is written and where. By default photo-tagger writes an XMP
 sidecar next to each image and leaves the original untouched.
 
-| Flag                                             | Default           | Env var | Description                                                                                         |
-| ------------------------------------------------ | ----------------- | ------- | --------------------------------------------------------------------------------------------------- |
-| `--preserve-keywords` / `--overwrite-keywords`   | preserve (`true`) | `-`     | Merge with existing keywords vs replace them.                                                       |
-| `--write-title` / `--no-write-title`             | write (`true`)    | `-`     | Generate and write a title.                                                                         |
-| `--write-description` / `--no-write-description` | write (`true`)    | `-`     | Generate and write a description.                                                                   |
-| `--write-keywords` / `--no-write-keywords`       | write (`true`)    | `-`     | Write keywords (merged per `--preserve-keywords`); `--no-write-keywords` leaves existing ones.      |
-| `--write-sidecar` / `--embed-in-photo`           | sidecar (`true`)  | `-`     | Write an XMP sidecar (default) vs embed metadata into the image file.                               |
-| `--backup-xmp` / `--no-backup-xmp`               | backup (`true`)   | `-`     | Keep ExifTool's `*_original` backup before writing; `--no-backup-xmp` passes `-overwrite_original`. |
-| `--max-keywords` N                               | none (keep all)   | `-`     | Cap AI-generated keywords kept per photo before merging.                                            |
-| `--vocabulary` PATH                              | none              | `-`     | Restrict generated keywords to the terms in PATH (see below).                                       |
-| `--vocabulary-strict`                            | `false`           | `-`     | Drop generated keywords the vocabulary does not cover instead of writing them as-is.                |
-| `--session-gap` MINUTES                          | `0` (off)         | `-`     | Group photos into shoots and make each shoot's keywords agree with itself (see below).              |
-| `--dry-run`                                      | `false`           | `-`     | Run the model and log the proposed metadata, but write nothing.                                     |
+| Flag                                             | Default           | Env var | Description                                                                                                                                                      |
+| ------------------------------------------------ | ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--preserve-keywords` / `--overwrite-keywords`   | preserve (`true`) | `-`     | Merge with existing keywords vs replace them.                                                                                                                    |
+| `--write-title` / `--no-write-title`             | write (`true`)    | `-`     | Generate and write a title.                                                                                                                                      |
+| `--write-description` / `--no-write-description` | write (`true`)    | `-`     | Generate and write a description.                                                                                                                                |
+| `--write-keywords` / `--no-write-keywords`       | write (`true`)    | `-`     | Write keywords (merged per `--preserve-keywords`); `--no-write-keywords` leaves existing ones.                                                                   |
+| `--write-sidecar` / `--embed-in-photo`           | sidecar (`true`)  | `-`     | Shorthand for `--sidecar-mode all` vs `--sidecar-mode none`.                                                                                                     |
+| `--sidecar-mode` {all,none,raw}                  | `all`             | `-`     | Where metadata goes: a sidecar per photo, inside each photo, or (`raw`) a sidecar for RAW files and embedded for everything else. Wins over the two flags above. |
+| `--backup-xmp` / `--no-backup-xmp`               | backup (`true`)   | `-`     | Keep ExifTool's `*_original` backup before writing; `--no-backup-xmp` passes `-overwrite_original`.                                                              |
+| `--max-keywords` N                               | none (keep all)   | `-`     | Cap AI-generated keywords kept per photo before merging.                                                                                                         |
+| `--vocabulary` PATH                              | none              | `-`     | Restrict generated keywords to the terms in PATH (see below).                                                                                                    |
+| `--vocabulary-strict`                            | `false`           | `-`     | Drop generated keywords the vocabulary does not cover instead of writing them as-is.                                                                             |
+| `--session-gap` MINUTES                          | `0` (off)         | `-`     | Group photos into shoots and make each shoot's keywords agree with itself (see below).                                                                           |
+| `--dry-run`                                      | `false`           | `-`     | Run the model and log the proposed metadata, but write nothing.                                                                                                  |
 
 ### Controlled vocabulary
 

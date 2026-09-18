@@ -697,7 +697,7 @@ def _config_values(**overrides: object) -> GuiConfigValues:
         "write_description": True,
         "write_keywords": True,
         "preserve_keywords": True,
-        "use_sidecar": True,
+        "sidecar_mode": "all",
         "backup_xmp": True,
         "telemetry_enabled": True,
     }
@@ -715,7 +715,7 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
         _config_values(
             model_name='qwen "vl" model',
             write_description=False,
-            use_sidecar=False,
+            sidecar_mode="raw",
             backup_xmp=False,
             telemetry_enabled=False,
         ),
@@ -727,7 +727,7 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
     assert defaults.extensions == "jpg,cr3"
     assert defaults.recursive is True
     assert defaults.output.write_description is False
-    assert defaults.output.use_sidecar is False
+    assert defaults.output.sidecar_mode == "raw"
     assert defaults.output.backup_xmp is False
     assert defaults.telemetry.enabled is False
 
@@ -768,7 +768,7 @@ def test_merged_config_text_preserves_comments_and_unknown_keys() -> None:
     assert data["extensions"] == "jpg,cr3"
     assert data["provider"]["provider_name"] == "lmstudio"
     assert data["provider"]["model_name"] == "llava"
-    assert data["output"]["use_sidecar"] is True
+    assert data["output"]["sidecar_mode"] == "all"
     assert data["output"]["backup_xmp"] is False
 
 

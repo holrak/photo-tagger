@@ -10,6 +10,39 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "OFF"]
 
 MIN_HIERARCHICAL_DEPTH = 2
 
+# Image formats Pillow reads natively. Everything else counts as camera RAW, for two callers: the
+# image loader tries rawpy first, and the "raw" sidecar mode keeps those files untouched. An
+# extension nobody here knows is therefore treated as RAW, which is the cautious answer both times.
+NON_RAW_EXTENSIONS = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".gif",
+        ".jpe",
+        ".jp2",
+        ".tif",
+        ".tiff",
+        ".heic",
+        ".heif",
+        ".avif",
+        ".psd",
+        ".ico",
+        ".ppm",
+        ".pgm",
+        ".pbm",
+    },
+)
+
+# Where a run puts the metadata it writes: "all" into XMP sidecars, "none" into the image files
+# themselves, "raw" into a sidecar for RAW files and into the image for everything else. "raw" is
+# the mixed-folder answer: a DNG keeps its bytes untouched while the JPEG beside it carries its own
+# metadata.
+SidecarMode = Literal["all", "none", "raw"]
+DEFAULT_SIDECAR_MODE: SidecarMode = "all"
+
 
 def _env_int(name: str, default: int) -> int:
     """Read *name* from the environment as an int, warning and falling back if malformed."""

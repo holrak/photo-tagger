@@ -131,6 +131,26 @@ def test_process_photo_writes_metadata(
     assert "Beach" in keywords.subject
 
 
+@pytest.mark.parametrize(
+    ("name", "sidecar"),
+    [("img.dng", True), ("img.jpg", False)],
+)
+def test_process_photo_raw_mode_picks_the_target_per_photo(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+    name: str,
+    *,
+    sidecar: bool,
+) -> None:
+    """One run over a mixed folder: the DNG gets a sidecar, the JPEG is written in place."""
+    image = tmp_path / name
+    image.write_text("x")
+
+    assert process_photo(image, _ctx(options=ProcessingOptions(sidecar_mode="raw"))) is True
+
+    assert patched_pipeline["write"].call_args.kwargs["use_sidecar"] is sidecar
+
+
 def test_process_photo_skips_optional_fields_when_disabled(
     tmp_path: Path,
     patched_pipeline: dict[str, Any],
@@ -988,7 +1008,7 @@ def test_process_photo_cache_hit_survives_metadata_write(
         def put(self, key: str, result: InferenceResult) -> None:
             store[key] = result
 
-    options = ProcessingOptions(use_sidecar=False)
+    options = ProcessingOptions(sidecar_mode="none")
     # Both runs see the same image-data hash even though embedding changed the file bytes.
     with patch(
         "photo_tagger.pipeline.read_image_context",

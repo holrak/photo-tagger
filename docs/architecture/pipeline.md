@@ -95,7 +95,8 @@ flowchart TD
     `--overwrite-keywords` the base is empty. `--max-keywords` caps how many AI keywords are kept
     before merging.
 8. **`write_metadata`** writes the merged keywords, title, and description through ExifTool, to an
-    XMP sidecar by default or into the file with `--embed-in-photo`. `--no-write-title` and
+    XMP sidecar by default, into the file with `--embed-in-photo`, or one of each per file type
+    with `--sidecar-mode raw` (`use_sidecar_for` decides per photo). `--no-write-title` and
     `--no-write-description` suppress those fields. See [Metadata and keywords](metadata.md). The
     write is recorded in the run's undo journal, which is what `photo-tagger undo` reads back.
 

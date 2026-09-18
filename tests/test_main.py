@@ -1353,6 +1353,45 @@ def test_cli_config_overrides_translates_field_names_to_option_names() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("sidecar_mode", "use_sidecar", "expected"),
+    [
+        # Nothing asked: the non-destructive default.
+        (None, None, "all"),
+        # The old two-state flags still mean what they always did.
+        (None, True, "all"),
+        (None, False, "none"),
+        # The mode is the specific answer, so it wins over the shorthand either way.
+        ("raw", None, "raw"),
+        ("raw", False, "raw"),
+        ("none", True, "none"),
+    ],
+)
+def test_resolve_sidecar_mode_precedence(
+    sidecar_mode: str | None,
+    expected: str,
+    *,
+    use_sidecar: bool | None,
+) -> None:
+    """--sidecar-mode wins; --write-sidecar/--embed-in-photo stay the two-state shorthand."""
+    from photo_tagger.cli_options import OutputConfig, resolve_sidecar_mode  # noqa: PLC0415
+
+    output = OutputConfig(sidecar_mode=sidecar_mode, use_sidecar=use_sidecar)  # type: ignore[arg-type]
+
+    assert resolve_sidecar_mode(output) == expected
+
+
+def test_sidecar_mode_reaches_the_pipeline_options() -> None:
+    """A config file's [output] sidecar_mode lands on the options the pipeline writes with."""
+    from photo_tagger.cli_options import load_defaults, to_processing_options  # noqa: PLC0415
+
+    defaults = load_defaults({"output": {"sidecar_mode": "raw"}})
+
+    options = to_processing_options(defaults.output, defaults.inference)
+
+    assert options.sidecar_mode == "raw"
+
+
 def test_main_reports_unhandled_crashes_and_re_raises(tmp_path: Path) -> None:
     """
     A crash escaping the CLI fires one anonymous crash beacon and still surfaces the traceback.

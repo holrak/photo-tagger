@@ -38,9 +38,11 @@ from photo_tagger.config import (
     DEFAULT_MODEL_NAME,
     DEFAULT_OUTPUT_LANGUAGE,
     DEFAULT_RETRIES,
+    DEFAULT_SIDECAR_MODE,
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT_SECONDS,
     LogLevel,
+    SidecarMode,
 )
 from photo_tagger.config_file import apply_overrides, find_config_file, load_config
 from photo_tagger.pipeline import ProcessingOptions
@@ -207,14 +209,30 @@ class OutputConfig:
             help="Create an ExifTool backup (_original) before overwriting metadata",
         ),
     ] = True
+    sidecar_mode: Annotated[
+        SidecarMode | None,
+        Parameter(
+            name=("--sidecar-mode",),
+            help=(
+                "Where metadata goes: 'all' (the default) writes an XMP sidecar next to every "
+                "photo, 'none' embeds it in the photo itself, and 'raw' does both, a sidecar for "
+                "RAW files and embedded for everything else. 'raw' is the answer for a folder of "
+                "RAW+JPEG pairs, where the RAWs should keep their bytes untouched but the JPEGs "
+                "should carry their own metadata"
+            ),
+        ),
+    ] = None
     use_sidecar: Annotated[
-        bool,
+        bool | None,
         Parameter(
             name=("--write-sidecar",),
             negative="--embed-in-photo",
-            help="Write metadata to XMP sidecars (default) instead of embedding in the image",
+            help=(
+                "Shorthand for --sidecar-mode: --write-sidecar is 'all' (the default), "
+                "--embed-in-photo is 'none'. An explicit --sidecar-mode wins over both"
+            ),
         ),
-    ] = True
+    ] = None
     dry_run: Annotated[
         bool,
         Parameter(
@@ -739,6 +757,21 @@ class ConfigFileSource:
         _apply_shadowed_keys(shadowed, arguments, source=source_name)
 
 
+def resolve_sidecar_mode(output: OutputConfig) -> SidecarMode:
+    """
+    Fold the two ways of asking for a write target into the one the pipeline uses.
+
+    ``--sidecar-mode`` is the real option; ``--write-sidecar`` / ``--embed-in-photo`` stay as the
+    two-state shorthand they have always been. Both default to None (nothing asked), so an explicit
+    mode can win over the boolean without having to guess which of the two the user typed.
+    """
+    if output.sidecar_mode is not None:
+        return output.sidecar_mode
+    if output.use_sidecar is None:
+        return DEFAULT_SIDECAR_MODE
+    return "all" if output.use_sidecar else "none"
+
+
 def to_processing_options(
     output: OutputConfig,
     inference: InferenceConfig,
@@ -757,7 +790,7 @@ def to_processing_options(
         write_title=output.write_title,
         write_keywords=output.write_keywords,
         backup_xmp=output.backup_xmp,
-        use_sidecar=output.use_sidecar,
+        sidecar_mode=resolve_sidecar_mode(output),
         dry_run=output.dry_run,
         temperature=inference.temperature,
         max_tokens=inference.max_tokens,

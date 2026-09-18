@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from photo_tagger.config import (
     CAMERA_TAGS,
     LOCATION_TAGS,
+    NON_RAW_EXTENSIONS,
     TAG_EXIF_DATE_TIME_ORIGINAL,
     TAG_EXIF_IMAGE_DESCRIPTION,
     TAG_IPTC_KEYWORDS,
@@ -27,6 +28,7 @@ from photo_tagger.config import (
     TAG_XMP_SUBJECT,
     TAG_XMP_TITLE,
     TAG_XMP_WEIGHTED_FLAT_SUBJECT,
+    SidecarMode,
     exiftool_executable,
 )
 from photo_tagger.models import KeywordSet
@@ -812,6 +814,36 @@ def _build_write_payload(
         payload["XMP-dc:Title"] = title
         payload[TAG_IPTC_OBJECT_NAME] = title
     return payload
+
+
+def is_raw_file(image_path: Path) -> bool:
+    """
+    Report whether *image_path* looks like a camera RAW file, by extension alone.
+
+    Decided by exclusion: a suffix Pillow reads natively is not RAW, anything else is. An unknown
+    extension counting as RAW is the cautious answer for the caller that matters here, the "raw"
+    sidecar mode, which then leaves the file's own bytes alone.
+    """
+    return image_path.suffix.lower() not in NON_RAW_EXTENSIONS
+
+
+def use_sidecar_for(image_path: Path, mode: SidecarMode) -> bool:
+    """
+    Decide whether *image_path* gets an XMP sidecar under *mode*.
+
+    Examples:
+        >>> use_sidecar_for(Path("/photos/image.dng"), "raw")
+        True
+        >>> use_sidecar_for(Path("/photos/image.jpg"), "raw")
+        False
+    """
+    match mode:
+        case "none":
+            return False
+        case "raw":
+            return is_raw_file(image_path)
+        case _:
+            return True
 
 
 def write_target(image_path: Path, *, use_sidecar: bool) -> Path:

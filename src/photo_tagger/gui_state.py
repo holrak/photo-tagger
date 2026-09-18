@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
-from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE
+from photo_tagger.config import DEFAULT_OUTPUT_LANGUAGE, DEFAULT_SIDECAR_MODE, SidecarMode
 from photo_tagger.csv_report import ReportRow
 from photo_tagger.discovery import parse_extensions, resolve_image_files
 from photo_tagger.errors import ConfigFileError
@@ -305,7 +305,8 @@ class SaveOptions:
     write_keywords: bool = True
     overwrite: bool = False
     backup: bool = True
-    use_sidecar: bool = True
+    # Sidecar, embedded, or one per file type: resolved per photo by metadata.use_sidecar_for.
+    sidecar_mode: SidecarMode = DEFAULT_SIDECAR_MODE
     # The active vocabulary's own spelling of each term, keyed by casefolded term. None when no
     # vocabulary is in force, which is the only time the merge step may capitalize freely.
     verbatim: Mapping[str, str] | None = None
@@ -1498,7 +1499,7 @@ class GuiConfigValues:
     write_description: bool
     write_keywords: bool
     preserve_keywords: bool
-    use_sidecar: bool
+    sidecar_mode: SidecarMode
     backup_xmp: bool
     telemetry_enabled: bool
     vocabulary: Path | None = None
@@ -1533,7 +1534,7 @@ def config_toml_text(values: GuiConfigValues) -> str:
         f"write_description = {_toml_bool(values.write_description)}",
         f"write_keywords = {_toml_bool(values.write_keywords)}",
         f"preserve_keywords = {_toml_bool(values.preserve_keywords)}",
-        f"use_sidecar = {_toml_bool(values.use_sidecar)}",
+        f"sidecar_mode = {_toml_str(values.sidecar_mode)}",
         f"backup_xmp = {_toml_bool(values.backup_xmp)}",
     ]
     if values.vocabulary is not None:
@@ -1614,7 +1615,10 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     output["write_description"] = values.write_description
     output["write_keywords"] = values.write_keywords
     output["preserve_keywords"] = values.preserve_keywords
-    output["use_sidecar"] = values.use_sidecar
+    output["sidecar_mode"] = values.sidecar_mode
+    # The boolean this replaced only knew sidecar-or-not, and the mode wins over it anyway. Drop
+    # it so a config the GUI wrote never carries two answers to the same question.
+    output.pop("use_sidecar", None)
     output["backup_xmp"] = values.backup_xmp
     output["vocabulary_strict"] = values.vocabulary_strict
     output["session_gap_minutes"] = values.session_gap_minutes

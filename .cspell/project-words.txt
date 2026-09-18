@@ -11,6 +11,7 @@ autouse
 bakllava
 betterem
 BogoMIPS
+borderless
 capsys
 casefold
 Casefolded
@@ -54,6 +55,7 @@ exiftool
 filelock
 filterwarnings
 fontawesome
+frameless
 fromarray
 frontends
 frontmatter
@@ -145,6 +147,7 @@ pinentry
 pipx
 Piwigo
 pixmap
+pixmaps
 pixtral
 pofile
 pointerover
@@ -215,12 +218,14 @@ titlecase
 tlsv
 tobytes
 tomlkit
+trackpad
 tristates
 twemoji
 título
 ullTotalPhys
 unscanned
 unwritable
+upscales
 usefixtures
 venv
 viewports

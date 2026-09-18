@@ -213,7 +213,10 @@ The arrow on either **Save** button opens the save options, which choose what ev
     to refresh only the title and description while keeping a curated Lightroom keyword list as is
     (turning it off also disables **Overwrite Existing Keywords**, since there is nothing to write).
 - **Overwrite Existing Keywords** replaces the existing keywords instead of merging the new ones in.
-- **Embed in Photo** writes into the image file instead of the default XMP sidecar.
+- **Write To** picks where a save puts the metadata, the GUI's equivalent of the CLI's
+    `--sidecar-mode`: **XMP Sidecar** (the default) writes a `.xmp` file next to every photo, **The
+    Photo Itself** writes into each image file, and **Sidecar for RAW, Photo Otherwise** does one of
+    each per file type, for a folder of RAW+JPEG pairs.
 - **Keep ExifTool Backup** (on by default) lets ExifTool save the untouched file as `*_original`
     before writing, the GUI's equivalent of the CLI's `--backup-xmp` / `--no-backup-xmp`. Uncheck it
     to write in place: saving a few thousand photos otherwise leaves a full second copy of each one

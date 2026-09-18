@@ -8,49 +8,23 @@ from loguru import logger
 from PIL import Image, ImageOps
 from pydantic_ai import BinaryContent
 
-from photo_tagger.config import DEFAULT_DIMENSIONS, DEFAULT_JPEG_QUALITY
+from photo_tagger.config import DEFAULT_DIMENSIONS, DEFAULT_JPEG_QUALITY, NON_RAW_EXTENSIONS
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-# File extensions that PIL handles natively. Anything outside this set is tried
-# with rawpy first, falling back to PIL when rawpy can't recognize the format.
-_NON_RAW_EXTS = frozenset(
-    {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".bmp",
-        ".gif",
-        ".jpe",
-        ".jp2",
-        ".tif",
-        ".tiff",
-        ".heic",
-        ".heif",
-        ".avif",
-        ".psd",
-        ".ico",
-        ".ppm",
-        ".pgm",
-        ".pbm",
-    },
-)
-
-
 def _open_image(image_path: Path) -> Image.Image:
     """
-    Open an image with PIL, using rawpy unless the suffix is known non-RAW.
+    Open an image with PIL, using rawpy unless the suffix is a format PIL handles natively.
 
     Returns a fully-loaded, EXIF-rotated, RGB-friendly image. The underlying file handle is closed
     before this function returns, so the caller can operate on the result without holding the source
     file open.
     """
     suffix = image_path.suffix.lower()
-    if suffix in _NON_RAW_EXTS:
+    if suffix in NON_RAW_EXTENSIONS:
         logger.info("skipping_rawpy_for_known_format", extension=suffix)
     else:
         try:

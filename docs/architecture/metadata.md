@@ -116,10 +116,10 @@ Title and description are only written when `--write-title` and `--write-descrip
 ### Sidecar or embedded
 
 By default photo-tagger writes an XMP sidecar named after the image (`image.cr3` gets `image.xmp`).
-This leaves the original file byte-for-byte untouched. Pass `--embed-in-photo` to write the tags
-into the image file instead.
+This leaves the original file byte-for-byte untouched. `--sidecar-mode` picks between the three
+answers; `--write-sidecar` and `--embed-in-photo` are shorthand for the first two.
 
-=== "Sidecar (default)"
+=== "Sidecar (default, `--sidecar-mode all`)"
 
     ```text
     photos/
@@ -127,17 +127,32 @@ into the image file instead.
       duck.xmp        # title, description, and keywords
     ```
 
-=== "Embedded (--embed-in-photo)"
+=== "Embedded (`--embed-in-photo`)"
 
     ```text
     photos/
       duck.cr3        # metadata written into the file itself
     ```
 
+=== "One of each (`--sidecar-mode raw`)"
+
+    ```text
+    photos/
+      duck.dng        # RAW: original, never modified
+      duck.xmp        # its title, description, and keywords
+      duck.jpg        # not RAW: metadata written into the file itself
+    ```
+
 !!! note
 
     Sidecars keep your originals completely untouched, and Lightroom reads the `.xmp` file alongside the
     photo on import. This is the safest option for RAW workflows, which is why it is the default.
+
+`--sidecar-mode raw` is for the folder that holds both, the RAW+JPEG pairs a camera set to that mode
+produces: the RAWs keep their bytes, and each JPEG carries its own metadata so it travels intact.
+RAW is decided by extension, by exclusion: a suffix Pillow reads natively (`.jpg`, `.png`, `.tif`,
+`.heic`, ...) is not RAW, and anything else is, so an unfamiliar extension gets the cautious answer
+and keeps its file untouched.
 
 ### Backups and dry runs
 

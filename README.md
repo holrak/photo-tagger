@@ -20,7 +20,8 @@ metadata. Use it as a command-line tool (`photo-tagger`) or as an optional deskt
 (`photo-tagger gui`); both run the same pipeline and read the same config.
 
 By default it keeps your originals untouched by creating XMP sidecars, but you can embed the updates
-directly into each photo with `--embed-in-photo`.
+directly into each photo with `--embed-in-photo`, or split the two by file type with
+`--sidecar-mode raw`.
 
 **Full documentation:** <https://jbsilva.github.io/photo-tagger/>
 
@@ -174,6 +175,9 @@ Key options:
 - `--no-write-title` / `--no-write-description` / `--no-write-keywords` – skip writing those fields
 - `--no-backup-xmp` – avoid creating `*_original` snapshot before writing
 - `--embed-in-photo` – write metadata directly into the image instead of creating an XMP sidecar
+- `--sidecar-mode {all,none,raw}` – where metadata goes: sidecars for every photo (`all`, the
+  default), inside every photo (`none`, the same as `--embed-in-photo`), or one of each per file
+  type (`raw`: a sidecar for RAW files, embedded for JPEG and friends)
 - `--dry-run` – run the model and log the proposed metadata without writing XMP
 - `-w/--workers N` – process N photos concurrently using a thread pool (default 1)
 - `--no-progress` – hide the live rich progress bar (auto-disabled on non-interactive stdouts)
@@ -265,6 +269,12 @@ Embed metadata directly into a set of JPEGs:
 
 ```bash
 photo-tagger -i ./exports --ext jpg --embed-in-photo
+```
+
+Tag a folder of RAW + JPEG pairs, sidecars for the RAWs and embedded metadata for the JPEGs:
+
+```bash
+photo-tagger -i ~/Pictures/shoot --ext cr3,jpg --sidecar-mode raw
 ```
 
 Build a keyword list from the photos you already have, then tag against it:

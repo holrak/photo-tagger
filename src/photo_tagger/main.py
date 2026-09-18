@@ -6,6 +6,8 @@ Optionally non-destructive: create/update XMP sidecar files with Lightroom-compa
 Alternatively, pass --embed-in-photo to write metadata directly into the original file.
 Unfortunately, Lightroom uses XMP sidecar files only for proprietary raw formats (e.g., CR3, NEF).
 For JPEG, DNG and other formats, you'll often prefer embedding the metadata directly into the file.
+A folder holding both is what --sidecar-mode raw is for: sidecars for the RAW files, embedded
+metadata for the rest, in one pass.
 This can be done with ExifTool manually as well:
     exiftool -tagsFromFile image.xmp -all:all image.jpg
 
@@ -776,7 +778,7 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         write_title=options.write_title,
         write_keywords=options.write_keywords,
         backup_xmp=options.backup_xmp,
-        use_sidecar=options.use_sidecar,
+        sidecar_mode=options.sidecar_mode,
         dry_run=options.dry_run,
         max_keywords=options.max_new_keywords,
         vocabulary_terms=len(options.vocabulary.terms) if options.vocabulary else 0,
@@ -856,9 +858,10 @@ def tag(  # noqa: PLR0913 - cyclopts entry point; each arg is a CLI flag group.
     - Loads image (RAW supported), converts to in-memory JPEG, queries the model.
     - Generates title, description, and keywords; merges with existing XMP by default
         (use --overwrite-keywords to replace).
-    - Writes metadata to an XMP sidecar (default) or embeds it directly when --embed-in-photo
-        is used. Use --no-write-title/--no-write-description to skip fields; --no-backup-xmp
-        to avoid backups.
+    - Writes metadata to an XMP sidecar (default), or embeds it directly with --embed-in-photo,
+        or splits the two per file type with --sidecar-mode raw (sidecars for RAW, embedded for
+        JPEG and friends). Use --no-write-title/--no-write-description to skip fields;
+        --no-backup-xmp to avoid backups.
 
     Skipping:
     - --skip-from FILE: skip files listed in FILE (one name or path per line).

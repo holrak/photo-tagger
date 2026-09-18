@@ -43,7 +43,7 @@
 # write_description = true
 # write_title = true
 # backup_xmp = true           # ExifTool _original backup
-# use_sidecar = true          # false = embed metadata in the image file
+# sidecar_mode = "all"        # "none" = embed in the image file; "raw" = sidecar for RAW only
 # dry_run = false
 # max_keywords = 15           # cap AI keywords kept per photo before merging
 # vocabulary = "keywords.txt" # Lightroom keyword export, or one term/path per line

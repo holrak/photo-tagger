@@ -29,7 +29,8 @@ Before your first run, make sure ExifTool is on your `PATH` and a model server i
 
 By default photo-tagger leaves your originals untouched: for each image it writes an XMP sidecar
 (for example `IMG_1234.xmp`) next to the file. Pass `--embed-in-photo` to write the metadata into
-the image file itself instead.
+the image file itself instead, or `--sidecar-mode raw` to do both in one pass: a sidecar for each
+RAW file, embedded metadata for everything else.
 
 Either way the metadata is written through ExifTool. The fields generated are:
 

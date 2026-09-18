@@ -18,9 +18,11 @@ from photo_tagger.config import (
     DEFAULT_JPEG_QUALITY,
     DEFAULT_MAX_TOKENS,
     DEFAULT_OUTPUT_LANGUAGE,
+    DEFAULT_SIDECAR_MODE,
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_USER_PROMPT,
+    SidecarMode,
 )
 from photo_tagger.errors import BatchError
 from photo_tagger.image_io import prepare_image_for_agent
@@ -29,6 +31,7 @@ from photo_tagger.metadata import (
     build_contextual_prompt,
     managed_helper,
     read_image_context,
+    use_sidecar_for,
     write_metadata,
     write_target,
 )
@@ -124,7 +127,8 @@ class ProcessingOptions:
     write_title: bool = True
     write_keywords: bool = True
     backup_xmp: bool = True
-    use_sidecar: bool = True
+    # Sidecar or embedded, decided per photo: see photo_tagger.metadata.use_sidecar_for.
+    sidecar_mode: SidecarMode = DEFAULT_SIDECAR_MODE
     dry_run: bool = False
     temperature: float = DEFAULT_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
@@ -619,7 +623,8 @@ def _write_pending(
 
     # Whether the target already existed decides how undo reverts this write: restore the
     # ExifTool backup, or delete the sidecar the run created. It can only be known before the write.
-    target = write_target(image_path, use_sidecar=options.use_sidecar)
+    sidecar = use_sidecar_for(image_path, options.sidecar_mode)
+    target = write_target(image_path, use_sidecar=sidecar)
     existed = target.exists()
     written = write_metadata(
         image_path,
@@ -627,7 +632,7 @@ def _write_pending(
         description=pending.description if options.write_description else None,
         title=pending.title if options.write_title else None,
         backup=options.backup_xmp,
-        use_sidecar=options.use_sidecar,
+        use_sidecar=sidecar,
         et=et,
     )
     if written and ctx.journal is not None:
