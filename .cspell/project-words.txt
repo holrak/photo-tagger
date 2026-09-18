@@ -182,6 +182,7 @@ rawpy
 RDWR
 recompiles
 relocks
+renovatebot
 rescan
 roundtrips
 SARIF

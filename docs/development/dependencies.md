@@ -46,12 +46,21 @@ uv sync --extra gui --group dev --group test
 
 [`renovate.json5`](https://github.com/jbsilva/photo-tagger/blob/main/renovate.json5) drives
 automated dependency updates and replaces the old `.github/dependabot.yml`. It extends
-`config:best-practices` and `:enablePreCommit`, and covers three update domains:
+`config:best-practices` and covers three update domains:
 
 - `pyproject.toml` plus `uv.lock` (the Python dependencies).
 - GitHub Actions in `.github/workflows/`, pinned to a full commit SHA with the version kept in a
     trailing comment.
-- `.pre-commit-config.yaml` hook revs.
+- `prek.toml` hook revs.
+
+!!! note "Why prek hooks need a custom manager"
+
+    Renovate has no native prek manager yet
+    ([renovatebot/renovate#41683](https://github.com/renovatebot/renovate/issues/41683)), and its
+    built-in pre-commit manager only matches `.pre-commit-config.ya?ml`. Since this repo uses
+    `prek.toml`, the hook revs are tracked by a regex `customManagers` entry instead, which reads the
+    `repo` / `rev` pairs and resolves them through the `github-tags` datasource. Swap it for the native
+    manager once that ships.
 
 ### Range strategy
 
@@ -59,8 +68,8 @@ Renovate uses `rangeStrategy = "bump"`. With the default `auto` strategy an open
 covers a new release, so only `uv.lock` would change and the declared floor in `pyproject.toml`
 would go stale. `bump` instead raises the lower bound (for example `cyclopts>=4.16.1` to
 `cyclopts>=4.17.0`) and relocks, so the declared floor tracks what is actually installed. The
-github-actions and pre-commit managers ignore this setting because they pin exact SHAs and revs
-rather than version ranges.
+github-actions manager and the prek.toml regex manager ignore this setting because they pin exact
+SHAs and revs rather than version ranges.
 
 ### Schedule and release age
 
@@ -92,13 +101,13 @@ major updates land alone so each gets its own review:
 | `github-actions (minor+patch)`     | GitHub Actions minor and patch bumps                         |
 | `python production (minor+patch)`  | `[project.dependencies]` minor and patch bumps               |
 | `python development (minor+patch)` | `[dependency-groups]` (dev and test) minor and patch bumps   |
-| `pre-commit hooks`                 | Remaining pre-commit hook revs without a cross-file twin     |
+| `prek hooks`                       | Remaining prek hook revs without a cross-file twin           |
 | `ruff`                             | The `ruff` PyPI dep and the `astral-sh/ruff-pre-commit` hook |
 | `bandit`                           | The `bandit` PyPI dep and the `PyCQA/bandit` hook            |
 
 The `ruff` and `bandit` groups deliberately have no update-type filter: the tool's pyproject
-dependency and its pre-commit hook must move together on every bump, majors included, so each tool's
-dep and hook converge to one version in a single PR.
+dependency and its prek hook must move together on every bump, majors included, so each tool's dep
+and hook converge to one version in a single PR.
 
 ### Validating the config
 

@@ -87,8 +87,9 @@ warning below before silencing anything.
 
 ## Pre-commit hooks
 
-The repository uses `prek` to run pre-commit hooks. Run every hook against all files with one
-command:
+The repository uses [`prek`](https://prek.j178.dev) to run the git hooks. They are configured in
+`prek.toml`, prek's native TOML format, rather than the `.pre-commit-config.yaml` the original
+`pre-commit` tool reads. Run every hook against all files with one command:
 
 ```bash
 prek run -a

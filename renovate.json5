@@ -1,5 +1,5 @@
 // Renovate configuration: automated dependency updates across pyproject.toml / uv.lock, GitHub
-// Actions (.github/workflows), and .pre-commit-config.yaml hook revs.
+// Actions (.github/workflows), and prek.toml hook revs.
 //
 // Setup: install the Renovate GitHub App (https://github.com/apps/renovate) and merge the one-time
 // "Configure Renovate" onboarding PR. Renovate's GitHub-sourced security PRs need the repo's
@@ -13,9 +13,9 @@
 
   // config:best-practices applies this repo's policy by default: GitHub Actions pinned to a full
   // commit SHA (with the version kept in the trailing comment). It also enables the Dependency
-  // Dashboard issue. ":enablePreCommit" is separate because the pre-commit manager is off by
-  // default.
-  extends: ["config:best-practices", ":enablePreCommit"],
+  // Dashboard issue. The built-in pre-commit manager is deliberately NOT enabled: it only looks at
+  // .pre-commit-config.ya?ml, and this repo uses prek.toml. See customManagers below.
+  extends: ["config:best-practices"],
 
   // best-practices does NOT refresh transitive pins on its own; without this, uv.lock entries
   // that no direct constraint covers only ever move via security alerts. Uses the same weekly
@@ -32,7 +32,7 @@
   // "auto" strategy an open ">=" range still covers a new release, so Renovate would touch only
   // uv.lock and leave the constraint stale. "bump" raises "cyclopts>=4.16.1" to "cyclopts>=4.17.0"
   // (and updates uv.lock), keeping the declared floor in sync with what is installed. Ignored by
-  // the github-actions and pre-commit managers, which pin exact SHAs/revs rather than ranges.
+  // the github-actions manager and the prek.toml regex manager, which pin exact SHAs/revs.
   rangeStrategy: "bump",
 
   // Hold a non-security release for 3 days before opening a PR. This also keeps Renovate compatible
@@ -50,6 +50,26 @@
   },
 
   labels: ["dependencies"],
+
+  // prek reads prek.toml, not .pre-commit-config.yaml. Renovate has no native prek manager yet
+  // (renovatebot/renovate#41683), and the built-in pre-commit manager is hardwired to
+  // .pre-commit-config.ya?ml, so without this regex manager the hook revs below would silently go
+  // stale. Drop this block once a native manager ships and matches prek.toml directly.
+  customManagers: [
+    {
+      customType: "regex",
+      description: "prek hook revs in prek.toml",
+      managerFilePatterns: ["/(^|/)prek\\.toml$/"],
+      // Captures the owner/repo slug and the rev that follows it. "[^\\[]*?" tolerates comments or
+      // blank lines between the two keys while refusing to cross into the next "[[repos]]" table,
+      // so a rev is never paired with the wrong repo. The local hooks have no rev and never match.
+      matchStrings: [
+        "repo\\s*=\\s*[\"']https://github\\.com/(?<packageName>[^\"'\\s]+?)(?:\\.git)?[\"'][^\\[]*?rev\\s*=\\s*[\"'](?<currentValue>[^\"']+)[\"']",
+      ],
+      // The slug is both what github-tags queries and what the packageRules below match on.
+      datasourceTemplate: "github-tags",
+    },
+  ],
 
   // PR titles read "build(deps): ...".
   semanticCommits: "enabled",
@@ -92,15 +112,15 @@
       groupName: "python development (minor+patch)",
     },
 
-    // --- Batch every remaining pre-commit hook bump into one PR. The tool-specific groups below
+    // --- Batch every remaining prek hook bump into one PR. The tool-specific groups below
     //     come AFTER this and override it for ruff/bandit (last matching rule wins). ---
     {
-      description: "pre-commit hooks without a cross-file twin",
-      matchManagers: ["pre-commit"],
-      groupName: "pre-commit hooks",
+      description: "prek hooks without a cross-file twin",
+      matchManagers: ["custom.regex"],
+      groupName: "prek hooks",
     },
 
-    // --- Cross-file version sync. Renovate names a pre-commit hook by its repo slug
+    // --- Cross-file version sync. Renovate names a prek hook by its repo slug
     //     (astral-sh/ruff-pre-commit) and a PyPI dep by package name (ruff). They never collide, so
     //     a shared groupName pulls each tool's occurrences into ONE PR. No matchUpdateTypes filter:
     //     the hook and the dep must move together on every bump, majors included. Each occurrence

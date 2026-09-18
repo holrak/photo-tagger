@@ -161,7 +161,7 @@ lines-after-imports = 2
 # Reflow docstrings to the project's 100-column width. `pre-summary-newline` keeps the summary on the
 # second line to match the active D213 (the D212 alternative is ignored above). The pre-commit hook
 # passes `--in-place`; a bare `docformatter src` only prints a diff. A couple of files are excluded
-# from the hook (see .pre-commit-config.yaml for which and why).
+# from the hook (see prek.toml for which and why).
 recursive = true
 wrap-summaries = 100
 wrap-descriptions = 100

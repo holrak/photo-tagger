@@ -120,7 +120,7 @@ setup_python_env() {
     uv sync --group dev --group test
 }
 
-# Install the git hooks defined in .pre-commit-config.yaml. Run through "uv run" so the local
+# Install the git hooks defined in prek.toml. Run through "uv run" so the local
 # hooks (zuban, pycroscope) find their tools inside the synced virtual environment.
 setup_hooks() {
     if [[ "$INSTALL_HOOKS" != "true" || "$SKIP_STEPS" == *"hooks"* ]]; then
