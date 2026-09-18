@@ -8,35 +8,20 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
-- GUI: clicking the detail pane's preview opens the photo in a full window that zooms and pans, so a
-  keyword can be checked against the frame rather than against a thumbnail. Fit to window up to 8:1,
-  with the standard zoom keys, Ctrl+scroll (and the trackpad pinch), drag to pan, a double-click to
-  toggle between fit and 1:1, and `F` for full screen.
+- GUI: clicking the preview opens the photo in a window that zooms up to 8:1 and pans.
 
 ### Fixed
 
-- A metadata tag that is present but empty (an empty `rdf:Bag`, a blank string) no longer shadows
-  the tag photo-tagger falls back to. A photo whose `XMP-dc:Title` is empty now reports its
-  `IPTC:ObjectName` instead of an empty title, and a blank camera or location tag no longer hides
-  the value on the XMP sidecar behind it, nor leaves a dangling line in the prompt.
-- `photo-tagger vocabulary --report` quotes a keyword a spreadsheet would otherwise run as a
-  formula, the same way `--csv-file` always has. Keywords come off the photos, so the report can
-  carry whatever the tool that tagged them wrote there.
-- GUI: saving settings, the UI language, or the metadata language into a config file with a syntax
-  error now reports the problem and leaves the file alone, instead of crashing the window. Same for
-  a file where `[provider]`, `[output]`, or `[inference]` holds something other than a table.
-- Merging keywords no longer writes a literal duplicate to `XMP-lr:WeightedFlatSubject`. A photo
-  carrying a weighted keyword that its `XMP-dc:Subject` list does not (the two are read from
-  different tags) got that keyword a second time when the model proposed it again.
-- A run that fails while starting up closes the `--cache-file` it had already opened, instead of
-  holding its SQLite handle until the process exits.
-- The telemetry hardware probes and the GUI's **Reveal in Finder** resolve their helper program on
-  `PATH` themselves and run the absolute path. Leaving the search to the OS means Windows looks in
-  the current working directory first, so a `nvidia-smi.exe` or `explorer.exe` sitting in a photo
-  folder could run in place of the real one. The GUI also falls back to opening the folder when the
-  file browser is missing or will not start, rather than crashing.
-- GUI: a generate run that dies while starting up (opening the result cache) no longer leaves the
-  window disabled with its photos stuck at "working..." for the rest of the session.
+- A tag that is present but empty no longer shadows the tag photo-tagger falls back to.
+- `photo-tagger vocabulary --report` quotes a keyword a spreadsheet would run as a formula, as
+  `--csv-file` always has.
+- GUI: saving settings into a config file with a syntax error reports the problem instead of
+  crashing the window.
+- Merging keywords no longer writes a duplicate to `XMP-lr:WeightedFlatSubject`.
+- A run that fails while starting up closes the `--cache-file` it had already opened.
+- The telemetry probes and the GUI's **Reveal in Finder** run their helper program by absolute path,
+  so Windows cannot pick one up from the photo folder instead.
+- GUI: a generate run that dies while starting up no longer leaves the window disabled.
 
 ## [0.8.0] - 2026-09-03
 
