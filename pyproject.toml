@@ -28,12 +28,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
-    "cyclopts>=4.25.2",
-    "filelock>=3.32.6",
-    "httpx2>=2.12.0",
+    "cyclopts>=4.25.3",
+    "filelock>=4.0.0",
+    "httpx2>=2.13.0",
     "loguru>=0.7.3",
     "pillow>=12.3.0",
-    "pydantic-ai>=2.42.0",
+    "pydantic-ai>=2.44.0",
     "pydantic>=2.13.5",
     "pyexiftool>=0.5.6",
     "rawpy>=0.27.1",
@@ -51,15 +51,15 @@ dev = [
     "babel>=2.18.0",
     "bandit>=1.9.4",
     "pycroscope>=0.5.0",
-    "ruff>=0.16.7",
+    "ruff>=0.16.8",
     "zizmor>=1.30.1",
-    "zuban>=0.9.3",
+    "zuban>=0.10.0",
 ]
 docs = [
-    "zensical>=0.0.60",
+    "zensical>=0.0.62",
 ]
 package = [
-    "pyinstaller>=6.22.2",
+    "pyinstaller>=6.22.3",
 ]
 test = [
     "inline-snapshot>=0.35.4",
@@ -88,9 +88,10 @@ photo-tagger-gui = "photo_tagger.gui:launch"
 
 [tool.uv]
 exclude-newer = "1 day"
+exclude-newer-package = { zuban = "4 hours" }
 
 [build-system]
-requires = ["uv_build>=0.12.13,<1.0.0"]
+requires = ["uv_build>=0.12.16,<1.0.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
