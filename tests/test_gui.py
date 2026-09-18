@@ -29,7 +29,7 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTreeWidgetItem
+from PySide6.QtWidgets import QApplication, QMenu, QTreeWidgetItem
 
 from photo_tagger import gui, telemetry
 from photo_tagger.errors import ProviderError
@@ -722,6 +722,118 @@ def test_select_menu_checks_and_unchecks_all(window: gui.MainWindow, tmp_path: P
 def test_set_all_checked_with_no_photos_nags(window: gui.MainWindow) -> None:
     """With nothing added, the bulk-select actions report it instead of rebuilding the tree."""
     window._set_all_checked(checked=False)  # noqa: SLF001
+    assert "Add photos" in window._status.text()  # noqa: SLF001
+
+
+def _select_submenu(window: gui.MainWindow, label: str) -> QMenu:
+    """Return the Select menu's submenu titled *label* (asserting it is there)."""
+    found = [
+        action.menu()
+        for action in window._select_menu.actions()  # noqa: SLF001
+        if action.menu() is not None and action.menu().title() == label
+    ]
+    assert found, f"no {label} submenu"
+    return found[0]
+
+
+def test_select_by_file_type_lists_what_is_in_the_list(
+    window: gui.MainWindow,
+    tmp_path: Path,
+) -> None:
+    """
+    Check Only > File Type > dng leaves exactly the RAW files checked.
+
+    The DNG+JPEG folder this exists for: the file-type entries are built when the menu opens, so
+    they name the types actually present, with a count each.
+    """
+    raw = _jpeg(tmp_path / "IMG_0001.dng")  # a real JPEG under a RAW name: only the suffix matters
+    photo = _jpeg(tmp_path / "IMG_0001.jpg")
+    window._extensions.setText("jpg,dng")  # noqa: SLF001
+    window._add_inputs([tmp_path])  # noqa: SLF001
+
+    types = _select_submenu(window, "Check Only").actions()[0].menu()
+    types.aboutToShow.emit()
+    labels = [action.text() for action in types.actions()]
+    assert labels == ["dng (1)", "jpg (1)"]
+    next(action for action in types.actions() if action.text() == "dng (1)").trigger()
+
+    assert window._items[str(raw)].selected is True  # noqa: SLF001
+    assert window._items[str(photo)].selected is False  # noqa: SLF001
+    assert _check_state(window, photo) == Qt.CheckState.Unchecked
+    assert "Changed 1 photo (dng)" in window._status.text()  # noqa: SLF001
+
+
+def test_select_by_status_reuses_the_grid_filters(window: gui.MainWindow, tmp_path: Path) -> None:
+    """Uncheck > Status > Failed clears the failures and leaves the rest of the batch checked."""
+    a = _jpeg(tmp_path / "a.jpg")
+    b = _jpeg(tmp_path / "b.jpg")
+    _add_dir(window, {"a": a, "b": b})
+    window._items[str(a)].status = gui.FAILED  # noqa: SLF001
+
+    status = _select_submenu(window, "Uncheck").actions()[1].menu()
+    next(action for action in status.actions() if action.text() == "Failed").trigger()
+
+    assert window._items[str(a)].selected is False  # noqa: SLF001
+    assert window._items[str(b)].selected is True  # noqa: SLF001
+    assert "Changed 1 photo (Failed)" in window._status.text()  # noqa: SLF001
+
+
+def test_select_by_name_pattern_asks_and_remembers_the_pattern(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typed pattern unchecks what it matches and comes back prefilled next time."""
+    edit = _jpeg(tmp_path / "sunset_edit.jpg")
+    keep = _jpeg(tmp_path / "sunset.jpg")
+    _add_dir(window, {"edit": edit, "keep": keep})
+    monkeypatch.setattr(gui.QInputDialog, "getText", lambda *_a, **_k: ("*_edit.jpg", True))
+
+    window._select_by_pattern(gui.SELECT_UNCHECK)  # noqa: SLF001
+
+    assert window._items[str(edit)].selected is False  # noqa: SLF001
+    assert window._items[str(keep)].selected is True  # noqa: SLF001
+    assert window._last_name_pattern == "*_edit.jpg"  # noqa: SLF001
+
+
+def test_select_by_name_pattern_that_matches_nothing_says_so(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A criterion nothing matched reads differently from one that changed nothing."""
+    _add_dir(window, {"a": _jpeg(tmp_path / "a.jpg")})
+    monkeypatch.setattr(gui.QInputDialog, "getText", lambda *_a, **_k: ("IMG", True))
+
+    window._select_by_pattern(gui.SELECT_CHECK)  # noqa: SLF001
+    assert "No photos match IMG." in window._status.text()  # noqa: SLF001
+
+    monkeypatch.setattr(gui.QInputDialog, "getText", lambda *_a, **_k: ("a.jpg", True))
+    window._select_by_pattern(gui.SELECT_CHECK)  # noqa: SLF001
+    assert "Nothing to change for a.jpg" in window._status.text()  # noqa: SLF001
+
+
+def test_select_by_pattern_cancelled_changes_nothing(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dismissing the dialog, or leaving it blank, leaves every checkbox alone."""
+    a = _jpeg(tmp_path / "a.jpg")
+    _add_dir(window, {"a": a})
+    for reply in (("a.jpg", False), ("   ", True)):
+        monkeypatch.setattr(gui.QInputDialog, "getText", lambda *_a, **_k: reply)  # noqa: B023
+        window._select_by_pattern(gui.SELECT_UNCHECK)  # noqa: SLF001
+        assert window._items[str(a)].selected is True  # noqa: SLF001
+
+
+def test_select_by_criteria_with_no_photos_nags(window: gui.MainWindow) -> None:
+    """Every criterion path reports an empty list rather than acting on nothing."""
+    types = _select_submenu(window, "Check").actions()[0].menu()
+    types.aboutToShow.emit()
+    assert [action.isEnabled() for action in types.actions()] == [False]
+
+    window._select_by_pattern(gui.SELECT_CHECK)  # noqa: SLF001
     assert "Add photos" in window._status.text()  # noqa: SLF001
 
 

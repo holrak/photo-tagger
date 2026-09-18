@@ -34,6 +34,9 @@ from photo_tagger.gui_state import (
     READY,
     REMOVED,
     SAVED,
+    SELECT_CHECK,
+    SELECT_ONLY,
+    SELECT_UNCHECK,
     SORT_NAME,
     SORT_STATUS,
     SORT_TAGGED,
@@ -51,9 +54,11 @@ from photo_tagger.gui_state import (
     PhotoItem,
     Proposal,
     SaveOptions,
+    SelectionChange,
     WatchSettings,
     anchored_scroll,
     apply_proposal,
+    apply_selection,
     apply_vocabulary,
     build_save_job,
     build_tree,
@@ -66,6 +71,7 @@ from photo_tagger.gui_state import (
     ensure_path_dirs,
     estimate_remaining,
     expand_inputs,
+    extension_counts,
     fields_written,
     file_dialog_name_filters,
     file_type_label,
@@ -86,6 +92,8 @@ from photo_tagger.gui_state import (
     load_vocabulary_file,
     location_crumb,
     login_shell_path,
+    matches_extension,
+    matches_name_pattern,
     merged_config_text,
     navigation_shortcuts,
     new_paths,
@@ -898,6 +906,97 @@ def test_deselect_paths_ignores_unknown_paths() -> None:
     items = {str(a): PhotoItem(path=a)}
     assert deselect_paths(items, [Path("/missing.jpg")]) == 0
     assert items[str(a)].selected is True
+
+
+def _mixed_folder() -> list[PhotoItem]:
+    """Build a folder's worth of photos: two DNG+JPEG pairs, everything checked."""
+    names = ("IMG_0001.dng", "IMG_0001.jpg", "IMG_0002.DNG", "sunset_edit.jpg")
+    return [PhotoItem(path=Path("/photos") / name) for name in names]
+
+
+def test_apply_selection_check_leaves_the_rest_alone() -> None:
+    """Checking a criterion touches only what it matched, and counts only real changes."""
+    items = _mixed_folder()
+    for item in items:
+        item.selected = False
+
+    result = apply_selection(items, lambda item: matches_extension(item, "dng"), SELECT_CHECK)
+
+    assert result == SelectionChange(matched=2, changed=2)
+    assert [item.selected for item in items] == [True, False, True, False]
+
+
+def test_apply_selection_uncheck_counts_only_what_moved() -> None:
+    """A photo already unchecked is matched but not counted: the tally is what changed."""
+    items = _mixed_folder()
+    items[0].selected = False  # already off
+
+    result = apply_selection(items, lambda item: matches_extension(item, "dng"), SELECT_UNCHECK)
+
+    assert result == SelectionChange(matched=2, changed=1)
+    assert [item.selected for item in items] == [False, True, False, True]
+
+
+def test_apply_selection_only_unchecks_everything_it_missed() -> None:
+    """Check Only is the "just these" move: the matches go on, every other photo goes off."""
+    items = _mixed_folder()
+    # Start on the opposite footing: the RAWs are checked and the JPEGs are not.
+    items[1].selected = False
+    items[3].selected = False
+
+    result = apply_selection(items, lambda item: matches_extension(item, "jpg"), SELECT_ONLY)
+
+    assert result == SelectionChange(matched=2, changed=4)
+    assert [item.selected for item in items] == [False, True, False, True]
+
+
+def test_apply_selection_reports_a_criterion_that_matched_nothing() -> None:
+    """Nothing matched and nothing changed are different answers the status line tells apart."""
+    items = _mixed_folder()
+
+    result = apply_selection(items, lambda item: matches_extension(item, "cr3"), SELECT_CHECK)
+
+    assert result == SelectionChange(matched=0, changed=0)
+    assert all(item.selected for item in items)
+
+
+def test_extension_counts_orders_by_count_then_name() -> None:
+    """The file-type menu lists the commonest type first, ties broken alphabetically."""
+    items = [*_mixed_folder(), PhotoItem(path=Path("/photos/no_extension"))]
+
+    assert extension_counts(items) == [("dng", 2), ("jpg", 2), ("", 1)]
+
+
+def test_matches_extension_ignores_case_and_a_leading_dot() -> None:
+    """A .DNG is a dng, and the caller may pass the extension either way."""
+    item = PhotoItem(path=Path("/photos/IMG_0002.DNG"))
+    assert matches_extension(item, "dng") is True
+    assert matches_extension(item, ".DNG") is True
+    assert matches_extension(item, "jpg") is False
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        # No wildcard reads as "contains", which is what a name box invites.
+        ("IMG", True),
+        ("img_00", True),
+        ("sunset", False),
+        # Anything with a wildcard is matched as the glob it looks like.
+        ("IMG_*.dng", True),
+        ("*.jpg", False),
+        ("IMG_000?.dng", True),
+        # A separator in the pattern matches the whole path, so it can name a folder.
+        ("/photos/*.dng", True),
+        ("/other/*.dng", False),
+        # An empty pattern matches nothing, rather than every photo in the list.
+        ("", False),
+    ],
+)
+def test_matches_name_pattern(pattern: str, *, expected: bool) -> None:
+    """Name patterns are case-insensitive, and plain text means "contains"."""
+    item = PhotoItem(path=Path("/photos/IMG_0001.dng"))
+    assert matches_name_pattern(item, pattern) is expected
 
 
 def test_paths_matching_fields_all_requires_every_field() -> None:

@@ -159,6 +159,9 @@ from photo_tagger.gui_state import (
     READY,
     REMOVED,
     SAVED,
+    SELECT_CHECK,
+    SELECT_ONLY,
+    SELECT_UNCHECK,
     SORT_NAME,
     SORT_STATUS,
     SORT_TAGGED,
@@ -174,9 +177,11 @@ from photo_tagger.gui_state import (
     Proposal,
     SaveJob,
     SaveOptions,
+    SelectionChange,
     WatchSettings,
     anchored_scroll,
     apply_proposal,
+    apply_selection,
     apply_vocabulary,
     build_save_job,
     build_tree,
@@ -187,6 +192,7 @@ from photo_tagger.gui_state import (
     deselect_paths,
     ensure_path_dirs,
     expand_inputs,
+    extension_counts,
     file_dialog_name_filters,
     file_type_label,
     filter_photos,
@@ -201,6 +207,8 @@ from photo_tagger.gui_state import (
     load_vocabulary_file,
     location_crumb,
     login_shell_path,
+    matches_extension,
+    matches_name_pattern,
     merged_config_text,
     navigation_shortcuts,
     new_paths,
@@ -208,6 +216,7 @@ from photo_tagger.gui_state import (
     paths_matching_fields,
     paths_under,
     photo_item_to_report_row,
+    photo_matches_filter,
     progress_timing_text,
     rank_vision_models,
     record_dropped_terms,
@@ -385,6 +394,37 @@ _TAGGED_PRESETS: tuple[tuple[str, frozenset[str], bool, str], ...] = (
         gettext_noop("a title and a description"),
     ),
     (gettext_noop("Has keywords"), frozenset({FIELD_KEYWORDS}), True, gettext_noop("keywords")),
+)
+
+# The Select menu's three bulk verbs, each offering the same criteria below. Each entry is
+# (verb, menu label, tooltip).
+_SELECT_VERBS: tuple[tuple[str, str, str], ...] = (
+    (
+        SELECT_CHECK,
+        gettext_noop("Check"),
+        gettext_noop("Check the matching photos, leaving every other photo as it is."),
+    ),
+    (
+        SELECT_UNCHECK,
+        gettext_noop("Uncheck"),
+        gettext_noop("Uncheck the matching photos, leaving every other photo as it is."),
+    ),
+    (
+        SELECT_ONLY,
+        gettext_noop("Check Only"),
+        gettext_noop("Check the matching photos and uncheck every other photo in the list."),
+    ),
+)
+
+# The lifecycle criteria a bulk verb can act on, reusing the folder grid's own filters so "saved"
+# and "generated" mean the same thing in both places. Each entry is (filter, menu label); the
+# label doubles as the phrase the status line reports back.
+_SELECT_STATUSES: tuple[tuple[str, str], ...] = (
+    (FILTER_PENDING, gettext_noop("Not generated")),
+    (FILTER_GENERATED, gettext_noop("Generated")),
+    (FILTER_SAVED, gettext_noop("Saved")),
+    (FILTER_FAILED, gettext_noop("Failed")),
+    (FILTER_UNTAGGED, gettext_noop("Untagged")),
 )
 
 # The Write To submenu, mirroring the CLI's --sidecar-mode. Each entry is (mode, menu label,
@@ -1626,6 +1666,8 @@ class MainWindow(QMainWindow):
         self._grid_sort = SORT_NAME
         self._grid_sort_desc = False
         self._grid_filter = FILTER_ALL
+        # The Select menu's last name pattern, so refining one is a small edit, not a retype.
+        self._last_name_pattern = ""
 
     # --- construction ----------------------------------------------------------------------
 
@@ -2214,9 +2256,14 @@ class MainWindow(QMainWindow):
     def _build_select_menu(self) -> QMenu:
         """Bulk check/uncheck actions, including the CLI's --skip-tagged/--skip-from mirrors."""
         menu = self._select_menu = QMenu(self)
+        menu.setToolTipsVisible(True)
         menu.addAction(_("Check All"), lambda: self._set_all_checked(checked=True))
         menu.addAction(_("Uncheck All"), lambda: self._set_all_checked(checked=False))
         menu.addAction(_("Invert Checked"), self._invert_checked)
+        menu.addSeparator()
+
+        for verb, label, hint in _SELECT_VERBS:
+            self._build_criteria_menu(menu.addMenu(_(label)), verb).setToolTip(tooltip(hint))
         menu.addSeparator()
 
         self._tagged_menu = menu.addMenu(_("Uncheck Already Tagged"))
@@ -2247,6 +2294,101 @@ class MainWindow(QMainWindow):
             ),
         )
         return menu
+
+    def _build_criteria_menu(self, menu: QMenu, verb: str) -> QMenu:
+        """Fill one verb's submenu with the criteria it can act on, and return the menu."""
+        menu.setToolTipsVisible(True)
+        types = menu.addMenu(_("File Type"))
+        types.setToolTip(tooltip("The file types actually in the list, with how many of each."))
+        # Filled when the menu opens: which types are in the list changes with every photo added.
+        types.aboutToShow.connect(lambda: self._fill_file_type_menu(types, verb))
+        status = menu.addMenu(_("Status"))
+        status.setToolTip(tooltip("Where each photo is in the generate-and-save cycle."))
+        for criterion, label in _SELECT_STATUSES:
+            status.addAction(
+                _(label),
+                lambda crit=criterion, text=label: self._select_matching(
+                    lambda item: photo_matches_filter(item, crit),
+                    verb=verb,
+                    phrase=_(text),
+                ),
+            )
+        pattern = menu.addAction(_("Name Pattern..."), lambda: self._select_by_pattern(verb))
+        pattern.setToolTip(
+            tooltip("Match filenames against text or a glob, e.g. IMG_ or *_edit.jpg."),
+        )
+        return menu
+
+    def _fill_file_type_menu(self, menu: QMenu, verb: str) -> None:
+        """Rebuild *menu* from the file types currently in the list, most common first."""
+        menu.clear()
+        counts = extension_counts(self._items.values())
+        if not counts:
+            menu.addAction(_("No photos in the list")).setEnabled(False)
+            return
+        for extension, count in counts:
+            label = extension or _("no extension")
+            menu.addAction(
+                f"{label} ({count})",
+                lambda ext=extension, name=label: self._select_matching(
+                    lambda item: matches_extension(item, ext),
+                    verb=verb,
+                    phrase=name,
+                ),
+            )
+
+    def _select_by_pattern(self, verb: str) -> None:
+        """Ask for a name pattern and apply *verb* to the photos it matches."""
+        if not self._items:
+            self._status.setText(_("Add photos before selecting."))
+            return
+        pattern, accepted = QInputDialog.getText(
+            self,
+            _("Name Pattern"),
+            _("Match filenames containing this text, or a glob such as *_edit.jpg:"),
+            text=self._last_name_pattern,
+        )
+        pattern = pattern.strip()
+        if not accepted or not pattern:
+            return
+        self._last_name_pattern = pattern
+        self._select_matching(
+            lambda item: matches_name_pattern(item, pattern),
+            verb=verb,
+            phrase=pattern,
+        )
+
+    def _select_matching(
+        self,
+        matches: Callable[[PhotoItem], bool],
+        *,
+        verb: str,
+        phrase: str,
+    ) -> None:
+        """Apply one bulk selection action and report what it did; *phrase* names the criterion."""
+        if not self._items:
+            self._status.setText(_("Add photos before selecting."))
+            return
+        result = apply_selection(self._items.values(), matches, verb)
+        if result.changed:
+            self._rebuild_tree()
+        self._update_status()
+        self._status.setText(self._selection_message(result, phrase))
+
+    def _selection_message(self, result: SelectionChange, phrase: str) -> str:
+        """Word the status line for a bulk selection: nothing matched, nothing moved, or a tally."""
+        if not result.matched:
+            return _("No photos match {phrase}.").format(phrase=phrase)
+        if not result.changed:
+            return _("Nothing to change for {phrase}; {selected} still checked.").format(
+                phrase=phrase,
+                selected=self._selected_count(),
+            )
+        return ngettext(
+            "Changed {n} photo ({phrase}); {selected} now checked.",
+            "Changed {n} photos ({phrase}); {selected} now checked.",
+            result.changed,
+        ).format(n=result.changed, phrase=phrase, selected=self._selected_count())
 
     def _set_all_checked(self, *, checked: bool) -> None:
         """Check or uncheck every photo at once."""

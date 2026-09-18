@@ -87,6 +87,18 @@ list by hand:
 
 - **Check All** / **Uncheck All** flip every checkbox at once; **Invert Checked** swaps checked and
     unchecked.
+- **Check**, **Uncheck**, and **Check Only** each open the same three criteria, so you can act on
+    part of a list without clicking through it. **Check Only** is the "just these" move: it checks
+    what matched and unchecks everything else.
+    - **File Type** lists the extensions actually in the list with a count each (`dng (120)`,
+        `jpg (120)`), built fresh every time the menu opens.
+    - **Status** works on where a photo is in the cycle: **Not generated**, **Generated**, **Saved**,
+        **Failed**, or **Untagged**. These are the same criteria as the thumbnail grid's filter, so
+        **Uncheck > Status > Saved** before a rerun means the same thing in both places.
+    - **Name Pattern...** asks for text to match against the filename. Plain text means "contains"
+        (`IMG` finds `IMG_0001.dng`), and anything with `*`, `?`, or `[` is treated as a glob
+        (`*_edit.jpg`). A pattern holding a `/` is matched against the whole path, so it can name a
+        subfolder. Matching ignores case, and the box remembers your last pattern.
 - **Uncheck Already Tagged** opens a menu of criteria for what counts as "already done", the GUI's
     field-aware [`--skip-tagged`](cli-reference.md). It reads the metadata in one pass (so a large
     folder pauses briefly) and unchecks the matching photos:

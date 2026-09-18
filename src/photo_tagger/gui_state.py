@@ -8,6 +8,7 @@ PySide6 extra. ``gui.py`` is then just the widget and event-loop shell that wire
 Qt.
 """
 
+import fnmatch
 import os
 import shutil
 import subprocess  # nosec B404 - only used to read the user's own login-shell PATH (see below)
@@ -472,6 +473,94 @@ def deselect_paths(items: dict[str, PhotoItem], paths: Iterable[Path]) -> int:
             item.selected = False
             changed += 1
     return changed
+
+
+# What a bulk selection action does to the photos it matched. SELECT_ONLY also unchecks everything
+# it did not match, which is the "show me just these" move the other two cannot express.
+SELECT_CHECK = "check"
+SELECT_UNCHECK = "uncheck"
+SELECT_ONLY = "only"
+
+
+@dataclass(frozen=True, slots=True)
+class SelectionChange:
+    """How many photos a bulk selection action matched, and how many checkboxes it moved."""
+
+    matched: int
+    changed: int
+
+
+def apply_selection(
+    items: Iterable[PhotoItem],
+    matches: Callable[[PhotoItem], bool],
+    verb: str,
+) -> SelectionChange:
+    """
+    Check or uncheck the photos *matches* picks out, and report what happened.
+
+    The two counts answer different questions the status bar needs to tell apart: nothing matched
+    (the criterion found no photos) reads differently from nothing changed (they were all already
+    checked). Photos the criterion missed are left alone, except under :data:`SELECT_ONLY`, which
+    unchecks them.
+    """
+    matched = 0
+    changed = 0
+    for item in items:
+        hit = matches(item)
+        matched += int(hit)
+        if hit:
+            wanted = verb != SELECT_UNCHECK
+        elif verb == SELECT_ONLY:
+            wanted = False
+        else:
+            continue
+        if item.selected != wanted:
+            item.selected = wanted
+            changed += 1
+    return SelectionChange(matched=matched, changed=changed)
+
+
+def _extension(path: Path) -> str:
+    """Return a path's extension, lowercased and without the dot ("" when it has none)."""
+    return path.suffix.lstrip(".").lower()
+
+
+def extension_counts(items: Iterable[PhotoItem]) -> list[tuple[str, int]]:
+    """
+    Tally the photos per file extension, the most common type first.
+
+    Feeds the Select menu's by-file-type entries, which is why the count rides along: a mixed
+    folder's menu reads "dng (120)" and "jpg (120)" rather than making the user guess.
+    """
+    counts: dict[str, int] = {}
+    for item in items:
+        extension = _extension(item.path)
+        counts[extension] = counts.get(extension, 0) + 1
+    return sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
+def matches_extension(item: PhotoItem, extension: str) -> bool:
+    """Whether *item* is of type *extension* (given without the dot, case-insensitive)."""
+    return _extension(item.path) == extension.lstrip(".").lower()
+
+
+# The characters that make a name pattern a glob rather than a plain piece of text.
+_GLOB_CHARS = "*?["
+
+
+def matches_name_pattern(item: PhotoItem, pattern: str) -> bool:
+    """
+    Whether *item*'s filename matches the glob *pattern*, ignoring case.
+
+    A pattern with no wildcard in it is read as "contains", so typing ``IMG`` finds ``IMG_0001.dng``
+    rather than nothing at all. One that holds a path separator is matched against the whole path
+    instead of the bare filename, so a pattern can name a subfolder.
+    """
+    if not pattern:
+        return False
+    text = str(item.path) if ("/" in pattern or "\\" in pattern) else item.path.name
+    glob = pattern if any(char in pattern for char in _GLOB_CHARS) else f"*{pattern}*"
+    return fnmatch.fnmatchcase(text.casefold(), glob.casefold())
 
 
 @dataclass(slots=True)
@@ -1183,7 +1272,7 @@ def file_type_label(path: Path) -> str:
     The sidecar check is a plain filesystem stat, so this is cheap enough to run for every file at
     add time (no exiftool involved).
     """
-    suffix = path.suffix.lstrip(".").lower()
+    suffix = _extension(path)
     return f"{suffix}+xmp" if path.with_suffix(".xmp").exists() else suffix
 
 
