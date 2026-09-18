@@ -62,6 +62,7 @@ from photo_tagger.gui_state import (
     apply_vocabulary,
     build_save_job,
     build_tree,
+    caption_source_note,
     chain_to_display,
     clamp_zoom,
     config_text_with_language,
@@ -88,6 +89,7 @@ from photo_tagger.gui_state import (
     journal_label,
     journal_time,
     keyword_diff,
+    keyword_lines,
     keywords_to_save,
     keywords_to_text,
     load_vocabulary_file,
@@ -98,6 +100,7 @@ from photo_tagger.gui_state import (
     merged_config_text,
     navigation_shortcuts,
     new_paths,
+    normalize_keyword_lines,
     parse_keyword_lines,
     paths_matching_fields,
     paths_under,
@@ -111,6 +114,7 @@ from photo_tagger.gui_state import (
     reveal_label,
     search_summary,
     sort_photos,
+    source_label,
     status_sort_rank,
     status_summary,
     step_zoom,
@@ -128,7 +132,14 @@ from photo_tagger.gui_state import (
     zoom_label,
 )
 from photo_tagger.i18n import activate
-from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE
+from photo_tagger.metadata import (
+    FIELD_DESCRIPTION,
+    FIELD_KEYWORDS,
+    FIELD_TITLE,
+    SOURCE_IMAGE,
+    SOURCE_SIDECAR,
+    CaptionValue,
+)
 from photo_tagger.models import KeywordSet
 from photo_tagger.pipeline import MAX_TRACKED_DROPPED_TERMS
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
@@ -546,6 +557,111 @@ def test_format_existing_keywords_keeps_only_deepest_chain() -> None:
         hierarchical=["Animal|Bird", "Animal|Bird|Duck"],
     )
     assert format_existing_keywords(kw) == "Duck<Bird<Animal"
+
+
+def test_caption_source_note_names_the_file_a_value_came_from() -> None:
+    """With one source there is nothing to compare, so the note is just where it was read."""
+    note = caption_source_note([CaptionValue("A caption.", SOURCE_SIDECAR)])
+    assert note == "from XMP sidecar"
+    assert caption_source_note([]) == ""
+
+
+def test_caption_source_note_names_the_value_a_sidecar_shadows() -> None:
+    """
+    A caption left inside the photo is named, not hidden.
+
+    photo-tagger writes the sidecar and reads it back first, so the camera's placeholder is still on
+    the photo and still what a plain `exiftool photo.dng` prints.
+    """
+    note = caption_source_note(
+        [
+            CaptionValue("A man and a woman sit on a beach.", SOURCE_SIDECAR),
+            CaptionValue("default", SOURCE_IMAGE),
+        ],
+    )
+    assert note.splitlines() == [
+        "from XMP sidecar",
+        'shadows "default" in the image file',
+    ]
+
+
+def test_caption_source_note_stays_quiet_when_both_files_agree() -> None:
+    """The same value in both files shadows nothing, so there is nothing to report."""
+    note = caption_source_note(
+        [CaptionValue("Same.", SOURCE_SIDECAR), CaptionValue("Same.", SOURCE_IMAGE)],
+    )
+    assert note == "from XMP sidecar"
+
+
+def test_source_label_passes_an_unknown_source_through() -> None:
+    """A source name with no label of its own is shown as it came, not dropped."""
+    assert source_label(SOURCE_IMAGE) == "image file"
+    assert source_label("something else") == "something else"
+
+
+def test_keyword_lines_sort_by_leaf() -> None:
+    """Both columns sort on the rendered line, which is leaf-first, so they can be compared."""
+    kw = KeywordSet(
+        subject=["Zebra", "Animal", "Bird", "Duck", "Apple"],
+        hierarchical=["Animal|Bird|Duck"],
+    )
+    assert keyword_lines(kw) == ["Apple", "Duck<Bird<Animal", "Zebra"]
+
+
+def test_normalize_keyword_lines_drops_leaves_a_chain_already_covers() -> None:
+    """
+    A model returns each leaf twice, bare and in its chain; the field shows it once.
+
+    The bare copies never changed what a save writes (merging expands every chain into its levels),
+    so they were noise in a column meant to be read against the one beside it.
+    """
+    raw = [
+        "Beach",
+        "Ocean",
+        "Sand",
+        "Sun Hat",
+        "Sun Hat<Headwear<Clothing",
+        "Beach<Sandy Area<Outdoor Area",
+        "Ocean<Water Body<Natural Feature",
+    ]
+    assert normalize_keyword_lines(raw) == [
+        "Beach<Sandy Area<Outdoor Area",
+        "Ocean<Water Body<Natural Feature",
+        "Sand",
+        "Sun Hat<Headwear<Clothing",
+    ]
+
+
+def test_normalize_keyword_lines_writes_what_the_raw_list_would_have() -> None:
+    """Normalizing is a display change only: the saved keyword set has to come out the same."""
+    raw = ["Beach", "Sand", "Beach<Sandy Area<Outdoor Area", "Man", "Man<Adult<People"]
+    before = keywords_to_save(KeywordSet(), raw, overwrite=True)
+    after = keywords_to_save(KeywordSet(), normalize_keyword_lines(raw), overwrite=True)
+    assert sorted(after.subject) == sorted(before.subject)
+    assert sorted(after.hierarchical) == sorted(before.hierarchical)
+
+
+def test_normalize_keyword_lines_keeps_the_vocabulary_spelling() -> None:
+    """The merge it runs through is the save's own, so a catalog's lower-case term is untouched."""
+    assert normalize_keyword_lines(["gegenlicht"], verbatim={"gegenlicht": "gegenlicht"}) == [
+        "gegenlicht",
+    ]
+
+
+def test_apply_proposal_normalizes_the_keywords_it_seeds() -> None:
+    """What the editable field shows after a generation is the set a save would write."""
+    item = PhotoItem(path=Path("/photos/a.jpg"))
+    proposal = Proposal(
+        path=item.path,
+        existing_title=None,
+        existing_description=None,
+        existing_keywords=KeywordSet(),
+        title="T",
+        description="D",
+        keywords=["Duck", "Bird", "Duck<Bird<Animal"],
+    )
+    apply_proposal(item, proposal)
+    assert item.keywords == ["Duck<Bird<Animal"]
 
 
 def test_hierarchy_preview_renders_a_guided_tree() -> None:

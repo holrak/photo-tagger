@@ -21,6 +21,10 @@ All notable changes to this project are documented here. The format is based on
 - GUI: the **Select** menu can check, uncheck, or check only the photos matching a file type,
   status, or name pattern.
 - GUI: clicking the preview opens the photo in a window that zooms up to 8:1 and pans.
+- GUI: both keyword columns now render and sort the same way, so they read line by line. Each
+  hierarchy shows once, as its deepest chain, instead of every leaf appearing twice.
+- GUI: each existing title and description says which file it came from, and names a value the
+  sidecar shadows (`shadows "default" in the image file`).
 
 ### Fixed
 

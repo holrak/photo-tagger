@@ -185,6 +185,7 @@ from photo_tagger.gui_state import (
     apply_vocabulary,
     build_save_job,
     build_tree,
+    caption_source_note,
     clamp_zoom,
     config_text_with_language,
     config_text_with_output_language,
@@ -204,6 +205,7 @@ from photo_tagger.gui_state import (
     hierarchy_preview,
     journal_label,
     keyword_diff,
+    keyword_lines,
     keywords_to_text,
     load_vocabulary_file,
     location_crumb,
@@ -225,6 +227,7 @@ from photo_tagger.gui_state import (
     reveal_label,
     search_summary,
     sort_photos,
+    source_label,
     status_sort_rank,
     status_summary,
     step_zoom,
@@ -250,9 +253,11 @@ from photo_tagger.metadata import (
     FIELD_TITLE,
     build_contextual_prompt,
     find_field_presence,
+    first_caption,
     managed_helper,
     prompt_with_hint,
     read_caption,
+    read_caption_values,
     read_image_context,
     read_metadata_sources,
     use_sidecar_for,
@@ -3069,6 +3074,10 @@ class MainWindow(QMainWindow):
         grid.addWidget(QLabel(_("Title")), 1, 0)
         grid.addWidget(self._existing_title, 1, 1)
         grid.addWidget(self._title, 1, 2)
+        # A row of its own under the field, not a layout nested in its cell: nesting makes the grid
+        # size the row by the box's sizeHint instead of its minimum, which stretches the row.
+        self._title_source = self._source_note()
+        grid.addWidget(self._title_source, 2, 1)
 
         top = Qt.AlignmentFlag.AlignTop
         self._existing_description = _readonly_box(44)
@@ -3078,9 +3087,11 @@ class MainWindow(QMainWindow):
         # reserving a fixed block of the pane (textChanged also fires on programmatic fills).
         self._description.textChanged.connect(lambda: _fit_text_height(self._description))
         _fit_text_height(self._description)
-        grid.addWidget(QLabel(_("Description")), 2, 0, top)
-        grid.addWidget(self._existing_description, 2, 1)
-        grid.addWidget(self._description, 2, 2)
+        grid.addWidget(QLabel(_("Description")), 3, 0, top)
+        grid.addWidget(self._existing_description, 3, 1)
+        grid.addWidget(self._description, 3, 2)
+        self._description_source = self._source_note()
+        grid.addWidget(self._description_source, 4, 1)
 
         self._existing_keywords = _readonly_box(150)
         self._keywords = QPlainTextEdit()
@@ -3093,10 +3104,23 @@ class MainWindow(QMainWindow):
             ),
         )
         self._keywords.textChanged.connect(self._refresh_derived)
-        grid.addWidget(QLabel(_("Keywords")), 3, 0, top)
-        grid.addWidget(self._existing_keywords, 3, 1)
-        grid.addWidget(self._keywords, 3, 2)
+        grid.addWidget(QLabel(_("Keywords")), 5, 0, top)
+        grid.addWidget(self._existing_keywords, 5, 1)
+        grid.addWidget(self._keywords, 5, 2)
         return grid
+
+    def _source_note(self) -> QLabel:
+        """Build the dimmed line under an Existing field that says where its value came from."""
+        label = QLabel("")
+        label.setObjectName("hint")
+        label.setWordWrap(True)
+        label.setToolTip(
+            tooltip(
+                "Which file this value came from. A sidecar wins, so a value left in the photo is "
+                "named rather than hidden: only a save to the photo itself replaces it.",
+            ),
+        )
+        return label
 
     def _build_details_section(self) -> QVBoxLayout:
         """Collapsible keyword-change details: the diff and the resulting hierarchy paths."""
@@ -4098,13 +4122,14 @@ class MainWindow(QMainWindow):
             self._render_preview(item)
         finally:
             QApplication.restoreOverrideCursor()
-        sources = ", ".join(item.existing_sources)
+        sources = ", ".join(source_label(source) for source in item.existing_sources)
         self._existing_source.setText(
             _("(from {sources})").format(sources=sources) if sources else _("(no metadata found)"),
         )
         self._existing_title.setText(item.existing_title or _(_NONE))
         self._existing_description.setPlainText(item.existing_description or _(_NONE))
         _fit_text_height(self._existing_description)
+        self._fill_source_notes(item)
         existing_kw = format_existing_keywords(item.existing_keywords)
         self._existing_keywords.setPlainText(existing_kw or _(_NONE))
         self._title.setText(item.title)
@@ -4114,6 +4139,18 @@ class MainWindow(QMainWindow):
         self._show_detail(enabled=True)
         self._update_error_banner(item)
         self._refresh_derived()
+
+    def _fill_source_notes(self, item: PhotoItem) -> None:
+        """Say under each Existing caption where it was read from, and what it shadows."""
+        for field_name, label in (
+            (FIELD_TITLE, self._title_source),
+            (FIELD_DESCRIPTION, self._description_source),
+        ):
+            note = caption_source_note(item.existing_caption_sources.get(field_name, []))
+            label.setText(note)
+            # A field no file carries has nothing to say, and an empty label would still take a
+            # line of the pane.
+            label.setVisible(bool(note))
 
     def _update_error_banner(self, item: PhotoItem) -> None:
         """Show the failure reason for a failed photo; hide the banner otherwise."""
@@ -4131,18 +4168,22 @@ class MainWindow(QMainWindow):
     def _ensure_loaded(self, item: PhotoItem) -> None:
         if item.loaded:
             return
-        title, description = read_caption(item.path)
+        # Every caption value, not just the winning one: the pane names what a sidecar shadows.
+        found = read_caption_values(item.path)
         context = read_image_context(item.path)
+        item.existing_caption_sources = found
+        title = first_caption(found[FIELD_TITLE])
+        description = first_caption(found[FIELD_DESCRIPTION])
         item.existing_title = title
         item.existing_description = description
         item.existing_keywords = context.existing_keywords
         item.loaded = True
         if not item.has_proposal:
-            # Seed the editable copy from the existing values so a file can be edited
-            # and saved even without generating a proposal first.
+            # Seed the editable copy from the existing values so a file can be edited and saved
+            # without generating first. Same rendering as the Existing column, so the two match.
             item.title = title or ""
             item.description = description or ""
-            item.keywords = list(context.existing_keywords.subject)
+            item.keywords = keyword_lines(context.existing_keywords)
 
     def _ensure_sources(self, item: PhotoItem) -> None:
         if item.sources_read:
@@ -4592,7 +4633,9 @@ class MainWindow(QMainWindow):
         item = self._items.get(str(proposal.path))
         if item is None:
             return
-        apply_proposal(item, proposal)
+        # Normalizing the proposal runs the save's own merge, which must not re-capitalize a
+        # catalog's terms, so the vocabulary spellings ride along.
+        apply_proposal(item, proposal, verbatim=self._verbatim_spellings())
         self._vocabulary_mapped += proposal.vocabulary_mapped
         record_dropped_terms(self._vocabulary_dropped, proposal.vocabulary_dropped)
         self._session_tagged.add(str(item.path))

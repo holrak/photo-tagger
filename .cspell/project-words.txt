@@ -69,6 +69,7 @@ getpid
 getpixel
 gpgconf
 headerless
+Headwear
 headlessly
 hostnames
 httpx

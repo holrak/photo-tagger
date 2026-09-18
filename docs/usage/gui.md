@@ -221,10 +221,15 @@ Click a photo to open it on the right. The detail pane is **side-by-side** for e
     toggles between them, drag the photo to pan it, and **Full screen** (`F`) fills the display.
     `Esc` closes the viewer,
 - **Existing** vs **New** Title, Description, and Keywords lined up row by row, with the New side
-    editable and seeded from the proposal. The Existing header notes where that metadata was read
-    from (the image file, an XMP sidecar, or both). The description boxes grow with their content
-    instead of reserving space, and existing keyword hierarchies display in the same `<` notation
-    you type,
+    editable and seeded from the proposal. Both keyword columns are rendered and sorted the same
+    way, so they read line by line: each hierarchy appears once as its deepest chain, in the same
+    `<` notation you type, without a second bare copy of a keyword the chain already covers. The
+    description boxes grow with their content instead of reserving space,
+- a line under each **Existing** Title and Description naming the file it came from. A sidecar wins
+    over the photo, so when the photo holds a different value that line says so:
+    `shadows "default" in the image file`, some cameras writing exactly that into every photo. That
+    value is what a plain `exiftool photo.dng` prints, and only a save to the photo itself (**Write
+    To > The Photo Itself**) replaces it,
 - a collapsible **Keyword changes** section. Its header always summarizes what a save would do
     (`+3 / -1`, or `no change`); expand it for the colored diff (green added, red struck-through
     removed, grey unchanged) and the resulting keyword **tree**, drawn with `tree`-style branch

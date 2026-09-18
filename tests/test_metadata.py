@@ -27,6 +27,7 @@ from photo_tagger.metadata import (
     managed_helper,
     prompt_with_hint,
     read_caption,
+    read_caption_values,
     read_capture_times,
     read_image_context,
     read_keyword_sets,
@@ -1014,6 +1015,58 @@ def test_read_caption_prefers_the_sidecar_over_the_image(tmp_path: Path) -> None
     assert description == "A real caption."
     # The sidecar has no title, so the image's is still what the photo carries.
     assert title == "Camera Title"
+
+
+def test_read_caption_values_reports_what_the_sidecar_shadows(tmp_path: Path) -> None:
+    """Both files' captions come back, the one photo-tagger uses first."""
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("x")
+    helper = _fake_helper(
+        [
+            {"SourceFile": str(img), "XMP:Description": "default"},
+            {"SourceFile": str(sidecar), "XMP:Description": "A real caption."},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img), str(sidecar)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        found = read_caption_values(img)
+
+    assert [(v.value, v.source) for v in found[FIELD_DESCRIPTION]] == [
+        ("A real caption.", SOURCE_SIDECAR),
+        ("default", SOURCE_IMAGE),
+    ]
+    assert found[FIELD_TITLE] == []
+
+
+def test_read_caption_values_heads_the_list_with_the_winning_tag(tmp_path: Path) -> None:
+    """
+    Which file answers is decided per tag, so the breakdown has to agree with read_caption.
+
+    A photo's XMP-dc:Title outranks a sidecar carrying only IPTC:ObjectName, and listing the files
+    sidecar-first without that rule would report the loser as the value in use.
+    """
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("x")
+    helper = _fake_helper(
+        [
+            {"SourceFile": str(img), "XMP:Title": "Preferred Title"},
+            {"SourceFile": str(sidecar), "IPTC:ObjectName": "Fallback Title"},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img), str(sidecar)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        found = read_caption_values(img)
+
+    assert [v.value for v in found[FIELD_TITLE]] == ["Preferred Title", "Fallback Title"]
+    assert found[FIELD_TITLE][0].source == SOURCE_IMAGE
 
 
 def test_read_image_context_reads_the_existing_caption(tmp_path: Path) -> None:

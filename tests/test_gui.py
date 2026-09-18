@@ -45,7 +45,15 @@ from photo_tagger.gui_state import (
     SaveJob,
     WatchSettings,
 )
-from photo_tagger.metadata import FIELD_DESCRIPTION, FIELD_KEYWORDS, FIELD_TITLE, ImageContext
+from photo_tagger.metadata import (
+    FIELD_DESCRIPTION,
+    FIELD_KEYWORDS,
+    FIELD_TITLE,
+    SOURCE_IMAGE,
+    SOURCE_SIDECAR,
+    CaptionValue,
+    ImageContext,
+)
 from photo_tagger.models import InferenceResult, KeywordSet
 from photo_tagger.providers import PROVIDER_LABELS, PROVIDER_NAMES
 from photo_tagger.undo import list_journals, read_journal
@@ -90,9 +98,24 @@ def _jpeg(path: Path) -> Path:
     return path
 
 
-def _stub_reads(monkeypatch: pytest.MonkeyPatch, *, keywords: list[str]) -> None:
-    """Patch the exiftool-backed reads so tests need no exiftool binary."""
+def _stub_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    keywords: list[str],
+    captions: dict[str, list[CaptionValue]] | None = None,
+) -> None:
+    """
+    Patch the exiftool-backed reads so tests need no exiftool binary.
+
+    *captions* overrides the per-field breakdown the detail pane reads, for a test that cares which
+    file a value came from or what it shadows; by default both fields come from the sidecar alone.
+    """
     monkeypatch.setattr(gui, "read_caption", lambda _p: ("Old Title", "Old caption."))
+    found = captions or {
+        FIELD_TITLE: [CaptionValue("Old Title", SOURCE_SIDECAR)],
+        FIELD_DESCRIPTION: [CaptionValue("Old caption.", SOURCE_SIDECAR)],
+    }
+    monkeypatch.setattr(gui, "read_caption_values", lambda _p: found)
     monkeypatch.setattr(
         gui,
         "read_image_context",
@@ -1230,6 +1253,125 @@ def test_save_keeps_a_caption_whose_overwrite_entry_is_off(
     assert captured["description"] is None  # the photo keeps "Old caption."
     assert captured["title"] == "Old Title"  # its own entry is still checked
     assert sorted(captured["keywords"].subject) == ["Beach", "Eagle"]  # type: ignore[attr-defined]
+
+
+def test_detail_pane_names_the_caption_a_sidecar_shadows(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The camera's placeholder is named under the field instead of vanishing behind the sidecar."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(
+        monkeypatch,
+        keywords=[],
+        captions={
+            FIELD_TITLE: [CaptionValue("A Title", SOURCE_SIDECAR)],
+            FIELD_DESCRIPTION: [
+                CaptionValue("A real caption.", SOURCE_SIDECAR),
+                CaptionValue("default", SOURCE_IMAGE),
+            ],
+        },
+    )
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    assert window._existing_description.toPlainText() == "A real caption."  # noqa: SLF001
+    note = window._description_source.text()  # noqa: SLF001
+    assert 'shadows "default" in the image file' in note
+    assert not window._description_source.isHidden()  # noqa: SLF001
+    # The title has one source, so its note says where it came from and nothing more.
+    assert window._title_source.text() == "from XMP sidecar"  # noqa: SLF001
+
+
+def test_detail_columns_line_up_row_by_row(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Each row's Existing and New widget share a top edge, which is the point of the two columns.
+
+    The source notes broke this once by being nested in their field's grid cell: the grid then sized
+    the row by the read-only box's sizeHint rather than its minimum, stretching the Description row
+    and leaving the New box floating in the middle of it.
+    """
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(
+        monkeypatch,
+        keywords=["Beach"],
+        captions={
+            FIELD_TITLE: [CaptionValue("A Title", SOURCE_SIDECAR)],
+            FIELD_DESCRIPTION: [
+                CaptionValue("A real caption.", SOURCE_SIDECAR),
+                CaptionValue("default", SOURCE_IMAGE),
+            ],
+        },
+    )
+    _add_dir(window, {"a": img})
+    window.resize(1200, 900)
+    window.show()
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+    QApplication.processEvents()
+
+    rows = (
+        (window._existing_title, window._title),  # noqa: SLF001
+        (window._existing_description, window._description),  # noqa: SLF001
+        (window._existing_keywords, window._keywords),  # noqa: SLF001
+    )
+    assert [existing.y() for existing, _new in rows] == [new.y() for _existing, new in rows]
+
+
+def test_detail_pane_hides_the_source_note_for_a_field_no_file_carries(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty note would still cost a line of the pane, so it is hidden instead."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(
+        monkeypatch,
+        keywords=[],
+        captions={FIELD_TITLE: [], FIELD_DESCRIPTION: []},
+    )
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    # isHidden, not isVisible: nothing is visible in a window the test never shows, but only an
+    # explicit hide sets isHidden.
+    assert window._title_source.isHidden()  # noqa: SLF001
+    assert window._description_source.isHidden()  # noqa: SLF001
+
+
+def test_opening_a_photo_seeds_the_new_column_like_the_existing_one(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A photo opened without generating starts with its own keywords, chains and all."""
+    img = _jpeg(tmp_path / "a.jpg")
+    monkeypatch.setattr(gui, "read_caption", lambda _p: (None, None))
+    monkeypatch.setattr(
+        gui,
+        "read_caption_values",
+        lambda _p: {FIELD_TITLE: [], FIELD_DESCRIPTION: []},
+    )
+    monkeypatch.setattr(
+        gui,
+        "read_image_context",
+        lambda _p, **_kwargs: ImageContext(
+            existing_keywords=KeywordSet(
+                subject=["Animal", "Bird", "Duck", "Sky"],
+                hierarchical=["Animal|Bird|Duck"],
+            ),
+        ),
+    )
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+
+    # Both columns render the same way, so they can be read line by line.
+    assert window._keywords.toPlainText() == window._existing_keywords.toPlainText()  # noqa: SLF001
+    assert window._keywords.toPlainText() == "Duck<Bird<Animal\nSky"  # noqa: SLF001
 
 
 def test_selecting_shows_metadata_source(

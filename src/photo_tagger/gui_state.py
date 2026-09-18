@@ -33,6 +33,9 @@ from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
     FIELD_KEYWORDS,
     FIELD_TITLE,
+    SOURCE_IMAGE,
+    SOURCE_SIDECAR,
+    CaptionValue,
     select_camera_fields,
     select_location,
 )
@@ -172,6 +175,9 @@ class PhotoItem:
     existing_description: str | None = None
     existing_keywords: KeywordSet = field(default_factory=KeywordSet)
     existing_sources: list[str] = field(default_factory=list)
+    # Every title and description found, per field, the one in use first. What it adds over the two
+    # fields above is the value a sidecar shadows, which the detail pane names rather than hide.
+    existing_caption_sources: dict[str, list[CaptionValue]] = field(default_factory=dict)
     sources_read: bool = False
     has_proposal: bool = False
     from_cache: bool = False
@@ -398,15 +404,26 @@ def build_save_job(item: PhotoItem, options: SaveOptions) -> SaveJob:
     )
 
 
-def apply_proposal(item: PhotoItem, proposal: Proposal) -> None:
-    """Fill *item*'s existing metadata and seed its editable copy from *proposal*."""
+def apply_proposal(
+    item: PhotoItem,
+    proposal: Proposal,
+    *,
+    verbatim: Mapping[str, str] | None = None,
+) -> None:
+    """
+    Fill *item*'s existing metadata and seed its editable copy from *proposal*.
+
+    The keywords are normalized on the way in (see :func:`normalize_keyword_lines`), so the field
+    shows the set a save would write rather than the model's two raw lists. *verbatim* is the
+    vocabulary's own spelling of each term, which that merge must not touch.
+    """
     item.existing_title = proposal.existing_title
     item.existing_description = proposal.existing_description
     item.existing_keywords = proposal.existing_keywords
     item.loaded = True
     item.title = proposal.title
     item.description = proposal.description
-    item.keywords = list(proposal.keywords)
+    item.keywords = normalize_keyword_lines(list(proposal.keywords), verbatim=verbatim)
     item.camera_info = proposal.camera_info
     item.location_tags = proposal.location_tags
     item.gps_position = proposal.gps_position
@@ -418,6 +435,42 @@ def apply_proposal(item: PhotoItem, proposal: Proposal) -> None:
     item.from_cache = proposal.from_cache
     item.status = READY
     item.error = ""
+
+
+# metadata.py keeps the sources as stable identifiers; only the window turns them into words.
+_SOURCE_LABELS = {
+    SOURCE_IMAGE: gettext_noop("image file"),
+    SOURCE_SIDECAR: gettext_noop("XMP sidecar"),
+}
+
+
+def source_label(source: str) -> str:
+    """Translate one metadata source name, leaving an unknown one as it came."""
+    return _(_SOURCE_LABELS.get(source, source))
+
+
+def caption_source_note(values: list[CaptionValue]) -> str:
+    """
+    Describe where one existing title or description came from, and what it shadows.
+
+    The dimmed line under the field: which file the shown value came from, plus a line for any
+    other file holding a different value. That second case is the point: a caption inside the photo
+    is still there and still what ``exiftool photo.dng`` prints, but the sidecar wins on read, so it
+    was invisible. Empty for a field no file carries.
+    """
+    if not values:
+        return ""
+    shown, *rest = values
+    lines = [_("from {source}").format(source=source_label(shown.source))]
+    lines += [
+        _('shadows "{value}" in the {source}').format(
+            value=other.value,
+            source=source_label(other.source),
+        )
+        for other in rest
+        if other.value != shown.value
+    ]
+    return "\n".join(lines)
 
 
 def photo_item_to_report_row(
@@ -824,13 +877,16 @@ def chain_to_display(path: str) -> str:
     return "<".join(reversed(path.split("|")))
 
 
-def format_existing_keywords(keywords: KeywordSet) -> str:
+def keyword_lines(keywords: KeywordSet) -> list[str]:
     """
-    Render existing keywords one per line, in the same ``<`` notation as the editable field.
+    Render a keyword set as the shortest list of lines that reproduces it, sorted.
 
     Each hierarchy shows once, as its deepest chain (``Duck<Bird<Animal``); the intermediate flat
     copies Lightroom also stores (Animal, Bird) are folded into it. Flat keywords that belong to no
-    hierarchy follow. This mirrors what a user would type to reproduce the same metadata.
+    hierarchy join them. This mirrors what a user would type to reproduce the same metadata.
+
+    Sorting is what lets the Existing and New columns be read side by side: a keyword lands on the
+    same line in both. The '<' notation is leaf-first, so sorting the rendered line sorts by leaf.
     """
     chains = [entry for entry in keywords.hierarchical if "|" in entry]
     deepest = [
@@ -841,7 +897,28 @@ def format_existing_keywords(keywords: KeywordSet) -> str:
     covered = {segment.casefold() for entry in chains for segment in entry.split("|")}
     lines = [chain_to_display(entry) for entry in deepest]
     lines += [kw for kw in keywords.subject if kw.casefold() not in covered]
-    return "\n".join(lines)
+    return sorted(lines, key=str.casefold)
+
+
+def format_existing_keywords(keywords: KeywordSet) -> str:
+    """Render existing keywords one per line, in the same ``<`` notation as the editable field."""
+    return "\n".join(keyword_lines(keywords))
+
+
+def normalize_keyword_lines(
+    keywords: list[str],
+    *,
+    verbatim: Mapping[str, str] | None = None,
+) -> list[str]:
+    """
+    Fold an edited keyword list into the shortest list that writes the same metadata, sorted.
+
+    A model returns its flat keywords and its hierarchies as two lists, so every leaf reached the
+    field twice (``Beach`` and ``Beach<Sandy Area<Outdoor Area``). Merging expands every chain into
+    its levels, so the bare copies were noise. Run through the save's own merge, so the field shows
+    what the file would get. Applied when a proposal arrives, never while the user types.
+    """
+    return keyword_lines(merge_keywords(KeywordSet(), keywords, verbatim=verbatim))
 
 
 def _walk_tree(node: _Tree, prefix: str, lines: list[str]) -> None:

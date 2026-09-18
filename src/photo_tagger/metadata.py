@@ -447,6 +447,73 @@ def _first_tag_value(blocks: list[dict[str, Any]], tags: tuple[str, ...]) -> str
     return None
 
 
+# Human-readable labels for where existing metadata lives.
+SOURCE_IMAGE = "image file"
+SOURCE_SIDECAR = "XMP sidecar"
+
+
+@dataclass(slots=True, frozen=True)
+class CaptionValue:
+    """One title or description found on a photo, and which file it came from."""
+
+    value: str
+    # SOURCE_IMAGE or SOURCE_SIDECAR.
+    source: str
+
+
+def read_caption_values(
+    image_path: Path,
+    *,
+    et: ExifToolHelper | None = None,
+) -> dict[str, list[CaptionValue]]:
+    """
+    Read every title and description on a photo, the one photo-tagger uses first.
+
+    Keyed by :data:`FIELD_TITLE` and :data:`FIELD_DESCRIPTION`, each holding one entry per file that
+    carries the field, the one in use first. :func:`read_caption` is the "just the values" view.
+
+    The GUI needs the rest of the list to show that the photo itself still holds a caption the
+    sidecar shadows: the value every XMP-aware tool ignores but ``exiftool photo.dng`` prints.
+    """
+    fields: dict[str, list[CaptionValue]] = {FIELD_TITLE: [], FIELD_DESCRIPTION: []}
+    targets = metadata_targets(image_path)
+    if not targets:
+        return fields
+
+    try:
+        with managed_helper(et) as helper:
+            blocks = helper.get_tags(files=targets, tags=[*_TITLE_TAGS, *_DESCRIPTION_TAGS])
+    except _EXIFTOOL_ERRORS as e:
+        logger.exception("failed_to_read_caption", error=str(e))
+        return fields
+
+    ordered = _sidecar_first(blocks)
+    for field_name, tags in ((FIELD_TITLE, _TITLE_TAGS), (FIELD_DESCRIPTION, _DESCRIPTION_TAGS)):
+        # One block is one file, so what is left inside it is the tag priority.
+        per_file = [
+            CaptionValue(
+                value=value,
+                source=SOURCE_SIDECAR if _is_sidecar_block(block) else SOURCE_IMAGE,
+            )
+            for block in ordered
+            if (value := _first_tag_value([block], tags)) is not None
+        ]
+        fields[field_name] = _winner_first(per_file, _first_tag_value(ordered, tags))
+    return fields
+
+
+def _winner_first(values: list[CaptionValue], winner: str | None) -> list[CaptionValue]:
+    """
+    Put the value :func:`_first_tag_value` picked at the head of the per-file list.
+
+    Which file answers is decided per tag, not per file: a photo's XMP-dc:Title outranks a sidecar
+    carrying only IPTC:ObjectName, and ordering by file alone would invert that.
+    """
+    if winner is None:
+        return values
+    return sorted(values, key=lambda entry: entry.value != winner)
+
+
 def read_caption(
     image_path: Path,
     *,
@@ -457,26 +524,16 @@ def read_caption(
 
     Returns ``(title, description)``, each ``None`` when absent. Title prefers XMP-dc:Title and
     falls back to IPTC:ObjectName; description prefers XMP-dc:Description and falls back to
-    EXIF:ImageDescription. The GUI uses this to show a user what is already on a photo before it
-    writes new metadata.
+    EXIF:ImageDescription, and a sidecar's answer wins over the image's. The GUI uses this to show a
+    user what is already on a photo before it writes new metadata.
     """
-    targets = metadata_targets(image_path)
-    if not targets:
-        return (None, None)
-
-    try:
-        with managed_helper(et) as helper:
-            blocks = helper.get_tags(files=targets, tags=[*_TITLE_TAGS, *_DESCRIPTION_TAGS])
-    except _EXIFTOOL_ERRORS as e:
-        logger.exception("failed_to_read_caption", error=str(e))
-        return (None, None)
-
-    return (_first_tag_value(blocks, _TITLE_TAGS), _first_tag_value(blocks, _DESCRIPTION_TAGS))
+    found = read_caption_values(image_path, et=et)
+    return (first_caption(found[FIELD_TITLE]), first_caption(found[FIELD_DESCRIPTION]))
 
 
-# Human-readable labels for where existing metadata lives.
-SOURCE_IMAGE = "image file"
-SOURCE_SIDECAR = "XMP sidecar"
+def first_caption(values: list[CaptionValue]) -> str | None:
+    """Return the value in use for a caption field, or None when no file carries it."""
+    return values[0].value if values else None
 
 
 def read_metadata_sources(
