@@ -22,8 +22,8 @@ location, GPS, and camera EXIF keeps the per-photo IPC cost to one round trip. I
 @dataclass(slots=True, frozen=True)
 class ImageContext:
     existing_keywords: KeywordSet  # typed subject / hierarchical / weighted views
-    existing_title: str | None  # the title already on the photo
-    existing_description: str | None  # the description already on the photo
+    existing_title: str | None  # what --preserve-title would keep
+    existing_description: str | None  # what --preserve-description would keep
     location_tags: dict[str, str]  # city/country from XMP-photoshop and IPTC
     gps_position: str | None  # Composite:GPSPosition, if present
     camera_info: dict[str, str]  # EXIF Model, LensModel, DateTimeOriginal
@@ -93,6 +93,13 @@ Two flag pairs control the merge:
     replaces them instead.
 - `--max-keywords N` caps how many AI-generated keywords are kept per photo before merging. The
     default keeps all of them.
+
+The title and the description hold a single value each, so they have no merge step: their pairs
+(`--preserve-title` / `--overwrite-title` and `--preserve-description` / `--overwrite-description`)
+only decide whether the generated text replaces what the photo carries, and each field answers for
+itself. Replacing is the default, so a camera-written placeholder (some fill `ImageDescription` with
+one on every photo) does not outlive the first run. Preserving writes the generated text only where
+the field is empty, which is how a hand-written caption survives a re-run.
 
 !!! example
 

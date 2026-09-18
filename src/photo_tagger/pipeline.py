@@ -123,6 +123,10 @@ class ProcessingOptions:
     """Bundle of per-photo settings that the CLI hands to the pipeline."""
 
     preserve_existing_kw: bool = True
+    # Keywords merge, so preserving them is the default. A title and a description hold one value
+    # each, so preserving one drops the generated text; replacing stays the default there.
+    preserve_existing_title: bool = False
+    preserve_existing_description: bool = False
     write_description: bool = True
     write_title: bool = True
     write_keywords: bool = True
@@ -267,7 +271,8 @@ class _PendingWrite:
     One analyzed photo waiting for its session to finish before it is written.
 
     Holds everything the write still needs: the keywords (which harmonization may rewrite), the two
-    text fields, the existing keywords to merge into, and the scratch pad the deferred
+    text fields, what the photo already carries in all three (to merge keywords into, and to decide
+    whether a preserved title or description is written at all), and the scratch pad the deferred
     :class:`ImageOutcome` is built from.
     """
 
@@ -276,6 +281,8 @@ class _PendingWrite:
     description: str
     existing: KeywordSet
     scratch: _InferenceScratch
+    existing_title: str | None = None
+    existing_description: str | None = None
 
 
 @dataclass(slots=True)
@@ -574,6 +581,8 @@ def process_photo(
             description=description,
             existing=existing_keywords_full if options.preserve_existing_kw else KeywordSet(),
             scratch=outcome_sink if outcome_sink is not None else {},
+            existing_title=context.existing_title,
+            existing_description=context.existing_description,
         )
         if ctx.pending is not None:
             # Session mode: hold the analysis until the whole shoot has one shared vocabulary.
@@ -582,6 +591,25 @@ def process_photo(
             return True
 
         return _write_pending(image_path, pending, ctx, et=helper)
+
+
+def _caption_to_write(
+    generated: str,
+    existing: str | None,
+    *,
+    write: bool,
+    preserve: bool,
+) -> str | None:
+    """
+    Decide what a title or a description field puts on the file, None meaning "leave it alone".
+
+    One place, so the dry-run preview and the real write cannot disagree.
+    """
+    if not write:
+        return None
+    if preserve and existing:
+        return None
+    return generated
 
 
 def _write_pending(
@@ -609,13 +637,25 @@ def _write_pending(
         else KeywordSet()
     )
     _record_scratch(pending.scratch, merged_keywords=merged_keywords)
+    title = _caption_to_write(
+        pending.title,
+        pending.existing_title,
+        write=options.write_title,
+        preserve=options.preserve_existing_title,
+    )
+    description = _caption_to_write(
+        pending.description,
+        pending.existing_description,
+        write=options.write_description,
+        preserve=options.preserve_existing_description,
+    )
 
     if options.dry_run:
         logger.info(
             "dry_run_preview",
             file=image_path.name,
-            title=pending.title if options.write_title else None,
-            description=pending.description if options.write_description else None,
+            title=title,
+            description=description,
             subject_keywords=merged_keywords.subject,
             hierarchical_keywords=merged_keywords.hierarchical,
         )
@@ -629,8 +669,8 @@ def _write_pending(
     written = write_metadata(
         image_path,
         merged_keywords,
-        description=pending.description if options.write_description else None,
-        title=pending.title if options.write_title else None,
+        description=description,
+        title=title,
         backup=options.backup_xmp,
         use_sidecar=sidecar,
         et=et,

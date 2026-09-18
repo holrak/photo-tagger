@@ -167,6 +167,58 @@ def test_process_photo_skips_optional_fields_when_disabled(
     assert kwargs["title"] is None
 
 
+@pytest.mark.parametrize(
+    ("existing", "written"),
+    [
+        (("Camera Title", "default"), (None, None)),
+        ((None, None), ("Title", "Description.")),
+    ],
+    ids=["photo-has-both", "photo-has-neither"],
+)
+def test_process_photo_keeps_a_preserved_caption_the_photo_already_has(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+    existing: tuple[str | None, str | None],
+    written: tuple[str | None, str | None],
+) -> None:
+    """Preserving a field keeps what the photo has, and still fills it in where there is none."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    options = ProcessingOptions(
+        preserve_existing_title=True,
+        preserve_existing_description=True,
+    )
+    with patch(
+        "photo_tagger.pipeline.read_image_context",
+        return_value=ImageContext(existing_title=existing[0], existing_description=existing[1]),
+    ):
+        process_photo(image, _ctx(options=options))
+
+    kwargs = patched_pipeline["write"].call_args.kwargs
+    assert (kwargs["title"], kwargs["description"]) == written
+
+
+def test_process_photo_replaces_an_existing_caption_by_default(
+    tmp_path: Path,
+    patched_pipeline: dict[str, Any],
+) -> None:
+    """Each field answers for itself: keywords merge while the placeholder caption is replaced."""
+    image = tmp_path / "img.cr3"
+    image.write_text("x")
+    with patch(
+        "photo_tagger.pipeline.read_image_context",
+        return_value=ImageContext(
+            existing_keywords=KeywordSet(subject=["Old"]),
+            existing_description="default",
+        ),
+    ):
+        process_photo(image, _ctx(options=ProcessingOptions()))
+
+    write_call = patched_pipeline["write"].call_args
+    assert write_call.kwargs["description"] == "Description."
+    assert "Old" in write_call.args[1].subject
+
+
 def test_process_photo_writes_no_keywords_when_disabled(
     tmp_path: Path,
     patched_pipeline: dict[str, Any],

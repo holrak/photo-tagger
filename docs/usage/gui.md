@@ -243,8 +243,14 @@ The arrow on either **Save** button opens the save options, which choose what ev
     equivalent of the CLI's `--no-write-title` / `--no-write-description` / `--no-write-keywords`.
     Uncheck one to leave that field on the photo untouched, for example uncheck **Write Keywords**
     to refresh only the title and description while keeping a curated Lightroom keyword list as is
-    (turning it off also disables **Overwrite Existing Keywords**, since there is nothing to write).
-- **Overwrite Existing Keywords** replaces the existing keywords instead of merging the new ones in.
+    (turning a field off also disables its **Overwrite Existing** entry, since there is nothing to
+    write).
+- **Overwrite Existing** holds one entry per field, deciding what a save replaces on a photo that
+    already carries that field: the GUI's `--overwrite-keywords`, `--preserve-title`, and
+    `--preserve-description`. **Keywords** is off, so new keywords merge in; check it to replace
+    them. **Title** and **Description** are on, since each holds a single value, and that is what
+    clears a camera's placeholder. Uncheck one to keep what the photo has and fill in only the
+    photos without it, so a caption you wrote by hand survives a re-run.
 - **Write To** picks where a save puts the metadata, the GUI's equivalent of the CLI's
     `--sidecar-mode`: **XMP Sidecar** (the default) writes a `.xmp` file next to every photo, **The
     Photo Itself** writes into each image file, and **Sidecar for RAW, Photo Otherwise** does one of
@@ -383,7 +389,7 @@ save again) and their **Tagged** column is scanned again.
 **File > Export CSV Report...** writes a spreadsheet with **one row per photo in the list**, the
 same report the CLI's [`--csv-file`](cli-reference.md#csv-report) produces. Each row gathers
 everything the GUI knows about a photo: its status, the working title/description/keywords (the
-keywords as a save would write them, honoring the **Overwrite** toggle), the
+keywords as a save would write them, honoring **Overwrite Existing > Keywords**), the
 title/description/keywords already on the file, the camera/location EXIF read when it was generated,
 and the per-photo token usage and timing. Photos you have not generated yet still get a row, with
 the generated and usage columns left blank.

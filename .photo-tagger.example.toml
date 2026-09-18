@@ -40,6 +40,8 @@
 
 [output]
 # preserve_keywords = true    # false = overwrite existing keywords
+# preserve_title = false      # true = keep the title a photo already has
+# preserve_description = false # true = keep the description a photo already has
 # write_description = true
 # write_title = true
 # backup_xmp = true           # ExifTool _original backup

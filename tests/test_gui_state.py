@@ -742,6 +742,18 @@ def test_config_toml_text_round_trips_through_load_defaults() -> None:
     assert defaults.telemetry.enabled is False
 
 
+def test_config_writers_persist_the_per_field_overwrite_choices() -> None:
+    """A fresh file and a merged one both carry all three keep-or-replace answers."""
+    import tomllib  # noqa: PLC0415 - test-local parser.
+
+    values = _config_values(preserve_title=True, preserve_description=True)
+    for text in (config_toml_text(values), merged_config_text("[output]\n", values)):
+        output = tomllib.loads(text)["output"]
+        assert output["preserve_title"] is True
+        assert output["preserve_description"] is True
+        assert output["preserve_keywords"] is True
+
+
 def test_config_toml_text_omits_blank_url() -> None:
     """A blank base URL is left out so the provider default applies."""
     text = config_toml_text(_config_values(api_base_url=None))
@@ -1366,8 +1378,29 @@ def test_build_save_job_leaves_unchecked_fields_out() -> None:
 
 def test_build_save_job_overwrite_drops_the_existing_keywords() -> None:
     """Overwrite replaces the keywords on the file instead of merging with them."""
-    job = build_save_job(_proposed_item(), SaveOptions(overwrite=True))
+    job = build_save_job(_proposed_item(), SaveOptions(overwrite_keywords=True))
     assert job.keywords.subject == ["Duck"]
+
+
+def test_build_save_job_keeps_a_caption_the_photo_already_has() -> None:
+    """With its Overwrite entry off, a field the photo already fills is left alone."""
+    item = _proposed_item()
+    item.existing_title = "Camera Title"
+    item.existing_description = "default"
+    options = SaveOptions(overwrite_title=False, overwrite_description=False)
+    job = build_save_job(item, options)
+    assert job.title is None
+    assert job.description is None
+    # The keywords still merge: each field answers for itself.
+    assert sorted(job.keywords.subject) == ["Duck", "Old"]
+
+
+def test_build_save_job_fills_an_empty_caption_even_when_preserving() -> None:
+    """Keeping what a photo has is not the same as writing nothing: an empty field is filled."""
+    options = SaveOptions(overwrite_title=False, overwrite_description=False)
+    job = build_save_job(_proposed_item(), options)
+    assert job.title == "New Title"
+    assert job.description == "New caption."
 
 
 def test_build_save_job_without_keywords_writes_none() -> None:

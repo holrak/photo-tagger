@@ -774,6 +774,8 @@ def _log_startup(  # noqa: PLR0913 - the log line names every config explicitly.
         newer_than=filter_.newer_than,
         older_than=filter_.older_than,
         preserve_keywords=options.preserve_existing_kw,
+        preserve_title=options.preserve_existing_title,
+        preserve_description=options.preserve_existing_description,
         write_description=options.write_description,
         write_title=options.write_title,
         write_keywords=options.write_keywords,

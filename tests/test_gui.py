@@ -1167,7 +1167,7 @@ def test_hierarchy_preview_updates_from_keywords(
     _stub_reads(monkeypatch, keywords=[])
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
-    window._overwrite.setChecked(True)  # noqa: SLF001
+    window._overwrite_actions[FIELD_KEYWORDS].setChecked(True)  # noqa: SLF001
     window._keywords.setPlainText("Duck<Bird<Animal")  # noqa: SLF001 - triggers textChanged
     assert window._hierarchy.toPlainText() == "Animal\n└─ Bird\n   └─ Duck"  # noqa: SLF001
 
@@ -1202,6 +1202,34 @@ def test_save_current_writes_and_marks_saved(
     leaf = window._leaf_for(img)  # noqa: SLF001
     assert leaf is not None
     assert leaf.text(gui._COL_TAGGED) == "TDK"  # noqa: SLF001
+
+
+def test_save_keeps_a_caption_whose_overwrite_entry_is_off(
+    window: gui.MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unchecking Overwrite Existing > Description leaves it alone without touching keywords."""
+    img = _jpeg(tmp_path / "a.jpg")
+    _stub_reads(monkeypatch, keywords=["Beach"])
+    captured: dict[str, object] = {}
+
+    def fake_write(*args: object, **kwargs: object) -> bool:
+        captured.update(kwargs)
+        captured["keywords"] = args[1]
+        return True
+
+    monkeypatch.setattr(gui, "write_metadata", fake_write)
+    _add_dir(window, {"a": img})
+    _select(window, window._leaf_for(img))  # noqa: SLF001
+    window._overwrite_actions[FIELD_DESCRIPTION].setChecked(False)  # noqa: SLF001
+    window._description.setPlainText("A new caption.")  # noqa: SLF001
+    window._keywords.setPlainText("Eagle")  # noqa: SLF001
+    window._save_current()  # noqa: SLF001
+
+    assert captured["description"] is None  # the photo keeps "Old caption."
+    assert captured["title"] == "Old Title"  # its own entry is still checked
+    assert sorted(captured["keywords"].subject) == ["Beach", "Eagle"]  # type: ignore[attr-defined]
 
 
 def test_selecting_shows_metadata_source(
@@ -1776,9 +1804,9 @@ def test_unchecking_write_keywords_disables_overwrite_and_blanks_diff(
     _add_dir(window, {"a": img})
     _select(window, window._leaf_for(img))  # noqa: SLF001
 
-    window._write_keywords.setChecked(False)  # noqa: SLF001 - fires _on_write_keywords_toggled
+    window._write_keywords.setChecked(False)  # noqa: SLF001 - fires _on_write_field_toggled
 
-    assert not window._overwrite.isEnabled()  # noqa: SLF001
+    assert not window._overwrite_actions[FIELD_KEYWORDS].isEnabled()  # noqa: SLF001
     assert "keywords will not be written" in window._diff.toPlainText().lower()  # noqa: SLF001
 
 
@@ -3087,7 +3115,11 @@ def test_save_options_default_to_writing_all_fields(window: gui.MainWindow) -> N
     for action in (window._write_title, window._write_description, window._write_keywords):  # noqa: SLF001
         assert action.isCheckable()
         assert action.isChecked()
-    assert not window._overwrite.isChecked()  # noqa: SLF001 - merge, not overwrite
+    overwrite = window._overwrite_actions  # noqa: SLF001
+    assert not overwrite[FIELD_KEYWORDS].isChecked()  # merge, not overwrite
+    # A title and a description hold one value each, so the generated one replaces it.
+    assert overwrite[FIELD_TITLE].isChecked()
+    assert overwrite[FIELD_DESCRIPTION].isChecked()
     assert window._sidecar_mode() == "all"  # noqa: SLF001 - sidecar, not embed
     assert window._backup.isChecked()  # noqa: SLF001 - keep ExifTool's *_original
 
@@ -3160,11 +3192,12 @@ def test_save_buttons_share_the_options_menu(window: gui.MainWindow) -> None:
     """Both Save buttons carry the same arrow menu holding the write toggles."""
     actions = window._save_options_menu.actions()  # noqa: SLF001
     assert window._write_title in actions  # noqa: SLF001
-    assert window._overwrite in actions  # noqa: SLF001
     assert window._backup in actions  # noqa: SLF001
-    # The Write To choices hang off a submenu of that same menu.
+    # The Write To and Overwrite Existing choices hang off submenus of that same menu.
     submenus = [action.menu() for action in actions if action.menu() is not None]
     assert any(window._sidecar_actions["raw"] in menu.actions() for menu in submenus)  # noqa: SLF001
+    keywords = window._overwrite_actions[FIELD_KEYWORDS]  # noqa: SLF001
+    assert any(keywords in menu.actions() for menu in submenus)
 
 
 def _unwrapped(tip: str) -> str:

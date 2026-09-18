@@ -91,6 +91,8 @@ jpeg_quality = 80        # JPEG quality (1-100) of the image sent to the model.
 
 [output]
 preserve_keywords = true  # Merge with existing keywords (false replaces them).
+preserve_title = false    # true keeps the title a photo already has.
+preserve_description = false  # true keeps the description a photo already has.
 write_title = true        # Generate and write a title.
 write_description = true  # Generate and write a description.
 write_keywords = true     # Write keywords (false leaves existing keywords untouched).

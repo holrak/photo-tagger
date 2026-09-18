@@ -173,6 +173,22 @@ class OutputConfig:
             help="Preserve existing keywords in XMP files (merge) vs overwrite them",
         ),
     ] = True
+    preserve_title: Annotated[
+        bool,
+        Parameter(
+            name=("--preserve-title",),
+            negative="--overwrite-title",
+            help="Keep a title the photo already has (the default replaces it)",
+        ),
+    ] = False
+    preserve_description: Annotated[
+        bool,
+        Parameter(
+            name=("--preserve-description",),
+            negative="--overwrite-description",
+            help="Keep a description the photo already has (the default replaces it)",
+        ),
+    ] = False
     write_description: Annotated[
         bool,
         Parameter(
@@ -786,6 +802,8 @@ def to_processing_options(
     """
     return ProcessingOptions(
         preserve_existing_kw=output.preserve_keywords,
+        preserve_existing_title=output.preserve_title,
+        preserve_existing_description=output.preserve_description,
         write_description=output.write_description,
         write_title=output.write_title,
         write_keywords=output.write_keywords,

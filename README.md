@@ -30,7 +30,8 @@ directly into each photo with `--embed-in-photo`, or split the two by file type 
 - Works with RAW and standard image formats (CR3, CR2, NEF, JPG, PNG, and more)
 - Generates a title, a concise description, and hierarchical keywords, in any language you ask for
   (`--output-language`)
-- Merges with existing metadata unless you opt-in to overwrite
+- Merges with existing keywords unless you opt-in to overwrite, and decides per field (title,
+  description, keywords) what a photo keeps and what gets replaced
 - Snaps keywords onto your own keyword list, so a run cannot fill your catalog with near-duplicates
   of terms you already curate, and builds that list for you from the photos you already have
   (`photo-tagger vocabulary`)
@@ -172,6 +173,9 @@ Key options:
 - `--hint` – a note about every photo in the run that the model must trust over its own reading of
   the image, for example `"The animal in these photos is a deer"`
 - `--overwrite-keywords` – replace instead of merge existing keyword metadata
+- `--preserve-title` / `--preserve-description` – keep the title or description a photo already has
+  and write the generated one only where there is none (both are replaced by default, which is what
+  clears a camera-written placeholder)
 - `--no-write-title` / `--no-write-description` / `--no-write-keywords` – skip writing those fields
 - `--no-backup-xmp` – avoid creating `*_original` snapshot before writing
 - `--embed-in-photo` – write metadata directly into the image instead of creating an XMP sidecar

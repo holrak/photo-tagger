@@ -1392,6 +1392,21 @@ def test_sidecar_mode_reaches_the_pipeline_options() -> None:
     assert options.sidecar_mode == "raw"
 
 
+def test_preserve_flags_reach_the_pipeline_per_field() -> None:
+    """Each field's keep-or-replace answer travels on its own, keywords included."""
+    from photo_tagger.cli_options import load_defaults, to_processing_options  # noqa: PLC0415
+
+    defaults = load_defaults(
+        {"output": {"preserve_description": True, "preserve_keywords": False}},
+    )
+
+    options = to_processing_options(defaults.output, defaults.inference)
+
+    assert options.preserve_existing_description is True
+    assert options.preserve_existing_title is False
+    assert options.preserve_existing_kw is False
+
+
 def test_main_reports_unhandled_crashes_and_re_raises(tmp_path: Path) -> None:
     """
     A crash escaping the CLI fires one anonymous crash beacon and still surfaces the traceback.

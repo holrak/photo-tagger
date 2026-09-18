@@ -304,7 +304,11 @@ class SaveOptions:
     write_title: bool = True
     write_description: bool = True
     write_keywords: bool = True
-    overwrite: bool = False
+    # One "replace or keep" answer per field. Keywords merge, so keeping them is the default; a
+    # title and a description hold one value each, so the generated one replaces it.
+    overwrite_title: bool = True
+    overwrite_description: bool = True
+    overwrite_keywords: bool = False
     backup: bool = True
     # Sidecar, embedded, or one per file type: resolved per photo by metadata.use_sidecar_for.
     sidecar_mode: SidecarMode = DEFAULT_SIDECAR_MODE
@@ -338,18 +342,39 @@ class SaveJob:
         return fields_written(self.title, self.description, self.keywords)
 
 
+def _caption_to_save(
+    edited: str,
+    existing: str | None,
+    *,
+    write: bool,
+    overwrite: bool,
+) -> str | None:
+    """
+    Resolve one text field's saved value, None meaning "leave what the photo has".
+
+    A field switched off is left alone, and so is one the photo already fills when its Overwrite
+    toggle is off; only then does the edited text go on. Mirrors the CLI's own rule.
+    """
+    if not write:
+        return None
+    if not overwrite and existing:
+        return None
+    return edited or None
+
+
 def build_save_job(item: PhotoItem, options: SaveOptions) -> SaveJob:
     """
     Resolve what saving *item* writes: only the checked fields, the unchecked ones left untouched.
 
     A field that is switched off becomes None (or an empty keyword set), which write_metadata leaves
-    out of its payload.
+    out of its payload. So does a field whose Overwrite toggle is off on a photo that already
+    carries one.
     """
     keywords = (
         keywords_to_save(
             item.existing_keywords,
             item.keywords,
-            overwrite=options.overwrite,
+            overwrite=options.overwrite_keywords,
             verbatim=options.verbatim,
         )
         if options.write_keywords
@@ -358,8 +383,18 @@ def build_save_job(item: PhotoItem, options: SaveOptions) -> SaveJob:
     return SaveJob(
         path=item.path,
         keywords=keywords,
-        title=(item.title or None) if options.write_title else None,
-        description=(item.description or None) if options.write_description else None,
+        title=_caption_to_save(
+            item.title,
+            item.existing_title,
+            write=options.write_title,
+            overwrite=options.overwrite_title,
+        ),
+        description=_caption_to_save(
+            item.description,
+            item.existing_description,
+            write=options.write_description,
+            overwrite=options.overwrite_description,
+        ),
     )
 
 
@@ -1628,6 +1663,8 @@ class GuiConfigValues:
     vocabulary_strict: bool = False
     session_gap_minutes: float = 0.0
     undo_log: bool = True
+    preserve_title: bool = False
+    preserve_description: bool = False
 
 
 def config_toml_text(values: GuiConfigValues) -> str:
@@ -1656,6 +1693,8 @@ def config_toml_text(values: GuiConfigValues) -> str:
         f"write_description = {_toml_bool(values.write_description)}",
         f"write_keywords = {_toml_bool(values.write_keywords)}",
         f"preserve_keywords = {_toml_bool(values.preserve_keywords)}",
+        f"preserve_title = {_toml_bool(values.preserve_title)}",
+        f"preserve_description = {_toml_bool(values.preserve_description)}",
         f"sidecar_mode = {_toml_str(values.sidecar_mode)}",
         f"backup_xmp = {_toml_bool(values.backup_xmp)}",
     ]
@@ -1737,6 +1776,8 @@ def merged_config_text(existing_text: str, values: GuiConfigValues) -> str:
     output["write_description"] = values.write_description
     output["write_keywords"] = values.write_keywords
     output["preserve_keywords"] = values.preserve_keywords
+    output["preserve_title"] = values.preserve_title
+    output["preserve_description"] = values.preserve_description
     output["sidecar_mode"] = values.sidecar_mode
     # The boolean this replaced only knew sidecar-or-not, and the mode wins over it anyway. Drop
     # it so a config the GUI wrote never carries two answers to the same question.

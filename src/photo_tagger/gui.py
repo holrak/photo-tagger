@@ -117,7 +117,7 @@ from photo_tagger.cache import (
     safe_cache_get,
     safe_cache_put,
 )
-from photo_tagger.cli_options import load_defaults, resolve_sidecar_mode
+from photo_tagger.cli_options import OutputConfig, load_defaults, resolve_sidecar_mode
 from photo_tagger.config import (
     DEFAULT_FREQUENCY_PENALTY,
     DEFAULT_JPEG_QUALITY,
@@ -478,6 +478,29 @@ _WRITE_TO_CHOICES: tuple[tuple[SidecarMode, str, str], ...] = (
             "Write a .xmp file beside each RAW photo and write into everything else. For a "
             "folder of RAW+JPEG pairs.",
         ),
+    ),
+)
+
+# The Overwrite Existing submenu, as (field, label, tooltip). Keywords merge, so that entry starts
+# unchecked; a title and a description hold one value each, and replacing is what clears a
+# camera-written placeholder.
+_OVERWRITE_CHOICES: tuple[tuple[str, str, str], ...] = (
+    (
+        FIELD_TITLE,
+        gettext_noop("Title"),
+        gettext_noop("Replace an existing title. Uncheck to fill in only photos without one."),
+    ),
+    (
+        FIELD_DESCRIPTION,
+        gettext_noop("Description"),
+        gettext_noop(
+            "Replace an existing description. Uncheck to fill in only photos without one.",
+        ),
+    ),
+    (
+        FIELD_KEYWORDS,
+        gettext_noop("Keywords"),
+        gettext_noop("Replace existing keywords instead of merging the new ones in."),
     ),
 )
 
@@ -2044,7 +2067,9 @@ class MainWindow(QMainWindow):
             write_title=self._write_title.isChecked(),
             write_description=self._write_description.isChecked(),
             write_keywords=self._write_keywords.isChecked(),
-            preserve_keywords=not self._overwrite.isChecked(),
+            preserve_keywords=not self._overwrites(FIELD_KEYWORDS),
+            preserve_title=not self._overwrites(FIELD_TITLE),
+            preserve_description=not self._overwrites(FIELD_DESCRIPTION),
             sidecar_mode=self._sidecar_mode(),
             backup_xmp=self._backup.isChecked(),
             telemetry_enabled=self._telemetry_enabled,
@@ -3149,16 +3174,13 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             action.setChecked(checked)
             menu.addAction(action)
-        # Connect only after setChecked above, so building the menu does not fire the handler
-        # before _overwrite (which it toggles) has been created further down.
-        self._write_keywords.toggled.connect(self._on_write_keywords_toggled)
         menu.addSeparator()
+        menu.addMenu(self._build_overwrite_menu(output))
+        # Connect only after the Overwrite submenu exists, since the handler enables and disables
+        # its entries.
+        for action in (self._write_title, self._write_description, self._write_keywords):
+            action.toggled.connect(self._on_write_field_toggled)
 
-        self._overwrite = QAction(_("Overwrite Existing Keywords"), self)
-        self._overwrite.setToolTip(
-            tooltip("Replace existing keywords instead of merging the new ones in."),
-        )
-        self._overwrite.toggled.connect(self._refresh_derived)
         self._backup = QAction(_("Keep ExifTool Backup"), self)
         self._backup.setToolTip(
             tooltip(
@@ -3167,28 +3189,49 @@ class MainWindow(QMainWindow):
                 "batch (make sure you have a backup elsewhere).",
             ),
         )
-        for action, checked in (
-            (self._overwrite, not output.preserve_keywords),
-            (self._backup, output.backup_xmp),
-        ):
-            action.setCheckable(True)
-            action.setChecked(checked)
-            menu.addAction(action)
+        self._backup.setCheckable(True)
+        self._backup.setChecked(output.backup_xmp)
+        menu.addAction(self._backup)
         menu.addMenu(self._build_write_to_menu(resolve_sidecar_mode(output)))
-        # A config that starts with keywords off must also start with Overwrite grayed out.
-        self._overwrite.setEnabled(self._write_keywords.isChecked())
+        # A config that starts with a field off must also start with its Overwrite entry grayed out.
+        self._sync_overwrite_enabled()
         # Every toggle refreshes the Save buttons' option summary. Connected after the
         # setChecked calls above so construction never fires into the not-yet-built buttons.
         for action in (
             self._write_title,
             self._write_description,
             self._write_keywords,
-            self._overwrite,
+            *self._overwrite_actions.values(),
             self._backup,
             *self._sidecar_actions.values(),
         ):
             action.toggled.connect(self._refresh_save_tooltips)
         return menu
+
+    def _build_overwrite_menu(self, output: OutputConfig) -> QMenu:
+        """Build the Overwrite Existing submenu, each entry pre-picked from the config file."""
+        checked = {
+            FIELD_TITLE: not output.preserve_title,
+            FIELD_DESCRIPTION: not output.preserve_description,
+            FIELD_KEYWORDS: not output.preserve_keywords,
+        }
+        menu = QMenu(_("Overwrite Existing"), self)
+        menu.setToolTipsVisible(True)
+        menu.setToolTip(tooltip("Which fields a save replaces when the photo already has one."))
+        self._overwrite_actions: dict[str, QAction] = {}
+        for field_name, label, hint in _OVERWRITE_CHOICES:
+            action = QAction(_(label), self)
+            action.setCheckable(True)
+            action.setChecked(checked[field_name])
+            action.setToolTip(tooltip(hint))
+            menu.addAction(action)
+            self._overwrite_actions[field_name] = action
+        self._overwrite_actions[FIELD_KEYWORDS].toggled.connect(self._refresh_derived)
+        return menu
+
+    def _overwrites(self, field_name: str) -> bool:
+        """Report whether a save replaces *field_name* on a photo that already carries one."""
+        return self._overwrite_actions[field_name].isChecked()
 
     def _build_write_to_menu(self, mode: SidecarMode) -> QMenu:
         """Build the exclusive Write To submenu, with *mode* pre-picked."""
@@ -3229,9 +3272,11 @@ class MainWindow(QMainWindow):
         if self._write_keywords.isChecked():
             parts.append(
                 _("overwriting existing keywords")
-                if self._overwrite.isChecked()
+                if self._overwrites(FIELD_KEYWORDS)
                 else _("merging with existing keywords"),
             )
+        if kept := self._kept_captions():
+            parts.append(_("keeping any existing {fields}").format(fields=", ".join(kept)))
         parts.append(_WRITE_TO_SUMMARIES[self._sidecar_mode()]())
         parts.append(
             _("keeping a *_original backup")
@@ -3239,6 +3284,17 @@ class MainWindow(QMainWindow):
             else _("with no *_original backup"),
         )
         return ", ".join(parts)
+
+    def _kept_captions(self) -> list[str]:
+        """Name the text fields a save writes only where the photo has none, for the summary."""
+        return [
+            name
+            for action, field_name, name in (
+                (self._write_title, FIELD_TITLE, _("title")),
+                (self._write_description, FIELD_DESCRIPTION, _("description")),
+            )
+            if action.isChecked() and not self._overwrites(field_name)
+        ]
 
     def _refresh_save_tooltips(self) -> None:
         """Keep both Save buttons' tooltips describing the currently chosen options."""
@@ -3578,7 +3634,7 @@ class MainWindow(QMainWindow):
             target = target.with_suffix(".csv")
         # Fold any unsaved edits in the open photo into its row before exporting.
         self._commit_current()
-        overwrite = self._overwrite.isChecked()
+        overwrite = self._overwrites(FIELD_KEYWORDS)
         verbatim = self._verbatim_spellings()
         rows = [
             photo_item_to_report_row(item, overwrite=overwrite, verbatim=verbatim)
@@ -4161,10 +4217,19 @@ class MainWindow(QMainWindow):
         self._viewer_cache = (key, pixmap)
         return pixmap
 
-    def _on_write_keywords_toggled(self) -> None:
-        """Overwrite-vs-merge only matters when keywords are written; gray it out otherwise."""
-        self._overwrite.setEnabled(self._write_keywords.isChecked())
+    def _on_write_field_toggled(self) -> None:
+        """Follow a field being switched on or off: its Overwrite entry and the keyword preview."""
+        self._sync_overwrite_enabled()
         self._refresh_derived()
+
+    def _sync_overwrite_enabled(self) -> None:
+        """Replace-or-keep only matters for a field being written; gray the rest out."""
+        for field_name, action in (
+            (FIELD_TITLE, self._write_title),
+            (FIELD_DESCRIPTION, self._write_description),
+            (FIELD_KEYWORDS, self._write_keywords),
+        ):
+            self._overwrite_actions[field_name].setEnabled(action.isChecked())
 
     def _refresh_derived(self) -> None:
         """Recompute the keyword-change diff and hierarchy preview from the edited fields."""
@@ -4177,7 +4242,7 @@ class MainWindow(QMainWindow):
             self._details_toggle.setText(_("Keyword changes (not written)"))
             return
         edited = parse_keyword_lines(self._keywords.toPlainText())
-        overwrite = self._overwrite.isChecked()
+        overwrite = self._overwrites(FIELD_KEYWORDS)
         existing = self._current.existing_keywords
         verbatim = self._verbatim_spellings()
         paths = hierarchy_preview(existing, edited, overwrite=overwrite, verbatim=verbatim)
@@ -4229,7 +4294,9 @@ class MainWindow(QMainWindow):
             write_title=self._write_title.isChecked(),
             write_description=self._write_description.isChecked(),
             write_keywords=self._write_keywords.isChecked(),
-            overwrite=self._overwrite.isChecked(),
+            overwrite_title=self._overwrites(FIELD_TITLE),
+            overwrite_description=self._overwrites(FIELD_DESCRIPTION),
+            overwrite_keywords=self._overwrites(FIELD_KEYWORDS),
             backup=self._backup.isChecked(),
             sidecar_mode=self._sidecar_mode(),
             verbatim=self._verbatim_spellings(),

@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format is based on
 - `--sidecar-mode {all,none,raw}` picks the write target; `raw` does both, a sidecar for RAW files
   and embedded for the rest, for a folder of RAW+JPEG pairs. `--write-sidecar` / `--embed-in-photo`
   are now shorthand. In the GUI: the save menu's **Write To** submenu.
+- `--preserve-title` and `--preserve-description` keep a title or description the photo already has,
+  filling in only the photos without one. Both still default to replacing. In the GUI: the save
+  menu's **Overwrite Existing** submenu, one entry per field.
 - GUI: a search box above the photo list, matching by text or glob (`*_edit.jpg`). It only narrows
   what the list shows; hidden photos are still generated and saved.
 - GUI: the photo list can be shown flat (**View as List**), so a sort runs across every photo
