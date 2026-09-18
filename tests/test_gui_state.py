@@ -3,8 +3,9 @@
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -1119,6 +1120,9 @@ def test_matches_extension_ignores_case_and_a_leading_dot() -> None:
         # A separator in the pattern matches the whole path, so it can name a folder.
         ("/photos/*.dng", True),
         ("/other/*.dng", False),
+        # Either separator spells the same folder, so a Windows habit still finds the photo.
+        ("\\photos\\*.dng", True),
+        ("\\other\\*.dng", False),
         # An empty pattern matches nothing, rather than every photo in the list.
         ("", False),
     ],
@@ -1127,6 +1131,28 @@ def test_matches_name_pattern(pattern: str, *, expected: bool) -> None:
     """Name patterns are case-insensitive, and plain text means "contains"."""
     item = PhotoItem(path=Path("/photos/IMG_0001.dng"))
     assert matches_name_pattern(item, pattern) is expected
+
+
+@pytest.mark.parametrize(
+    ("windows_path", "pattern"),
+    [
+        # What the Windows runners build from Path("/photos/IMG_0001.dng"), typed either way.
+        (r"\photos\IMG_0001.dng", "/photos/*.dng"),
+        (r"\photos\IMG_0001.dng", r"\photos\*.dng"),
+        # The same for a real drive-lettered path.
+        (r"C:\photos\IMG_0001.dng", "C:/photos/*.dng"),
+        (r"C:\photos\IMG_0001.dng", r"C:\photos\*.dng"),
+    ],
+)
+def test_matches_name_pattern_on_a_windows_path(windows_path: str, pattern: str) -> None:
+    """
+    A Windows path stringifies with backslashes, which must not decide what the pattern finds.
+
+    Pinned with an explicit PureWindowsPath so the POSIX runners catch a regression here too, rather
+    than only the Windows job.
+    """
+    item = PhotoItem(path=cast("Path", PureWindowsPath(windows_path)))
+    assert matches_name_pattern(item, pattern) is True
 
 
 def test_search_summary_counts_what_is_hidden() -> None:

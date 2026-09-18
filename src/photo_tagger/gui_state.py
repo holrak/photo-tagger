@@ -636,6 +636,11 @@ def matches_extension(item: PhotoItem, extension: str) -> bool:
 _GLOB_CHARS = "*?["
 
 
+def _forward(text: str) -> str:
+    """Rewrite path separators as forward slashes, so both spellings compare equal."""
+    return text.replace("\\", "/")
+
+
 def matches_name_pattern(item: PhotoItem, pattern: str) -> bool:
     """
     Whether *item*'s filename matches the glob *pattern*, ignoring case.
@@ -648,7 +653,9 @@ def matches_name_pattern(item: PhotoItem, pattern: str) -> bool:
         return False
     text = str(item.path) if ("/" in pattern or "\\" in pattern) else item.path.name
     glob = pattern if any(char in pattern for char in _GLOB_CHARS) else f"*{pattern}*"
-    return fnmatch.fnmatchcase(text.casefold(), glob.casefold())
+    # Compare on forward slashes: a Windows path stringifies with backslashes, but the box invites
+    # either separator, and fnmatch would otherwise never match the one the user did not type.
+    return fnmatch.fnmatchcase(_forward(text).casefold(), _forward(glob).casefold())
 
 
 @dataclass(slots=True)
