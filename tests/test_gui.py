@@ -4691,7 +4691,12 @@ def test_changing_the_metadata_language_reloads_the_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Plural folding is English-only, so the lookup index has to be rebuilt for a new language."""
-    monkeypatch.setenv("PHOTO_TAGGER_CONFIG", str(tmp_path / "config.toml"))
+    # The file has to exist: find_config_file ignores a $PHOTO_TAGGER_CONFIG that points at
+    # nothing, and the window then falls back to the real ~/.config/photo-tagger/config.toml,
+    # which this test would rewrite on the developer's own machine.
+    config = tmp_path / "config.toml"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PHOTO_TAGGER_CONFIG", str(config))
     window._load_vocabulary(_keyword_file(tmp_path, "Landschaft\n"))  # noqa: SLF001
     assert window._vocabulary is not None  # noqa: SLF001
     assert window._vocabulary.fold_plurals is True  # noqa: SLF001
