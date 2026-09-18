@@ -908,6 +908,44 @@ def write_target(image_path: Path, *, use_sidecar: bool) -> Path:
     return image_path.with_suffix(".xmp") if use_sidecar else image_path
 
 
+# What exiftool puts in front of an error it would downgrade to a warning under -m. Matched
+# case-insensitively: exiftool spells it "[minor]" in errors and "[Minor]" in some warnings.
+_MINOR_ERROR_MARKER = "[minor]"
+
+# exiftool's "ignore minor errors and warnings" flag.
+_IGNORE_MINOR_ERRORS = "-m"
+
+
+def _is_minor_error(exc: ExifToolExecuteError) -> bool:
+    """Report whether exiftool refused the write over something ``-m`` would let through."""
+    streams = f"{exc.stderr or ''}\n{exc.stdout or ''}"
+    return _MINOR_ERROR_MARKER in streams.casefold()
+
+
+def _set_tags(helper: ExifToolHelper, set_kwargs: dict[str, Any], target: Path) -> None:
+    """
+    Apply the payload, retrying once with ``-m`` when exiftool refuses over a minor error.
+
+    Some cameras write maker notes exiftool cannot parse, and it refuses the whole write rather than
+    move a block whose offsets it cannot fix. The retry is the only way to embed metadata in those
+    files. Not passed up front: the check is worth having for every other photo, and each waiver is
+    logged.
+    """
+    try:
+        helper.set_tags(**set_kwargs)
+    except ExifToolExecuteError as exc:
+        if not _is_minor_error(exc):
+            raise
+        logger.warning(
+            "retrying_write_ignoring_minor_errors",
+            target=str(target),
+            reason=(exc.stderr or exc.stdout or "").strip(),
+        )
+        retry_kwargs: dict[str, Any] = dict(set_kwargs)
+        retry_kwargs["params"] = [*set_kwargs.get("params", []), _IGNORE_MINOR_ERRORS]
+        helper.set_tags(**retry_kwargs)
+
+
 def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as kwargs.
     image_path: Path,
     keywords: KeywordSet,
@@ -946,7 +984,7 @@ def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as k
 
     try:
         with managed_helper(et) as helper:
-            helper.set_tags(**set_kwargs)
+            _set_tags(helper, set_kwargs, target_path)
     except _EXIFTOOL_ERRORS as e:
         logger.exception("xmp_write_failed", error=str(e), target=str(target_path))
         return False

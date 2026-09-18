@@ -922,6 +922,53 @@ def test_write_metadata_returns_false_on_exiftool_error(tmp_path: Path) -> None:
         assert write_metadata(img, KeywordSet(subject=["Bird"])) is False
 
 
+def _execute_error(stderr: str) -> ExifToolExecuteError:
+    """Build the error pyexiftool raises when exiftool exits non-zero, carrying *stderr*."""
+    return ExifToolExecuteError(1, "", stderr, [])
+
+
+def test_write_metadata_retries_a_minor_error_ignoring_it(tmp_path: Path) -> None:
+    """
+    A write exiftool refuses over a minor error is tried once more with -m.
+
+    Some cameras write maker notes exiftool cannot parse (their offsets already wrong on the file
+    straight out of the camera), and it refuses the whole write rather than move a block whose
+    offsets it cannot fix. Without the retry, embedding metadata in those photos is impossible.
+    """
+    img = tmp_path / "img.dng"
+    helper = _fake_helper()
+    helper.set_tags.side_effect = [
+        _execute_error("Error: [minor] Maker notes could not be parsed - img.dng\n"),
+        None,
+    ]
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        written = write_metadata(
+            img,
+            KeywordSet(subject=["Bird"]),
+            backup=False,
+            use_sidecar=False,
+        )
+
+    assert written is True
+    assert helper.set_tags.call_count == 2  # noqa: PLR2004 - the refused write plus its one retry.
+    retry_params = helper.set_tags.call_args.kwargs["params"]
+    # The retry keeps whatever the first attempt asked for and only adds the waiver.
+    assert retry_params == ["-overwrite_original", "-m"]
+
+
+def test_write_metadata_does_not_retry_an_error_m_would_not_waive(tmp_path: Path) -> None:
+    """Only exiftool's own "[minor]" marker waives a failure; anything else fails once and stays."""
+    img = tmp_path / "img.dng"
+    helper = _fake_helper()
+    helper.set_tags.side_effect = _execute_error("Error: File format error - img.dng\n")
+
+    with patch("photo_tagger.metadata.ExifToolHelper", return_value=helper):
+        assert write_metadata(img, KeywordSet(subject=["Bird"])) is False
+
+    assert helper.set_tags.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # read_caption
 # ---------------------------------------------------------------------------

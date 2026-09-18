@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Embedding metadata works on photos whose maker notes ExifTool cannot parse, which some cameras
+  write. ExifTool refused the write; it is retried once ignoring minor errors, and logged. Maker
+  notes and image data come through byte for byte.
 - Embedding a description replaces `EXIF:ImageDescription` too, not only its XMP copies. A
   camera-written placeholder used to survive every save in IFD0.
 - An existing title and description are read from the XMP sidecar first, then the image file. A

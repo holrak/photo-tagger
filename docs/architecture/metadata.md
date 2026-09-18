@@ -171,6 +171,18 @@ RAW is decided by extension, by exclusion: a suffix Pillow reads natively (`.jpg
 `.heic`, ...) is not RAW, and anything else is, so an unfamiliar extension gets the cautious answer
 and keeps its file untouched.
 
+### Cameras ExifTool will not write to on the first try
+
+ExifTool refuses a write when it cannot parse a photo's maker notes: it will not move a block whose
+internal offsets it cannot fix up. Some cameras ship files that trip this, their maker-note offsets
+already wrong from the camera (`exiftool -validate` says so before anything has written to them), so
+every embedded write failed with `Error: [minor] Maker notes could not be parsed`.
+
+Such a write is tried once more with ExifTool's `-m` (ignore minor errors), the only way to put
+metadata inside those files, and each retry is logged per photo. The waiver is never asked for up
+front, since the check is worth having for everything else. Maker notes and image data come through
+byte-identical; what stays wrong is what the camera already had wrong.
+
 ### Backups and dry runs
 
 When writing, ExifTool keeps a `*_original` backup of the target before changing it. This is on by
