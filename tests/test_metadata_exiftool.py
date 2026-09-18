@@ -171,6 +171,66 @@ def test_description_mirror_round_trips_as_image_description(tmp_path: Path) -> 
     assert blocks[0].get("XMP:ImageDescription") == "A mirrored description."
 
 
+def _set_camera_description(path: Path, value: str) -> None:
+    """Put *value* on a photo the way a camera does: the EXIF tag and its XMP copy."""
+    from exiftool import ExifToolHelper  # type: ignore[attr-defined]  # noqa: PLC0415
+
+    with ExifToolHelper() as et:  # type: ignore[no-untyped-call]
+        et.set_tags(
+            tags={"EXIF:ImageDescription": value, "XMP-dc:Description": value},
+            files=[str(path)],
+            params=["-overwrite_original"],
+        )
+
+
+def test_embedded_write_replaces_a_camera_written_exif_description(tmp_path: Path) -> None:
+    """
+    Embedding a description replaces the EXIF tag, not only its XMP mirror.
+
+    Some cameras write a placeholder into ImageDescription on every photo. Writing the XMP mirror
+    alone left that in IFD0, so plain ``exiftool photo.jpg`` and every EXIF-only reader kept
+    reporting it after a save the GUI called successful.
+    """
+    from exiftool import ExifToolHelper  # type: ignore[attr-defined]  # noqa: PLC0415
+
+    img = _write_jpeg(tmp_path / "img.jpg")
+    _set_camera_description(img, "default")
+
+    assert write_metadata(
+        img,
+        KeywordSet(subject=["X"]),
+        description="A real description.",
+        backup=False,
+        use_sidecar=False,
+    )
+
+    with ExifToolHelper() as et:  # type: ignore[no-untyped-call]
+        blocks = et.get_tags(files=[str(img)], tags=["EXIF:ImageDescription"])
+    assert blocks[0].get("EXIF:ImageDescription") == "A real description."
+
+
+def test_a_sidecar_caption_wins_over_a_stale_one_in_the_photo(tmp_path: Path) -> None:
+    """
+    The sidecar is what a save wrote, so it is what reading the photo reports.
+
+    In sidecar mode the photo's own bytes are never touched, which leaves a camera's placeholder
+    description in place; reading the image first meant the GUI kept showing it.
+    """
+    img = _write_jpeg(tmp_path / "img.jpg")
+    _set_camera_description(img, "default")
+
+    assert write_metadata(
+        img,
+        KeywordSet(subject=["X"]),
+        description="A real description.",
+        backup=False,
+        use_sidecar=True,
+    )
+
+    assert read_caption(img)[1] == "A real description."
+    assert read_image_context(img).existing_description == "A real description."
+
+
 def test_read_caption_round_trip(tmp_path: Path) -> None:
     """A written title and description are read back by read_caption."""
     img = _write_jpeg(tmp_path / "img.jpg")

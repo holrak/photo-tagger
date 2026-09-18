@@ -21,6 +21,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Embedding a description replaces `EXIF:ImageDescription` too, not only its XMP copies. A
+  camera-written placeholder used to survive every save in IFD0.
+- An existing title and description are read from the XMP sidecar first, then the image file. A
+  stale caption in the photo shadowed the one just written beside it.
 - A tag that is present but empty no longer shadows the tag photo-tagger falls back to.
 - `photo-tagger vocabulary --report` quotes a keyword a spreadsheet would run as a formula, as
   `--csv-file` always has.

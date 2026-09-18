@@ -412,16 +412,35 @@ def read_keyword_sets(
     return keywords
 
 
+def _is_sidecar_block(block: dict[str, Any]) -> bool:
+    """Report whether an exiftool result block came from an XMP sidecar rather than the photo."""
+    return str(block.get("SourceFile", "")).casefold().endswith(".xmp")
+
+
+def _sidecar_first(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Order exiftool result blocks so an XMP sidecar's answer wins over the image file's.
+
+    The sidecar is the later copy: it is what every XMP-aware catalog reads, and the only thing a
+    sidecar-mode run writes. Reading the image first let a stale caption in it shadow the one just
+    written beside it. ``sorted`` is stable, so blocks on the same side keep exiftool's order.
+    """
+    return sorted(blocks, key=lambda block: not _is_sidecar_block(block))
+
+
 def _first_tag_value(blocks: list[dict[str, Any]], tags: tuple[str, ...]) -> str | None:
     """
     Return the first non-blank value across *blocks* for the first matching *tags* entry.
+
+    Sidecar blocks are consulted before the image's own (see :func:`_sidecar_first`).
 
     Emptiness is judged by :func:`_value_is_present`, not by comparing against ``""``: an empty
     ``rdf:Bag`` comes back from exiftool as ``[]`` and a blank one as ``[" "]``, and either would
     otherwise count as content and shadow the fall-back tag that holds the real value.
     """
+    ordered = _sidecar_first(blocks)
     for tag in tags:
-        for block in blocks:
+        for block in ordered:
             value = block.get(tag)
             if _value_is_present(value):
                 return format_metadata_value(value)
@@ -488,8 +507,7 @@ def read_metadata_sources(
     for block in blocks:
         if not _block_has_indicator([block]):
             continue
-        source_file = str(block.get("SourceFile", ""))
-        label = SOURCE_SIDECAR if source_file.casefold().endswith(".xmp") else SOURCE_IMAGE
+        label = SOURCE_SIDECAR if _is_sidecar_block(block) else SOURCE_IMAGE
         if label not in sources:
             sources.append(label)
     return sources
@@ -506,6 +524,10 @@ class ImageContext:
     """
 
     existing_keywords: KeywordSet = field(default_factory=KeywordSet)
+    # The title and description already on the photo, read the same way read_caption reads them.
+    # The pipeline needs them to honor --preserve-title / --preserve-description.
+    existing_title: str | None = None
+    existing_description: str | None = None
     location_tags: dict[str, str] = field(default_factory=dict)
     gps_position: str | None = None
     camera_info: dict[str, str] = field(default_factory=dict)
@@ -578,7 +600,18 @@ def read_image_context(
         return ImageContext()
 
     keyword_tags = [tag for tag, _ in _KEYWORD_TAG_TO_FIELD]
-    all_tags = list(dict.fromkeys([*keyword_tags, *LOCATION_TAGS, *CAMERA_TAGS, _GPS_TAG]))
+    all_tags = list(
+        dict.fromkeys(
+            [
+                *keyword_tags,
+                *_TITLE_TAGS,
+                *_DESCRIPTION_TAGS,
+                *LOCATION_TAGS,
+                *CAMERA_TAGS,
+                _GPS_TAG,
+            ],
+        ),
+    )
     params: list[str] = []
     if include_content_hash:
         all_tags.append(_IMAGE_DATA_HASH_TAG)
@@ -609,6 +642,8 @@ def read_image_context(
     )
     return ImageContext(
         existing_keywords=existing_keywords,
+        existing_title=_first_tag_value(blocks, _TITLE_TAGS),
+        existing_description=_first_tag_value(blocks, _DESCRIPTION_TAGS),
         location_tags=location_tags,
         gps_position=gps_position,
         camera_info=camera_info,
@@ -793,8 +828,15 @@ def _build_write_payload(
     keywords: KeywordSet,
     description: str | None,
     title: str | None,
+    *,
+    use_sidecar: bool,
 ) -> dict[str, str | list[str]]:
-    """Build the exiftool tag map that write_metadata will apply."""
+    """
+    Build the exiftool tag map that write_metadata will apply.
+
+    *use_sidecar* decides whether EXIF tags belong in the payload: a sidecar holds XMP and nothing
+    else, so they are only written when the target is the photo itself.
+    """
     payload: dict[str, str | list[str]] = {}
     if subjects := keywords.subject:
         payload["XMP-dc:Subject"] = subjects
@@ -810,6 +852,10 @@ def _build_write_payload(
         # silently: a warning plus exit 0). exiftool maps it back to IFD0 ImageDescription when a
         # sidecar is folded into the image.
         payload["XMP-tiff:ImageDescription"] = description
+        if not use_sidecar:
+            # The real IFD0 tag: the XMP mirror above does not touch it on a direct write, so a
+            # camera-written description (some write a placeholder) would survive every save.
+            payload[TAG_EXIF_IMAGE_DESCRIPTION] = description
     if title:
         payload["XMP-dc:Title"] = title
         payload[TAG_IPTC_OBJECT_NAME] = title
@@ -878,7 +924,8 @@ def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as k
     Args:
         image_path: Path to the image file. The sidecar shares its name with a `.xmp` extension.
         keywords: A :class:`KeywordSet` of subject, hierarchical, and weighted keywords.
-        description: Optional short description to write to XMP (and ImageDescription).
+        description: Optional short description to write to XMP (and, when embedding, to
+            EXIF:ImageDescription, so no camera-written value survives underneath).
         title: Optional short title to write to XMP-dc:Title and IPTC:ObjectName.
         backup: If True, let ExifTool create a backup (`_original` suffix where applicable).
         use_sidecar: If True, write to a sidecar; otherwise embed in the source file.
@@ -888,7 +935,7 @@ def write_metadata(  # noqa: PLR0913 - distinct optional fields are clearer as k
         True on success, False on failure.
     """
     target_path = write_target(image_path, use_sidecar=use_sidecar)
-    payload = _build_write_payload(keywords, description, title)
+    payload = _build_write_payload(keywords, description, title, use_sidecar=use_sidecar)
     if not payload:
         logger.warning("no_data_to_write", file=image_path.name)
         return False

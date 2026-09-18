@@ -22,6 +22,8 @@ location, GPS, and camera EXIF keeps the per-photo IPC cost to one round trip. I
 @dataclass(slots=True, frozen=True)
 class ImageContext:
     existing_keywords: KeywordSet  # typed subject / hierarchical / weighted views
+    existing_title: str | None  # the title already on the photo
+    existing_description: str | None  # the description already on the photo
     location_tags: dict[str, str]  # city/country from XMP-photoshop and IPTC
     gps_position: str | None  # Composite:GPSPosition, if present
     camera_info: dict[str, str]  # EXIF Model, LensModel, DateTimeOriginal
@@ -32,7 +34,10 @@ class ImageContext:
 misspelled key is now a type error instead of a silently empty list.
 
 The read targets both the image file and any adjacent `.xmp` sidecar, so metadata that lives only in
-the sidecar is still picked up.
+the sidecar is still picked up. Keywords from both are pooled; for the single-valued title and
+description, the sidecar's answer wins (`_sidecar_first`). The sidecar is the later copy, the one
+every XMP-aware catalog reads and the only thing a sidecar-mode run writes, so reading the image
+first let a camera's placeholder shadow the caption photo-tagger had just written beside it.
 
 `build_contextual_prompt()` turns that context into a short "Existing Metadata" block appended to
 the user prompt. The model gets the first few existing keywords, a `City, Country` location hint,
@@ -102,13 +107,18 @@ piece of generated metadata is written to both an XMP tag and its IPTC or EXIF c
 different tools agree on the value. Lightroom prioritizes `IPTC:Keywords` for JPEGs, which is why
 the flat subject list is mirrored there.
 
-| Generated field    | Tags written                                      |
-| ------------------ | ------------------------------------------------- |
-| Flat keywords      | `XMP-dc:Subject`, `IPTC:Keywords`                 |
-| Keyword hierarchy  | `XMP-lr:HierarchicalSubject`                      |
-| Weighted flat list | `XMP-lr:WeightedFlatSubject`                      |
-| Title              | `XMP-dc:Title`, `IPTC:ObjectName`                 |
-| Description        | `XMP-dc:Description`, `XMP-exif:ImageDescription` |
+| Generated field    | Tags written                                                                 |
+| ------------------ | ---------------------------------------------------------------------------- |
+| Flat keywords      | `XMP-dc:Subject`, `IPTC:Keywords`                                            |
+| Keyword hierarchy  | `XMP-lr:HierarchicalSubject`                                                 |
+| Weighted flat list | `XMP-lr:WeightedFlatSubject`                                                 |
+| Title              | `XMP-dc:Title`, `IPTC:ObjectName`                                            |
+| Description        | `XMP-dc:Description`, `XMP-tiff:ImageDescription`, `EXIF:ImageDescription`\* |
+
+\* `EXIF:ImageDescription` only when the target is the photo itself: a sidecar holds XMP and nothing
+else. ExifTool maps the `XMP-tiff` mirror back to IFD0 when a sidecar is folded into an image, but a
+direct write does not touch IFD0, so writing the EXIF tag too is what keeps a camera's placeholder
+from surviving underneath the new description.
 
 Title and description are only written when `--write-title` and `--write-description` are enabled
 (both are on by default). If the payload would be empty, nothing is written.

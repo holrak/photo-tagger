@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from exiftool.exceptions import ExifToolExecuteError
 
+from photo_tagger.config import TAG_EXIF_IMAGE_DESCRIPTION
 from photo_tagger.metadata import (
     FIELD_DESCRIPTION,
     FIELD_KEYWORDS,
@@ -178,6 +179,7 @@ def test_build_write_payload_produces_lightroom_compatible_keys() -> None:
         KeywordSet(subject=["Beach"], hierarchical=["Animal|Bird"], weighted=["Beach"]),
         description="A short desc.",
         title="A title",
+        use_sidecar=True,
     )
     assert payload["XMP-dc:Subject"] == ["Beach"]
     assert payload["IPTC:Keywords"] == ["Beach"]
@@ -191,8 +193,26 @@ def test_build_write_payload_produces_lightroom_compatible_keys() -> None:
 
 def test_build_write_payload_skips_blank_values() -> None:
     """Empty keyword lists / blank title and description produce no entries."""
-    payload = _build_write_payload(KeywordSet(), description=None, title=None)
+    payload = _build_write_payload(KeywordSet(), description=None, title=None, use_sidecar=True)
     assert payload == {}
+
+
+def test_build_write_payload_sets_the_exif_description_only_when_embedding() -> None:
+    """A sidecar holds XMP only; the photo itself also gets the real IFD0 tag replaced."""
+    sidecar = _build_write_payload(
+        KeywordSet(),
+        description="A short desc.",
+        title=None,
+        use_sidecar=True,
+    )
+    assert TAG_EXIF_IMAGE_DESCRIPTION not in sidecar
+    embedded = _build_write_payload(
+        KeywordSet(),
+        description="A short desc.",
+        title=None,
+        use_sidecar=False,
+    )
+    assert embedded[TAG_EXIF_IMAGE_DESCRIPTION] == "A short desc."
 
 
 def test_value_is_present_distinguishes_blanks_from_content() -> None:
@@ -919,6 +939,50 @@ def test_read_caption_reads_title_and_description_with_fallbacks(tmp_path: Path)
         patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
     ):
         assert read_caption(img) == ("Fallback Title", "Fallback caption.")
+
+
+def test_read_caption_prefers_the_sidecar_over_the_image(tmp_path: Path) -> None:
+    """
+    The sidecar's caption wins, whatever order exiftool returns the blocks in.
+
+    The image block comes first (metadata_targets lists the photo before its sidecar), so reading in
+    block order left a camera's placeholder description shadowing the one photo-tagger had just
+    written into the sidecar next to it.
+    """
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    sidecar = tmp_path / "a.xmp"
+    sidecar.write_text("x")
+    helper = _fake_helper(
+        [
+            {"SourceFile": str(img), "XMP:Description": "default", "XMP:Title": "Camera Title"},
+            {"SourceFile": str(sidecar), "XMP:Description": "A real caption."},
+        ],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img), str(sidecar)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        title, description = read_caption(img)
+    assert description == "A real caption."
+    # The sidecar has no title, so the image's is still what the photo carries.
+    assert title == "Camera Title"
+
+
+def test_read_image_context_reads_the_existing_caption(tmp_path: Path) -> None:
+    """The batched read also carries the title and description --preserve-* decides on."""
+    img = tmp_path / "a.dng"
+    img.write_text("x")
+    helper = _fake_helper(
+        [{"SourceFile": str(img), "XMP:Title": "A title", "XMP:Description": "A caption."}],
+    )
+    with (
+        patch("photo_tagger.metadata.metadata_targets", return_value=[str(img)]),
+        patch("photo_tagger.metadata.ExifToolHelper", return_value=helper),
+    ):
+        context = read_image_context(img)
+    assert context.existing_title == "A title"
+    assert context.existing_description == "A caption."
 
 
 def test_read_caption_returns_none_when_absent(tmp_path: Path) -> None:
