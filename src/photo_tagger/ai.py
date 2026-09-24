@@ -75,7 +75,7 @@ def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent
     api_key: str | None,
     retries: int,
     output_language: str = DEFAULT_OUTPUT_LANGUAGE,
-) -> Agent[None, GeneratedMetadata\]:
+) -> Agent[None, GeneratedMetadata]:
     """
     Build a configured pydantic-ai Agent backed by the requested provider.
 
