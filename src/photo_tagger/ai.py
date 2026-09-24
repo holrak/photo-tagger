@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic_ai import Agent, AgentRunResult, ModelSettings
+from pydantic_ai.output import NativeOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.usage import RunUsage
 
@@ -74,12 +75,12 @@ def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent
     api_key: str | None,
     retries: int,
     output_language: str = DEFAULT_OUTPUT_LANGUAGE,
-) -> Agent[None, GeneratedMetadata]:
+) -> Agent[None, GeneratedMetadata\]:
     """
     Build a configured pydantic-ai Agent backed by the requested provider.
 
-    *output_language* is the language the system prompt asks for in every generated field (title,
-    description, keywords, hierarchy segments).
+    *output_language* is the language the system prompt asks for in every generated field
+    (title, description, keywords, hierarchy segments).
     """
     chat_model = build_chat_model(
         provider_name,
@@ -87,19 +88,18 @@ def create_agent(  # noqa: PLR0913 - each kwarg is an independent provider/agent
         api_base_url=api_base_url,
         api_key=api_key,
     )
-    logger.debug("agent_output_language", output_language=output_language)
-    # pydantic-ai's Agent constructor does not propagate `output_type` into its
-    # generic, so static analyzers see `Agent[None, str]` while the runtime
-    # object actually decodes `GeneratedMetadata`. The two suppressions below
-    # cover zuban's view of the constructor arg and pycroscope's view of the
-    # return type respectively.
+
+    logger.debug(
+        "agent_output_language",
+        output_language=output_language,
+    )
+
     return Agent(  # static analysis: ignore[incompatible_return_value]
         chat_model,
-        output_type=GeneratedMetadata,  # type: ignore[arg-type]
+        output_type=NativeOutput(GeneratedMetadata),  # type: ignore[arg-type]
         retries=retries,
         system_prompt=build_system_prompt(output_language),
     )
-
 
 def _extract_usage(usage: object | None) -> tuple[int, int, int]:
     """Pull (input, output, total) token counts off a pydantic-ai RunUsage if present."""
@@ -171,7 +171,7 @@ def analyze_image_with_ai(  # noqa: PLR0913 - each kwarg is a distinct sampling 
                 timeout=timeout_seconds,
                 frequency_penalty=frequency_penalty,
             ),
-            output_type=GeneratedMetadata,
+            output_type=NativeOutput(GeneratedMetadata),
             usage=run_usage,
         )
     except Exception as exc:
